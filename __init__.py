@@ -5,10 +5,6 @@ from aiohttp import web
 
 from .prompt_input import CAP_PromptInput
 from .prompt_input_rich import CAP_RichPromptInput
-from .audio_keyframe_timeline import (
-    NODE_CLASS_MAPPINGS as _AKTL_CLASS,
-    NODE_DISPLAY_NAME_MAPPINGS as _AKTL_NAMES,
-)
 from .cap_audio_timeline import (
     NODE_CLASS_MAPPINGS as _CAT_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CAT_NAMES,
@@ -24,14 +20,12 @@ WEB_DIRECTORY = "./js"
 NODE_CLASS_MAPPINGS = {
     "CAP_PromptInput": CAP_PromptInput,
     "CAP_RichPromptInput": CAP_RichPromptInput,
-    **_AKTL_CLASS,
     **_CAT_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CAP_PromptInput": "Prompt Input",
     "CAP_RichPromptInput": "Rich Prompt Input",
-    **_AKTL_NAMES,
     **_CAT_NAMES,
 }
 
