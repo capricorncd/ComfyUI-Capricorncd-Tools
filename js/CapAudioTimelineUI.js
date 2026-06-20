@@ -991,11 +991,11 @@ _onKeyDown(e) {
     }
     if (e.key === "q" && this.selClipId) {
         this._trimLeft(this.selClipId);
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
     }
     if (e.key === "w" && this.selClipId) {
         this._trimRight(this.selClipId);
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
     }
     if (e.ctrlKey && e.key === "c" && this.selClipId) {
         this._copyClip(this.selClipId);
