@@ -351,6 +351,11 @@
     outline: none;
     background: #0f1620;
 }
+.cat-prompt-input:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    resize: none;
+}
 .cat-prompt-input.clip-mode { border-color: #4a5a2a; }
 .cat-prompt-input.clip-mode:focus { border-color: #8a9a4a; }
 

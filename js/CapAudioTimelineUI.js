@@ -126,8 +126,8 @@ _buildDom() {
       </div>
 
       <div class="cat-prompt-section">
-        <div class="cat-prompt-label">全局提示词</div>
-        <textarea class="cat-prompt-input" placeholder="在此输入提示词…" rows="3"></textarea>
+        <div class="cat-prompt-label">关键帧提示词</div>
+        <textarea class="cat-prompt-input" placeholder="选择素材后输入提示词…" rows="3" disabled></textarea>
       </div>
 
       <div class="cat-picker" style="display:none">
@@ -226,8 +226,7 @@ _bindWidgets() {
         }
     }
 
-    const gpW = this._w("global_prompt");
-    if (gpW?.value) this.promptInput.value = gpW.value;
+    // prompt area starts disabled; _updatePromptContext enables it when a clip is selected
 }
 
 _bindEvents() {
@@ -766,27 +765,20 @@ _updatePromptContext() {
         this.promptInput.value = clip.prompt ?? "";
         this.promptInput.disabled = false;
     } else {
-        this.promptLabel.textContent = "全局提示词";
+        this.promptLabel.textContent = "关键帧提示词";
         this.promptLabel.classList.remove("clip-mode");
         this.promptInput.classList.remove("clip-mode");
-        const gp = this._w("global_prompt");
-        this.promptInput.value = gp?.value ?? "";
-        this.promptInput.disabled = false;
+        this.promptInput.value = "";
+        this.promptInput.disabled = true;
     }
 }
 
 _onPromptChange() {
-    const val = this.promptInput.value;
     const clip = this.clips.find(c => c.id === this.selClipId);
-    if (clip) {
-        clip.prompt = val;
-        this._saveClips();
-        this._renderClips();
-    } else {
-        const gp = this._w("global_prompt");
-        if (gp) gp.value = val;
-        this.node.setDirtyCanvas(true, true);
-    }
+    if (!clip) return;
+    clip.prompt = this.promptInput.value;
+    this._saveClips();
+    this._renderClips();
 }
 
 // ── context menu ──────────────────────────────────────────────────────────

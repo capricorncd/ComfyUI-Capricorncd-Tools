@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import os
 import folder_paths
-from .timecode import parse_timecode
+from .timecode import parse_timecode, resolve_keyframe_dir
 
 
 def _list_audio_files():
@@ -12,7 +12,7 @@ def _list_audio_files():
 
 
 class CAP_AudioTimeline:
-    """Audio waveform trim + dual-track timeline (audio + image keyframe clips) with per-clip prompts."""
+    """Audio waveform trim + image keyframe timeline with per-clip prompts."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -36,21 +36,18 @@ class CAP_AudioTimeline:
                     {
                         "default": "[]",
                         "multiline": True,
-                        "tooltip": (
-                            "JSON: [{start_ms, end_ms, start_image, end_image, prompt}, ...]"
-                            " Times are relative to trimmed audio start."
-                        ),
+                        "tooltip": "JSON: [{start_ms, end_ms, start_image, end_image, prompt}, ...] Times are relative to trimmed audio start.",
                     },
                 ),
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "BOOLEAN", "STRING", "INT", "INT", "STRING")
-    RETURN_NAMES = ("audio", "fps", "one_shot", "clips", "width", "height", "global_prompt")
+    RETURN_TYPES = ("AUDIO", "INT", "BOOLEAN", "INT", "INT", "STRING", "STRING")
+    RETURN_NAMES = ("audio", "fps", "one_shot", "width", "height", "global_prompt", "data_json")
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
-        "Audio timeline with waveform trim, dual-track image keyframe editor, "
+        "Audio timeline with waveform trim, image keyframe editor, "
         "and per-clip / global prompts."
     )
 
@@ -90,25 +87,23 @@ class CAP_AudioTimeline:
 
     def execute(self, audio, audioUI, start_time, end_time, fps, width, height,
                 keyframe_dir, one_shot, global_prompt, clips_json):
-        del audioUI, keyframe_dir
+        del audioUI
         fps = max(1, int(fps))
         width = max(1, int(width))
         height = max(1, int(height))
         one_shot = bool(one_shot)
         global_prompt = str(global_prompt or "")
 
+        audio_path = folder_paths.get_annotated_filepath(audio)
         waveform, sample_rate = self._load_audio(audio)
         dur = self._duration_ms(waveform, sample_rate)
         start_ms = parse_timecode(start_time, fps)
         end_ms = parse_timecode(end_time, fps) if str(end_time).strip() else dur
         start_ms = max(0, min(start_ms, dur))
-        end_ms = max(start_ms, min(end_ms, dur))
+        end_ms = max(start_ms + 1, min(end_ms, dur))
 
-        audio_out = (
-            self._pack(waveform, sample_rate)
-            if start_ms <= 0 and end_ms >= dur
-            else self._trim(waveform, sample_rate, start_ms, end_ms)
-        )
+        # Always output the trimmed audio segment
+        audio_out = self._trim(waveform, sample_rate, start_ms, end_ms)
 
         try:
             clips = json.loads(clips_json or "[]")
@@ -122,8 +117,51 @@ class CAP_AudioTimeline:
             if not c.get("prompt"):
                 c["prompt"] = global_prompt
 
-        return (audio_out, fps, one_shot, json.dumps(clips, ensure_ascii=False),
-                width, height, global_prompt)
+        # Resolve image paths to absolute paths for data_json
+        img_dir = resolve_keyframe_dir(keyframe_dir) if keyframe_dir else ""
+
+        def resolve_img(name: str) -> str:
+            if not name:
+                return ""
+            if img_dir:
+                return os.path.join(img_dir, name)
+            return name
+
+        clips_for_json = [
+            {
+                "start_ms": c.get("start_ms", 0),
+                "end_ms": c.get("end_ms", 0),
+                "start_image": resolve_img(c.get("start_image") or ""),
+                "end_image": resolve_img(c.get("end_image") or ""),
+                "prompt": c.get("prompt", ""),
+            }
+            for c in clips
+        ]
+
+        data_json = json.dumps(
+            {
+                "audio_path": audio_path,
+                "trim_start_ms": start_ms,
+                "trim_end_ms": end_ms,
+                "fps": fps,
+                "width": width,
+                "height": height,
+                "one_shot": one_shot,
+                "global_prompt": global_prompt,
+                "clips": clips_for_json,
+            },
+            ensure_ascii=False,
+        )
+
+        return (
+            audio_out,
+            fps,
+            one_shot,
+            width,
+            height,
+            global_prompt,
+            data_json,
+        )
 
 
 NODE_CLASS_MAPPINGS = {"CAP_AudioTimeline": CAP_AudioTimeline}
