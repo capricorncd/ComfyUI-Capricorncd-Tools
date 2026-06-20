@@ -1,5 +1,7 @@
 # ComfyUI-Capricorncd-Tools
 
+![ComfyUI-Capricorncd-Tools](./docs/ComfyUI-Capricorncd-Tools.png)
+
 A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) focused on prompt editing and audio/image(Keyframe) timeline editing.
 
 ---
