@@ -1,200 +1,200 @@
 import { app } from "../../scripts/app.js";
 
-function escapeHtml(text) {
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\u00A0/g, "&nbsp;");
+// ── formatting ────────────────────────────────────────────────────────────
+
+function escapeHtml(t) {
+    return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function formatLineHtml(line) {
     const isComment = line.startsWith("#");
     const boldMatch = /^\*\*(.*)\*\*$/.exec(line);
-    let content = line;
+    let content = boldMatch ? boldMatch[1] : line;
     let style = "";
-
-    if (boldMatch) {
-        content = boldMatch[1];
-        style += "font-weight:bold;";
-    }
-    if (isComment) {
-        style += "color:gray;opacity:0.5;";
-    }
-
+    if (boldMatch) style += "font-weight:bold;";
+    if (isComment) style += "opacity:0.4;";
     content = escapeHtml(content).replace(/ {2}/g, " &nbsp;");
-    if (content === "") {
-        content = "&nbsp;";
-    }
-
+    if (!content) content = "&nbsp;";
     return `<div style="${style}">${content}</div>`;
 }
 
-function updateMirror(textarea) {
-    const mirror = textarea._capMirror;
-    if (!mirror) return;
-    const value = textarea.value;
-    const lines = value.split("\n");
-    mirror.innerHTML = lines.map(formatLineHtml).join("") + (value.endsWith("\n") ? "<div>&nbsp;</div>" : "");
-    mirror.scrollTop = textarea.scrollTop;
-    mirror.scrollLeft = textarea.scrollLeft;
+// ── mirror ────────────────────────────────────────────────────────────────
+
+function updateMirror(ta) {
+    const m = ta._capMirror;
+    if (!m) return;
+    const lines = ta.value.split("\n");
+    m.innerHTML =
+        lines.map(formatLineHtml).join("") +
+        (ta.value.endsWith("\n") ? "<div>&nbsp;</div>" : "");
+    m.scrollTop = ta.scrollTop;
 }
 
-function ensureMirror(textarea) {
-    if (textarea._capMirror) return;
+function ensureMirror(ta) {
+    if (ta._capMirror || !ta.parentNode) return;
 
-    const wrapper = document.createElement("div");
-    wrapper.style.position = "relative";
-    wrapper.style.width = "100%";
-    wrapper.style.height = "100%";
-    wrapper.style.minHeight = textarea.style.minHeight || "5rem";
+    // Read computed styles BEFORE making textarea transparent
+    const cs         = getComputedStyle(ta);
+    const textColor  = cs.color;
+    const bgColor    = cs.backgroundColor;
 
-    textarea.parentNode.insertBefore(wrapper, textarea);
-    wrapper.appendChild(textarea);
-
+    // Insert mirror as sibling (before textarea) — no wrapper div needed
     const mirror = document.createElement("pre");
-    mirror.style.position = "absolute";
-    mirror.style.top = "0";
-    mirror.style.left = "0";
-    mirror.style.right = "0";
-    mirror.style.bottom = "0";
-    mirror.style.margin = "0";
-    mirror.style.padding = "6px 10px";
-    mirror.style.overflow = "hidden";
-    mirror.style.whiteSpace = "pre-wrap";
-    mirror.style.wordWrap = "break-word";
-    mirror.style.pointerEvents = "none";
-    mirror.style.zIndex = "0";
-    mirror.style.fontFamily = "inherit";
-    mirror.style.fontSize = "inherit";
-    mirror.style.lineHeight = "inherit";
-    mirror.style.boxSizing = "border-box";
-    mirror.style.color = "black";
-    wrapper.insertBefore(mirror, textarea);
+    Object.assign(mirror.style, {
+        position:      ta.style.position || "absolute",
+        left:          ta.style.left,
+        top:           ta.style.top,
+        width:         "100%",
+        height:        "100%",
+        margin:        "0",
+        padding:       cs.padding,
+        overflow:      "hidden",
+        whiteSpace:    "pre-wrap",
+        wordWrap:      "break-word",
+        wordBreak:     "break-word",
+        pointerEvents: "none",
+        fontFamily:    cs.fontFamily,
+        fontSize:      cs.fontSize,
+        lineHeight:    cs.lineHeight,
+        letterSpacing: cs.letterSpacing,
+        boxSizing:     "border-box",
+        color:         textColor,
+        // background:    bgColor,
+        borderRadius:  cs.borderRadius,
+        border:        cs.border,
+    });
 
-    textarea.style.background = "transparent";
-    textarea.style.color = "transparent";
-    textarea.style.caretColor = "black";
-    textarea.style.position = "relative";
-    textarea.style.zIndex = "1";
-    textarea.style.resize = textarea.style.resize || "vertical";
-    textarea.style.overflow = "auto";
-    textarea.style.whiteSpace = "pre-wrap";
-    textarea.style.wordWrap = "break-word";
+    ta.parentNode.insertBefore(mirror, ta);
+    ta._capMirror = mirror;
 
-    textarea._capMirror = mirror;
+    // Make textarea text invisible so mirror shows through
+    ta.style.color      = "transparent";
+    ta.style.caretColor = textColor;
+    ta.style.background = bgColor;
 
-    const computed = getComputedStyle(textarea);
-    mirror.style.fontFamily = computed.fontFamily;
-    mirror.style.fontSize = computed.fontSize;
-    mirror.style.lineHeight = computed.lineHeight;
-    mirror.style.padding = computed.padding;
-    mirror.style.borderRadius = computed.borderRadius;
-    mirror.style.minHeight = textarea.offsetHeight + "px";
+    // LiteGraph updates the textarea's inline style when node moves/resizes.
+    // Mirror stays in sync via MutationObserver.
+    const syncPos = () => {
+        mirror.style.left = ta.style.left;
+        mirror.style.top  = ta.style.top;
+    };
+    syncPos();
+    const mo = new MutationObserver(syncPos);
+    mo.observe(ta, { attributes: true, attributeFilter: ["style"] });
+    ta._capMirrorObserver = mo;
 
-    updateMirror(textarea);
+    updateMirror(ta);
 }
 
-function toggleComment(textarea) {
-    const text = textarea.value;
-    const selStart = textarea.selectionStart;
-    const selEnd = textarea.selectionEnd;
+// ── editing commands ──────────────────────────────────────────────────────
+
+function toggleComment(ta) {
+    const text     = ta.value;
+    const selStart = ta.selectionStart;
+    const selEnd   = ta.selectionEnd;
 
     const lineStart = text.lastIndexOf("\n", selStart - 1) + 1;
-    let effectiveEnd = selEnd;
-    if (selEnd > selStart && text[effectiveEnd - 1] === "\n") {
-        effectiveEnd--;
-    }
-    let lineEnd = text.indexOf("\n", effectiveEnd);
+    let effEnd = selEnd;
+    if (effEnd > selStart && text[effEnd - 1] === "\n") effEnd--;
+    let lineEnd = text.indexOf("\n", effEnd);
     if (lineEnd === -1) lineEnd = text.length;
 
-    const before = text.slice(0, lineStart);
-    const region = text.slice(lineStart, lineEnd);
-    const after = text.slice(lineEnd);
+    const before  = text.slice(0, lineStart);
+    const region  = text.slice(lineStart, lineEnd);
+    const after   = text.slice(lineEnd);
+    const lines   = region.split("\n");
+    const allC    = lines.every(l => l.startsWith("#"));
+    const newLines = allC ? lines.map(l => l.slice(1)) : lines.map(l => "#" + l);
 
-    const lines = region.split("\n");
-    const allCommented = lines.every((l) => l.startsWith("#"));
-    const newLines = allCommented
-        ? lines.map((l) => l.slice(1))
-        : lines.map((l) => "#" + l);
+    ta.value = before + newLines.join("\n") + after;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    updateMirror(ta);
 
-    textarea.value = before + newLines.join("\n") + after;
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    updateMirror(textarea);
-
-    const delta = allCommented ? -1 : 1;
-    const newSelStart = Math.max(lineStart, selStart + delta);
-    const newSelEnd = Math.max(newSelStart, selEnd + delta * lines.length);
-    textarea.setSelectionRange(newSelStart, newSelEnd);
+    const delta  = allC ? -1 : 1;
+    ta.setSelectionRange(
+        Math.max(lineStart, selStart + delta),
+        Math.max(lineStart, selEnd + delta * lines.length),
+    );
 }
 
-function toggleBold(textarea) {
-    const text = textarea.value;
-    const selStart = textarea.selectionStart;
-    const selEnd = textarea.selectionEnd;
+function toggleBold(ta) {
+    const text     = ta.value;
+    const selStart = ta.selectionStart;
+    const selEnd   = ta.selectionEnd;
 
     const lineStart = text.lastIndexOf("\n", selStart - 1) + 1;
-    const posForEnd = selEnd > selStart ? selEnd : selStart;
-    let lineEnd = text.indexOf("\n", posForEnd);
+    let lineEnd = text.indexOf("\n", selEnd > selStart ? selEnd : selStart);
     if (lineEnd === -1) lineEnd = text.length;
 
-    const before = text.slice(0, lineStart);
-    const region = text.slice(lineStart, lineEnd);
-    const after = text.slice(lineEnd);
-
+    const before    = text.slice(0, lineStart);
+    const region    = text.slice(lineStart, lineEnd);
+    const after     = text.slice(lineEnd);
     const boldMatch = /^\*\*(.*)\*\*$/.exec(region);
     const newRegion = boldMatch ? boldMatch[1] : `**${region}**`;
-    textarea.value = before + newRegion + after;
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    updateMirror(textarea);
+
+    ta.value = before + newRegion + after;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    updateMirror(ta);
 
     const delta = boldMatch ? -2 : 2;
-    const newSelStart = Math.max(lineStart, selStart + delta);
-    const newSelEnd = Math.max(newSelStart, selEnd + delta);
-    textarea.setSelectionRange(newSelStart, newSelEnd);
+    ta.setSelectionRange(
+        Math.max(lineStart, selStart + delta),
+        Math.max(lineStart, selEnd + delta),
+    );
 }
 
-function attachHandler(inputEl) {
-    if (inputEl._capRichPromptHandlerAdded) return;
-    inputEl._capRichPromptHandlerAdded = true;
+// ── handler attachment ────────────────────────────────────────────────────
 
-    ensureMirror(inputEl);
-    inputEl.addEventListener("input", () => updateMirror(inputEl));
-    inputEl.addEventListener("scroll", () => updateMirror(inputEl));
+function attachHandler(ta) {
+    if (ta._capRichAttached) return;
+    ta._capRichAttached = true;
 
+    // Keydown — attach immediately, works before mirror is ready
     const onKeydown = (e) => {
-        if (!document.contains(inputEl)) {
+        if (!document.contains(ta)) {
             window.removeEventListener("keydown", onKeydown, true);
+            ta._capMirrorObserver?.disconnect();
             return;
         }
-        if (e.target !== inputEl) return;
-        if ((e.ctrlKey || e.metaKey) && (e.key === "/" || e.code === "Slash")) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            toggleComment(inputEl);
-        } else if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B" || e.code === "KeyB")) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            toggleBold(inputEl);
+        if (e.target !== ta) return;
+
+        const mod = e.ctrlKey || e.metaKey;
+        if (mod && (e.key === "/" || e.code === "Slash")) {
+            e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+            toggleComment(ta);
+        } else if (mod && (e.key === "b" || e.key === "B" || e.code === "KeyB")) {
+            e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+            toggleBold(ta);
         }
     };
     window.addEventListener("keydown", onKeydown, true);
 
-    inputEl.addEventListener("paste", (e) => {
-        e.preventDefault();
-        const pasteData = (e.clipboardData || window.clipboardData).getData("text/plain");
-        const start = inputEl.selectionStart;
-        const end = inputEl.selectionEnd;
-        const value = inputEl.value;
-        inputEl.value = value.slice(0, start) + pasteData + value.slice(end);
-        const cursor = start + pasteData.length;
-        inputEl.setSelectionRange(cursor, cursor);
-        inputEl.dispatchEvent(new Event("input", { bubbles: true }));
-        updateMirror(inputEl);
+    ta.addEventListener("input",  () => updateMirror(ta));
+    ta.addEventListener("scroll", () => {
+        if (ta._capMirror) ta._capMirror.scrollTop = ta.scrollTop;
     });
+    ta.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const txt   = (e.clipboardData || window.clipboardData).getData("text/plain");
+        const s     = ta.selectionStart, end = ta.selectionEnd;
+        ta.value    = ta.value.slice(0, s) + txt + ta.value.slice(end);
+        ta.setSelectionRange(s + txt.length, s + txt.length);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        updateMirror(ta);
+    });
+
+    // Mirror needs the element in the DOM — wait for it
+    const tryMirror = (tries = 0) => {
+        if (ta.parentNode) {
+            ensureMirror(ta);
+        } else if (tries < 100) {
+            setTimeout(() => tryMirror(tries + 1), 50);
+        }
+    };
+    tryMirror();
 }
+
+// ── extension ─────────────────────────────────────────────────────────────
 
 app.registerExtension({
     name: "Capricorncd.RichPromptInput",
@@ -205,16 +205,13 @@ app.registerExtension({
         for (const widget of node.widgets ?? []) {
             if (widget.name !== "prompt") continue;
 
-            if (widget.inputEl) {
-                attachHandler(widget.inputEl);
-            } else {
-                const timer = setInterval(() => {
-                    if (widget.inputEl) {
-                        clearInterval(timer);
-                        attachHandler(widget.inputEl);
-                    }
-                }, 50);
-                setTimeout(() => clearInterval(timer), 5000);
+            // ComfyUI multiline STRING widget stores textarea in inputEl
+            const ta = widget.inputEl ?? widget.element;
+            if (ta instanceof HTMLTextAreaElement) {
+                attachHandler(ta);
+            } else if (ta) {
+                const inner = ta.querySelector?.("textarea");
+                if (inner) attachHandler(inner);
             }
             break;
         }
