@@ -134,6 +134,7 @@ _buildDom() {
       <div class="cat-picker" style="display:none">
         <div class="cat-picker-hd">
           <span class="cat-picker-title">选择图片</span>
+          <button class="cat-picker-refresh" title="刷新图片列表">↻</button>
           <button class="cat-picker-x">✕</button>
         </div>
         <div class="cat-picker-grid"></div>
@@ -170,8 +171,9 @@ _buildDom() {
 
     this.pickerEl    = root.querySelector(".cat-picker");
     this.pickerGrid  = root.querySelector(".cat-picker-grid");
-    this.pickerTitle = root.querySelector(".cat-picker-title");
-    this.pickerCloseBtn = root.querySelector(".cat-picker-x");
+    this.pickerTitle      = root.querySelector(".cat-picker-title");
+    this.pickerRefreshBtn = root.querySelector(".cat-picker-refresh");
+    this.pickerCloseBtn   = root.querySelector(".cat-picker-x");
 
     // shared frame preview panel (populated on badge hover)
     this.framePreview = document.createElement("div");
@@ -330,7 +332,8 @@ _bindEvents() {
     this.promptInput.addEventListener("input", () => this._onPromptChange());
     this.promptInput.addEventListener("keydown", e => e.stopPropagation()); // don't leak to canvas
 
-    // image picker close
+    // image picker close / refresh
+    this.pickerRefreshBtn.addEventListener("click", () => this._refreshPicker());
     this.pickerCloseBtn.addEventListener("click", () => this._hidePicker());
 
     // global mouse — dragend clears state if native drag intercepts mouseup
@@ -949,6 +952,13 @@ _openPicker(clipId, field, title = "选择图片") {
 _hidePicker() {
     this.pickerEl.style.display = "none";
     this._pickerCtx = null;
+}
+
+async _refreshPicker() {
+    this.pickerRefreshBtn.disabled = true;
+    await this._fetchImages();
+    this._renderPickerGrid();
+    this.pickerRefreshBtn.disabled = false;
 }
 
 _renderPickerGrid() {

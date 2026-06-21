@@ -389,7 +389,7 @@
     border-bottom: 1px solid #2a2a3a;
     flex-shrink: 0;
 }
-.cat-picker-title { font-size: 11px; color: #aaa; }
+.cat-picker-title { font-size: 11px; color: #aaa; flex: 1; }
 .cat-picker-x {
     background: none;
     border: none;
@@ -400,6 +400,19 @@
     line-height: 1;
 }
 .cat-picker-x:hover { color: #ccc; }
+.cat-picker-refresh {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    line-height: 1;
+    transition: transform 0.3s;
+}
+.cat-picker-refresh:hover { color: #ccc; }
+.cat-picker-refresh:disabled { opacity: 0.4; cursor: default; }
+.cat-picker-refresh:not(:disabled):active { transform: rotate(180deg); }
 .cat-picker-grid {
     display: flex;
     flex-wrap: wrap;
