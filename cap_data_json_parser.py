@@ -16,6 +16,8 @@ class CAP_DataJsonClipParser:
             "required": {
                 "data_json": ("STRING", {"default": "", "multiline": True}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
+                "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
+                                        "tooltip": "音频修剪偏移（秒），结束时间 = clip_end_ms + trim_offset × 1000"}),
             },
         }
 
@@ -29,8 +31,8 @@ class CAP_DataJsonClipParser:
     )
 
     @classmethod
-    def IS_CHANGED(cls, data_json, index):
-        return (data_json, index)
+    def IS_CHANGED(cls, data_json, index, trim_offset):
+        return (data_json, index, trim_offset)
 
     def _load_waveform(self, audio_path: str):
         # Use torchaudio directly for absolute paths; fall back to comfy's loader for
@@ -67,7 +69,7 @@ class CAP_DataJsonClipParser:
         arr = np.array(img).astype(np.float32) / 255.0
         return torch.from_numpy(arr).unsqueeze(0)  # [1, H, W, 3]
 
-    def execute(self, data_json: str, index: int):
+    def execute(self, data_json: str, index: int, trim_offset: int = 1):
         try:
             data = json.loads(data_json or "{}")
         except json.JSONDecodeError:
@@ -86,7 +88,7 @@ class CAP_DataJsonClipParser:
         # Ensure at least 1 sample of separation for audio trim, but use the real
         # end_ms for frame_count so that a 0-duration placeholder doesn't produce 1.
         abs_start_ms = trim_start_ms + clip_start_ms
-        abs_end_ms = trim_start_ms + max(clip_end_ms, clip_start_ms + 1)
+        abs_end_ms = trim_start_ms + max(clip_end_ms, clip_start_ms + 1) + int(trim_offset) * 1000
 
         duration_ms = clip_end_ms - clip_start_ms
         seconds = duration_ms // 1000

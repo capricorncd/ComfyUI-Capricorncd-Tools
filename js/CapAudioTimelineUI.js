@@ -112,6 +112,9 @@ _buildDom() {
           <span class="cat-ttime">00:00.00</span>
           <span class="cat-tdur"></span>
           <button class="cat-addclip" disabled>＋ 添加图片</button>
+          <button class="cat-export" title="导出时间线配置为 JSON 文件">导出</button>
+          <button class="cat-import" title="从 JSON 文件导入时间线配置">导入</button>
+          <input class="cat-import-file" type="file" accept=".json" style="display:none">
         </div>
         <div class="cat-tl-body">
           <div class="cat-tl-scroll">
@@ -160,6 +163,9 @@ _buildDom() {
     this.tTimeEl    = root.querySelector(".cat-ttime");
     this.tDurEl     = root.querySelector(".cat-tdur");
     this.addClipBtn = root.querySelector(".cat-addclip");
+    this.exportBtn    = root.querySelector(".cat-export");
+    this.importBtn    = root.querySelector(".cat-import");
+    this.importFileEl = root.querySelector(".cat-import-file");
     this.tlScroll   = root.querySelector(".cat-tl-scroll");
     this.tlInner    = root.querySelector(".cat-tl-inner");
     this.rulerEl    = root.querySelector(".cat-ruler");
@@ -299,8 +305,11 @@ _bindEvents() {
     this.wPlayBtn.addEventListener("click", () => this._toggleWavePlay());
     this.tPlayBtn.addEventListener("click", () => this._toggleTlPlay());
 
-    // add clip button
+    // add clip / export / import buttons
     this.addClipBtn.addEventListener("click", () => this._showAddClipPicker());
+    this.exportBtn.addEventListener("click", () => this._exportJson());
+    this.importBtn.addEventListener("click", () => this.importFileEl.click());
+    this.importFileEl.addEventListener("change", e => this._importJson(e));
 
     // timeline click → set playhead (not on clips)
     this.tlScroll.addEventListener("click", e => {
@@ -1029,6 +1038,76 @@ async _fetchImages() {
         const d = await r.json();
         this._imgFiles = Array.isArray(d.files) ? d.files : [];
     } catch { this._imgFiles = []; }
+}
+
+// ── import / export ───────────────────────────────────────────────────────
+
+_exportJson() {
+    const wv = name => this._w(name)?.value ?? null;
+    const data = {
+        start_time:    wv("start_time"),
+        end_time:      wv("end_time"),
+        fps:           wv("fps"),
+        width:         wv("width"),
+        height:        wv("height"),
+        keyframe_dir:  wv("keyframe_dir"),
+        one_shot:      wv("one_shot"),
+        global_prompt: wv("global_prompt"),
+        clips: this.clips.map(c => ({
+            start_ms:    c.startMs,
+            end_ms:      c.endMs,
+            start_image: c.startImage ?? null,
+            end_image:   c.endImage ?? null,
+            prompt:      c.prompt ?? "",
+        })),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const audio = wv("audio");
+    const stem  = audio ? String(audio).replace(/\.[^.]+$/, "").split(/[\\/]/).pop() : "timeline";
+    a.href = url;
+    a.download = `${stem}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+_importJson(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+        try {
+            const data = JSON.parse(ev.target.result);
+            const set = (name, val) => { if (val == null) return; const w = this._w(name); if (w) w.value = val; };
+            set("fps",           data.fps);
+            set("width",         data.width);
+            set("height",        data.height);
+            set("one_shot",      data.one_shot);
+            set("global_prompt", data.global_prompt);
+            set("keyframe_dir",  data.keyframe_dir);
+            if (data.start_time != null) { set("start_time", data.start_time); this.sIn.value = data.start_time; }
+            if (data.end_time   != null) { set("end_time",   data.end_time);   this.eIn.value = data.end_time; }
+            if (Array.isArray(data.clips)) {
+                this.clips = data.clips.map(c => ({
+                    id:         uid(),
+                    startMs:    Number(c.start_ms) || 0,
+                    endMs:      Number(c.end_ms)   || 0,
+                    startImage: c.start_image ?? null,
+                    endImage:   c.end_image   ?? null,
+                    prompt:     c.prompt ?? "",
+                }));
+                this._saveClips();
+            }
+            if (data.keyframe_dir) this._scheduleDir();
+            if (this.isReady) this._renderTimeline();
+            this._updatePromptContext();
+        } catch (err) {
+            console.error("[CAP_AudioTimeline] import failed:", err);
+        }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
 }
 
 // ── persistence ───────────────────────────────────────────────────────────

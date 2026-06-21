@@ -118,6 +118,18 @@
 .cat-addclip:hover { background: #3a5a28; }
 .cat-addclip:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.cat-export, .cat-import {
+    border: 1px solid #5a5a7a;
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 2px 7px;
+    font-size: 11px;
+    background: #2a2a3e;
+    color: #aaa;
+    transition: background 0.1s;
+}
+.cat-export:hover, .cat-import:hover { background: #3a3a5a; color: #ddd; }
+
 .cat-wtime, .cat-ttime {
     font-family: monospace;
     font-size: 11px;
