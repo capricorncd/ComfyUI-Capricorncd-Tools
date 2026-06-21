@@ -8,7 +8,7 @@ class CAP_RichPromptInput:
                     "default": "",
                     "multiline": True,
                     "dynamicPrompts": False,
-                    "tooltip": "富文本提示词输入：Ctrl+/ 注释切换，Ctrl+B 当前行加粗，粘贴时仅保留纯文本。输出会过滤注释行。",
+                    "tooltip": "富文本提示词输入：Ctrl+/ 注释切换，粘贴时仅保留纯文本。输出会过滤注释行。",
                 }),
             }
         }
@@ -24,7 +24,5 @@ class CAP_RichPromptInput:
         for line in lines:
             if line.startswith("#"):
                 continue
-            if line.startswith("**") and line.endswith("**") and len(line) >= 4:
-                line = line[2:-2]
             active_lines.append(line)
         return ("\n".join(active_lines),)

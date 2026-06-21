@@ -8,12 +8,8 @@ function escapeHtml(t) {
 
 function formatLineHtml(line) {
     const isComment = line.startsWith("#");
-    const boldMatch = /^\*\*(.*)\*\*$/.exec(line);
-    let content = boldMatch ? boldMatch[1] : line;
-    let style = "";
-    if (boldMatch) style += "font-weight:bold;";
-    if (isComment) style += "opacity:0.4;";
-    content = escapeHtml(content).replace(/ {2}/g, " &nbsp;");
+    let style = isComment ? "opacity:0.4;" : "";
+    let content = escapeHtml(line).replace(/ {2}/g, " &nbsp;");
     if (!content) content = "&nbsp;";
     return `<div style="${style}">${content}</div>`;
 }
@@ -117,32 +113,6 @@ function toggleComment(ta) {
     );
 }
 
-function toggleBold(ta) {
-    const text     = ta.value;
-    const selStart = ta.selectionStart;
-    const selEnd   = ta.selectionEnd;
-
-    const lineStart = text.lastIndexOf("\n", selStart - 1) + 1;
-    let lineEnd = text.indexOf("\n", selEnd > selStart ? selEnd : selStart);
-    if (lineEnd === -1) lineEnd = text.length;
-
-    const before    = text.slice(0, lineStart);
-    const region    = text.slice(lineStart, lineEnd);
-    const after     = text.slice(lineEnd);
-    const boldMatch = /^\*\*(.*)\*\*$/.exec(region);
-    const newRegion = boldMatch ? boldMatch[1] : `**${region}**`;
-
-    ta.value = before + newRegion + after;
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-    updateMirror(ta);
-
-    const delta = boldMatch ? -2 : 2;
-    ta.setSelectionRange(
-        Math.max(lineStart, selStart + delta),
-        Math.max(lineStart, selEnd + delta),
-    );
-}
-
 // ── handler attachment ────────────────────────────────────────────────────
 
 function attachHandler(ta) {
@@ -162,9 +132,6 @@ function attachHandler(ta) {
         if (mod && (e.key === "/" || e.code === "Slash")) {
             e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
             toggleComment(ta);
-        } else if (mod && (e.key === "b" || e.key === "B" || e.code === "KeyB")) {
-            e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-            toggleBold(ta);
         }
     };
     window.addEventListener("keydown", onKeydown, true);
