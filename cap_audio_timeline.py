@@ -39,6 +39,8 @@ class CAP_AudioTimeline:
                         "tooltip": "JSON: [{start_ms, end_ms, start_image, end_image, prompt}, ...] Times are relative to trimmed audio start.",
                     },
                 ),
+                "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
+                                        "tooltip": "音频修剪时长偏移（秒），AUDIO 输出的结束时间 = end_ms + trim_offset × 1000，不影响 data_json 时间轴。"}),
             },
         }
 
@@ -53,9 +55,9 @@ class CAP_AudioTimeline:
 
     @classmethod
     def IS_CHANGED(cls, audio, start_time, end_time, fps, width, height,
-                   keyframe_dir, one_shot, global_prompt, clips_json, **_):
+                   keyframe_dir, one_shot, global_prompt, clips_json, trim_offset, **_):
         return (audio, start_time, end_time, fps, width, height,
-                keyframe_dir, one_shot, global_prompt, clips_json)
+                keyframe_dir, one_shot, global_prompt, clips_json, trim_offset)
 
     @classmethod
     def VALIDATE_INPUTS(cls, audio, **_):
@@ -86,7 +88,7 @@ class CAP_AudioTimeline:
         return self._pack(waveform[..., s:e], sample_rate)
 
     def execute(self, audio, audioUI, start_time, end_time, fps, width, height,
-                keyframe_dir, one_shot, global_prompt, clips_json):
+                keyframe_dir, one_shot, global_prompt, clips_json, trim_offset=1):
         del audioUI
         fps = max(1.0, float(fps))
         width = max(1, int(width))
@@ -102,8 +104,8 @@ class CAP_AudioTimeline:
         start_ms = max(0, min(start_ms, dur))
         end_ms = max(start_ms + 1, min(end_ms, dur))
 
-        # Always output the trimmed audio segment
-        audio_out = self._trim(waveform, sample_rate, start_ms, end_ms)
+        # Always output the trimmed audio segment (end extended by trim_offset seconds)
+        audio_out = self._trim(waveform, sample_rate, start_ms, end_ms + int(trim_offset) * 1000)
 
         try:
             clips = json.loads(clips_json or "[]")
