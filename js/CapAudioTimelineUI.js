@@ -55,6 +55,7 @@ constructor(node) {
     this._imgFiles = [];
     this._dirTimer = null;
     this._pickerCtx = null;  // {clipId, field}
+    this._clipElMap = new Map(); // clipId → HTMLElement
 
     loadCss();
     this._buildDom();
@@ -584,89 +585,136 @@ _renderRuler(dur, pxPerMs, totalPx) {
     }
 }
 
-_renderClips() {
-    const oneShot = this.getOneShot();
-    const dur = this._tlDurMs();
+_renderClips({ layoutOnly = false, animate = false, dragId = null } = {}) {
+    if (!layoutOnly) {
+        this.clipTrack.replaceChildren();
+        this._clipElMap.clear();
+        const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
+        for (const clip of sorted) {
+            const el = this._createClipElement(clip);
+            this._clipElMap.set(clip.id, el);
+            this.clipTrack.appendChild(el);
+        }
+    }
+    this._layoutClips({ animate, dragId });
+}
+
+_createClipElement(clip) {
+    const el = document.createElement("div");
+    el.className = "cat-clip";
+    el.dataset.id = clip.id;
+
+    const thumb = document.createElement("div");
+    thumb.className = "cat-clip-thumb";
+    if (clip.startImage) {
+        const img = document.createElement("img");
+        img.src = this._imgUrl(clip.startImage);
+        img.alt = "";
+        img.draggable = false;
+        img.onerror = () => img.remove();
+        thumb.appendChild(img);
+    }
+
+    const lbl = document.createElement("div");
+    lbl.className = "cat-clip-lbl";
+    const fname = clip.startImage?.split(/[\\/]/).pop() ?? "（未选图片）";
+    lbl.textContent = fname;
+    lbl.title = fname;
+
+    if (clip.startImage || clip.endImage) {
+        const fb = document.createElement("div");
+        fb.className = "cat-frame-badge";
+        fb.textContent = clip.endImage ? "[首尾]" : "[首]";
+        fb.addEventListener("mouseenter", () => this._showFramePreview(clip, fb));
+        fb.addEventListener("mouseleave", () => this._hideFramePreview());
+        el.appendChild(fb);
+    }
+
+    if (clip.prompt) {
+        const pb = document.createElement("div");
+        pb.className = "cat-prompt-badge";
+        pb.title = clip.prompt;
+        el.appendChild(pb);
+    }
+
+    const rh = document.createElement("div");
+    rh.className = "cat-resize-hdl";
+
+    el.append(thumb, lbl, rh);
+
+    el.addEventListener("mousedown", e => {
+        if (e.target.classList.contains("cat-resize-hdl")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this._selectClip(clip.id);
+        this._dragState = {
+            type: "move", clipId: clip.id,
+            originMs: this._tlPxToMs(e.clientX),
+            os: clip.startMs, oe: clip.endMs,
+        };
+    });
+
+    rh.addEventListener("mousedown", e => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._selectClip(clip.id);
+        this._dragState = {
+            type: "resize", clipId: clip.id,
+            originMs: this._tlPxToMs(e.clientX),
+            os: clip.startMs, oe: clip.endMs,
+        };
+    });
+
+    return el;
+}
+
+_layoutClips({ animate = false, dragId = null } = {}) {
     const pxPerMs = this._tlPxPerMs();
-    this.clipTrack.replaceChildren();
     const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
+    const liveIds = new Set(sorted.map(c => c.id));
+
+    for (const [id, el] of this._clipElMap) {
+        if (!liveIds.has(id)) {
+            el.remove();
+            this._clipElMap.delete(id);
+        }
+    }
 
     for (const clip of sorted) {
+        let el = this._clipElMap.get(clip.id);
+        if (!el) {
+            el = this._createClipElement(clip);
+            this._clipElMap.set(clip.id, el);
+            this.clipTrack.appendChild(el);
+        }
+
         const left = clip.startMs * pxPerMs;
         const width = Math.max(4, (clip.endMs - clip.startMs) * pxPerMs);
+        const isDragged = dragId != null && clip.id === dragId;
 
-        const el = document.createElement("div");
-        el.className = "cat-clip" + (clip.id === this.selClipId ? " selected" : "");
-        el.dataset.id = clip.id;
-        el.style.cssText = `left:${left}px; width:${width}px`;
+        el.classList.toggle("selected", clip.id === this.selClipId);
+        el.classList.toggle("cat-clip-dragging", isDragged);
+        el.classList.toggle("cat-clip-anim", animate && !isDragged);
+        el.style.width = `${width}px`;
+        el.style.left = `${left}px`;
 
-        // thumbnail
-        const thumb = document.createElement("div");
-        thumb.className = "cat-clip-thumb";
-        if (clip.startImage) {
-            const img = document.createElement("img");
-            img.src = this._imgUrl(clip.startImage);
-            img.alt = "";
-            img.draggable = false;
-            img.onerror = () => img.remove();
-            thumb.appendChild(img);
+        const lbl = el.querySelector(".cat-clip-lbl");
+        if (lbl) {
+            const fname = clip.startImage?.split(/[\\/]/).pop() ?? "（未选图片）";
+            lbl.textContent = fname;
+            lbl.title = fname;
         }
 
-        // label row
-        const lbl = document.createElement("div");
-        lbl.className = "cat-clip-lbl";
-        const fname = clip.startImage?.split(/[\\/]/).pop() ?? "（未选图片）";
-        lbl.textContent = fname;
-        lbl.title = fname;
-
-        // [首] / [首尾] badge — hover triggers large preview
-        if (clip.startImage || clip.endImage) {
-            const fb = document.createElement("div");
-            fb.className = "cat-frame-badge";
-            fb.textContent = clip.endImage ? "[首尾]" : "[首]";
-            fb.addEventListener("mouseenter", () => this._showFramePreview(clip, fb));
-            fb.addEventListener("mouseleave", () => this._hideFramePreview());
-            el.appendChild(fb);
-        }
-
-        // prompt dot indicator
-        if (clip.prompt) {
-            const pb = document.createElement("div");
+        const hasPrompt = !!clip.prompt;
+        let pb = el.querySelector(".cat-prompt-badge");
+        if (hasPrompt && !pb) {
+            pb = document.createElement("div");
             pb.className = "cat-prompt-badge";
-            pb.title = clip.prompt;
             el.appendChild(pb);
+        } else if (!hasPrompt && pb) {
+            pb.remove();
         }
-
-        // resize handle
-        const rh = document.createElement("div");
-        rh.className = "cat-resize-hdl";
-
-        el.append(thumb, lbl, rh);
-
-        // select + move drag
-        el.addEventListener("mousedown", e => {
-            if (e.target.classList.contains("cat-resize-hdl")) return;
-            e.preventDefault();
-            e.stopPropagation();
-            this._selectClip(clip.id);
-            this._dragState = {
-                type: "move", clipId: clip.id,
-                originMs: this._tlPxToMs(e.clientX),
-                os: clip.startMs, oe: clip.endMs,
-            };
-        });
-
-        // resize drag
-        rh.addEventListener("mousedown", e => {
-            e.preventDefault();
-            e.stopPropagation();
-            this._selectClip(clip.id);
-            this._dragState = {
-                type: "resize", clipId: clip.id,
-                originMs: this._tlPxToMs(e.clientX),
-                os: clip.startMs, oe: clip.endMs,
-            };
-        });
+        if (pb) pb.title = clip.prompt ?? "";
 
         this.clipTrack.appendChild(el);
     }
@@ -1090,9 +1138,8 @@ _handleMove(e) {
             c.endMs = clamp(oe + dMs, c.startMs + this._frameMs(), dur);
             this._packClips();
         }
-        this._renderClips();
+        this._renderClips({ layoutOnly: true, animate: type === "move", dragId: clipId });
         this._renderPlayhead();
-        if (clipId === this.selClipId) this._updatePromptContext();
     }
 }
 
@@ -1102,6 +1149,7 @@ _handleUp() {
         const clipId = this._dragState.clipId;
         this._dragState = null;
         this._saveClips();
+        this._renderClips();
         if (clipId === this.selClipId) this._updatePromptContext();
     }
 }
@@ -1270,6 +1318,7 @@ _syncFromConfigure(info) {
 destroy() {
     this._resizeObs?.disconnect();
     this._resizeObs = null;
+    this._clipElMap.clear();
     window.removeEventListener("mousemove", this._onMove);
     window.removeEventListener("mouseup", this._onUp);
     window.removeEventListener("dragend", this._onDragEnd);

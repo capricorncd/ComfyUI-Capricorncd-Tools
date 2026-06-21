@@ -209,6 +209,14 @@
     min-width: 4px;
     transition: border-color 0.1s;
 }
+.cat-clip.cat-clip-anim {
+    transition: left 0.22s ease-out, border-color 0.1s;
+}
+.cat-clip.cat-clip-dragging {
+    transition: border-color 0.1s;
+    z-index: 20;
+    cursor: grabbing;
+}
 .cat-clip:hover { border-color: #6090c0; }
 .cat-clip.selected {
     border-color: #ffd166;
