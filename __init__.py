@@ -9,6 +9,10 @@ from .cap_audio_timeline import (
     NODE_CLASS_MAPPINGS as _CAT_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CAT_NAMES,
 )
+from .cap_data_json_parser import (
+    NODE_CLASS_MAPPINGS as _CDP_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CDP_NAMES,
+)
 from .timecode import (
     IMAGE_EXTENSIONS,
     list_keyframe_files_ordered,
@@ -21,12 +25,14 @@ NODE_CLASS_MAPPINGS = {
     "CAP_PromptInput": CAP_PromptInput,
     "CAP_RichPromptInput": CAP_RichPromptInput,
     **_CAT_CLASS,
+    **_CDP_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CAP_PromptInput": "Prompt Input",
     "CAP_RichPromptInput": "Rich Prompt Input",
     **_CAT_NAMES,
+    **_CDP_NAMES,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

@@ -22,7 +22,7 @@ class CAP_AudioTimeline:
                 "audioUI": ("AUDIO_UI",),
                 "start_time": ("STRING", {"default": "00:00.00"}),
                 "end_time": ("STRING", {"default": ""}),
-                "fps": ("INT", {"default": 24, "min": 1, "max": 120, "step": 1}),
+                "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
                 "width": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
                 "height": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
                 "keyframe_dir": ("STRING", {"default": "", "multiline": False}),
@@ -42,8 +42,8 @@ class CAP_AudioTimeline:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "BOOLEAN", "INT", "INT", "STRING", "STRING")
-    RETURN_NAMES = ("audio", "fps", "one_shot", "width", "height", "global_prompt", "data_json")
+    RETURN_TYPES = ("AUDIO", "FLOAT", "BOOLEAN", "INT", "INT", "STRING", "STRING", "INT", "INT")
+    RETURN_NAMES = ("audio", "fps", "one_shot", "width", "height", "global_prompt", "data_json", "clips_length", "total_frame_count")
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
@@ -88,7 +88,7 @@ class CAP_AudioTimeline:
     def execute(self, audio, audioUI, start_time, end_time, fps, width, height,
                 keyframe_dir, one_shot, global_prompt, clips_json):
         del audioUI
-        fps = max(1, int(fps))
+        fps = max(1.0, float(fps))
         width = max(1, int(width))
         height = max(1, int(height))
         one_shot = bool(one_shot)
@@ -112,11 +112,6 @@ class CAP_AudioTimeline:
         except json.JSONDecodeError:
             clips = []
 
-        # Fill missing per-clip prompts with global_prompt
-        for c in clips:
-            if not c.get("prompt"):
-                c["prompt"] = global_prompt
-
         # Resolve image paths to absolute paths for data_json
         img_dir = resolve_keyframe_dir(keyframe_dir) if keyframe_dir else ""
 
@@ -127,22 +122,48 @@ class CAP_AudioTimeline:
                 return os.path.join(img_dir, name)
             return name
 
-        clips_for_json = [
+        # Build resolved clips with start/end images before applying end_image rules
+        resolved = [
             {
                 "start_ms": c.get("start_ms", 0),
                 "end_ms": c.get("end_ms", 0),
                 "start_image": resolve_img(c.get("start_image") or ""),
                 "end_image": resolve_img(c.get("end_image") or ""),
-                "prompt": c.get("prompt", ""),
+                "prompt": c.get("prompt") or "",
             }
             for c in clips
         ]
+
+        # Apply end_image rules per one_shot mode
+        clips_for_json = []
+        last_idx = len(resolved) - 1
+        for i, r in enumerate(resolved):
+            if one_shot and i < last_idx:
+                # One-shot: non-last clip's end frame = next clip's start frame
+                end_image = resolved[i + 1]["start_image"]
+            else:
+                # one_shot last clip, or one_shot=False: use configured end_image,
+                # fall back to this clip's start_image when not set
+                end_image = r["end_image"] or r["start_image"]
+            clips_for_json.append(
+                {
+                    "start_ms": r["start_ms"],
+                    "end_ms": r["end_ms"],
+                    "start_image": r["start_image"],
+                    "end_image": end_image,
+                    "prompt": r["prompt"],
+                }
+            )
+
+        clips_length = len(clips_for_json)
+        total_frame_count = max(1, int(round((end_ms - start_ms) * fps / 1000)))
 
         data_json = json.dumps(
             {
                 "audio_path": audio_path,
                 "trim_start_ms": start_ms,
                 "trim_end_ms": end_ms,
+                "total_frame_count": total_frame_count,
                 "fps": fps,
                 "width": width,
                 "height": height,
@@ -161,6 +182,8 @@ class CAP_AudioTimeline:
             height,
             global_prompt,
             data_json,
+            clips_length,
+            total_frame_count,
         )
 
 
