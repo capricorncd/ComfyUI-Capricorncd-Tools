@@ -31,6 +31,22 @@ function onGlobalKeyDown(e) {
     ui._onKeyDown(e);
 }
 
+const MIN_NODE_WIDTH = 480;
+const MIN_NODE_HEIGHT = 440;
+
+function clampAbsMin(size) {
+    return [
+        Math.max(size[0], MIN_NODE_WIDTH),
+        Math.max(size[1], MIN_NODE_HEIGHT),
+    ];
+}
+
+/** DOM widgets use (widget.width ?? node.width); never keep a stale widget.width. */
+function clearCatUiWidgetWidth(node) {
+    const w = node._catUI?.domWidget;
+    if (w && w.width != null) delete w.width;
+}
+
 function markNoSerialize(node) {
     for (const w of node.widgets ?? []) {
         if (w.name === "audioUI" || w.name === "cat_ui") {
@@ -71,11 +87,23 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_CLASS) return;
 
+        // Block automatic layout from narrowing the node; user drag-resize is allowed.
+        nodeType.prototype.setSize = function (size) {
+            const isUserResize = app.canvas?.resizing_node === this;
+            if (!isUserResize) {
+                const curW = this.size?.[0] ?? 0;
+                if (curW > 0 && size[0] < curW) {
+                    size = [curW, size[1]];
+                }
+            }
+            this.size = clampAbsMin(size);
+            this.onResize?.(this.size);
+        };
+
         const computeSize = nodeType.prototype.computeSize;
         nodeType.prototype.computeSize = function (out) {
-            const size = computeSize?.apply(this, arguments) ?? out ?? [0, 0];
-            size[1] = Math.max(size[1], 440);
-            return size;
+            const size = computeSize?.apply(this, arguments) ?? (out ? [...out] : [0, 0]);
+            return clampAbsMin(size);
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -85,11 +113,29 @@ app.registerExtension({
             return onRemoved?.apply(this, arguments);
         };
 
+        // configure() assigns this.size directly — enforce absolute minimum only.
+        const configure = nodeType.prototype.configure;
+        nodeType.prototype.configure = function (info) {
+            configure?.apply(this, arguments);
+            if (this.size[0] < MIN_NODE_WIDTH || this.size[1] < MIN_NODE_HEIGHT) {
+                this.setSize(clampAbsMin(this.size));
+            }
+            clearCatUiWidgetWidth(this);
+            this._catUI?._onDomWidthChanged?.();
+        };
+
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (info) {
             onConfigure?.apply(this, arguments);
             markNoSerialize(this);
             this._catUI?._syncFromConfigure(info);
+        };
+
+        const onSelected = nodeType.prototype.onSelected;
+        nodeType.prototype.onSelected = function () {
+            onSelected?.apply(this, arguments);
+            clearCatUiWidgetWidth(this);
+            this._catUI?._onDomWidthChanged?.();
         };
 
         const onSerialize = nodeType.prototype.onSerialize;

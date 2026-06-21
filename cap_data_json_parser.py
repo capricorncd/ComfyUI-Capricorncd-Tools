@@ -82,12 +82,16 @@ class CAP_DataJsonClipParser:
         clip = clips[index] if clips and 0 <= index < len(clips) else {}
 
         clip_start_ms = int(clip.get("start_ms", 0))
-        clip_end_ms = max(clip_start_ms + 1, int(clip.get("end_ms", clip_start_ms + 1)))
-
+        clip_end_ms = int(clip.get("end_ms", clip_start_ms))
+        # Ensure at least 1 sample of separation for audio trim, but use the real
+        # end_ms for frame_count so that a 0-duration placeholder doesn't produce 1.
         abs_start_ms = trim_start_ms + clip_start_ms
-        abs_end_ms = trim_start_ms + clip_end_ms
+        abs_end_ms = trim_start_ms + max(clip_end_ms, clip_start_ms + 1)
 
-        frame_count = max(1, int(round((clip_end_ms - clip_start_ms) * fps / 1000)))
+        duration_ms = clip_end_ms - clip_start_ms
+        seconds = duration_ms // 1000
+        ms_rem = duration_ms % 1000
+        frame_count = max(1, int(seconds * fps) + round(ms_rem * fps / 1000))
         prompt = clip.get("prompt") or global_prompt
 
         # Trimmed audio for this clip
@@ -99,8 +103,10 @@ class CAP_DataJsonClipParser:
             audio_out = {"waveform": torch.zeros(1, 2, 44100), "sample_rate": 44100}
 
         blank = torch.zeros(1, 64, 64, 3)
-        first_frame = self._load_image(clip.get("start_image", "")) or blank
-        last_frame = self._load_image(clip.get("end_image", "")) or blank
+        _fi = self._load_image(clip.get("start_image", ""))
+        _li = self._load_image(clip.get("end_image", ""))
+        first_frame = _fi if _fi is not None else blank
+        last_frame = _li if _li is not None else blank
 
         return (audio_out, frame_count, first_frame, last_frame, prompt)
 

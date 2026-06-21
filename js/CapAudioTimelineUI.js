@@ -180,14 +180,48 @@ _buildDom() {
 }
 
 _attachWidget() {
-    const w = this.node.addDOMWidget("cat_ui", "cat_timeline", this.root, {
+    const node = this.node;
+    const w = node.addDOMWidget("cat_ui", "cat_timeline", this.root, {
         hideOnZoom: false,
         getMinHeight: () => 440,
         getHeight: () => 440,
+        afterResize: () => this._onDomWidthChanged(),
     });
     w.serialize = false;
     this.domWidget = w;
-    this.node.setSize([Math.max(this.node.size[0], 480), this.node.size[1]]);
+
+    // DomWidgets.vue: size = (widget.width ?? node.width) - margin*2
+    // Never allow a stale widget.width to narrow the timeline below the node.
+    Object.defineProperty(w, "width", {
+        get() { return undefined; },
+        set() {},
+        enumerable: true,
+        configurable: true,
+    });
+
+    const baseLayoutSize = w.computeLayoutSize?.bind(w);
+    w.computeLayoutSize = () => {
+        const layout = baseLayoutSize?.(node) ?? { minHeight: 440, minWidth: 0 };
+        // Fixed absolute minimum — do not tie to current node width (blocks user shrink).
+        return { ...layout, minHeight: 440, minWidth: 480 };
+    };
+
+    node.setSize([
+        Math.max(node.size[0], 480),
+        Math.max(node.size[1], 440),
+    ]);
+
+    this._lastDomWidth = 0;
+    this._resizeObs = new ResizeObserver(() => this._onDomWidthChanged());
+    this._resizeObs.observe(this.root);
+}
+
+_onDomWidthChanged() {
+    const cw = this.tlScroll?.clientWidth ?? this.root?.clientWidth ?? 0;
+    if (cw > 0 && cw === this._lastDomWidth) return;
+    this._lastDomWidth = cw;
+    this._renderTrim();
+    if (this.isReady) this._renderTimeline();
 }
 
 // ── widget binding ────────────────────────────────────────────────────────
@@ -1219,6 +1253,8 @@ _syncFromConfigure(info) {
 // ── destroy ───────────────────────────────────────────────────────────────
 
 destroy() {
+    this._resizeObs?.disconnect();
+    this._resizeObs = null;
     window.removeEventListener("mousemove", this._onMove);
     window.removeEventListener("mouseup", this._onUp);
     window.removeEventListener("dragend", this._onDragEnd);
