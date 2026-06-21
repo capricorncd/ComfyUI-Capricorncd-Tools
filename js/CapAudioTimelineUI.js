@@ -729,6 +729,7 @@ _trimLeft(id) {
     this._packClips();
     this._saveClips();
     this._renderClips();
+    if (id === this.selClipId) this._updatePromptContext();
 }
 
 _trimRight(id) {
@@ -738,6 +739,7 @@ _trimRight(id) {
     this._packClips();
     this._saveClips();
     this._renderClips();
+    if (id === this.selClipId) this._updatePromptContext();
 }
 
 _copyClip(id) {
@@ -792,8 +794,10 @@ _packClips() {
 _updatePromptContext() {
     const clip = this.clips.find(c => c.id === this.selClipId);
     if (clip) {
-        const tc = formatTimecode(clip.startMs, this.getFps());
-        this.promptLabel.textContent = `关键帧提示词 · ${tc}`;
+        const fps = this.getFps();
+        const start = formatTimecode(clip.startMs, fps);
+        const end = formatTimecode(clip.endMs, fps);
+        this.promptLabel.textContent = `关键帧提示词 · ${start}~${end}`;
         this.promptLabel.classList.add("clip-mode");
         this.promptInput.classList.add("clip-mode");
         this.promptInput.value = clip.prompt ?? "";
@@ -888,7 +892,7 @@ _getKeyframeDir() {
 // ── image picker ──────────────────────────────────────────────────────────
 
 _openPicker(clipId, field, title = "选择图片") {
-    this._pickerCtx = { clipId, field };
+    this._pickerCtx = { mode: "replace", clipId, field };
     this.pickerTitle.textContent = title;
     this._renderPickerGrid();
     this.pickerEl.style.display = "flex";
@@ -920,7 +924,10 @@ _renderPickerGrid() {
         nm.textContent = file.split(/[\\/]/).pop();
         item.append(img, nm);
         item.addEventListener("click", () => {
-            if (this._pickerCtx) {
+            if (!this._pickerCtx) return;
+            if (this._pickerCtx.mode === "add") {
+                this._addClip(this._pickerCtx.atMs, file);
+            } else {
                 const { clipId, field } = this._pickerCtx;
                 this._updateClip(clipId, { [field]: file });
             }
@@ -930,9 +937,11 @@ _renderPickerGrid() {
     }
 }
 
-_showAddClipPicker() {
-    this._addClip(this.playheadMs);
-    if (this.selClipId) this._openPicker(this.selClipId, "startImage", "替换素材");
+_showAddClipPicker(atMs = this.playheadMs) {
+    this._pickerCtx = { mode: "add", atMs };
+    this.pickerTitle.textContent = "添加图片";
+    this._renderPickerGrid();
+    this.pickerEl.style.display = "flex";
 }
 
 _imgUrl(filename) {
@@ -1083,12 +1092,18 @@ _handleMove(e) {
         }
         this._renderClips();
         this._renderPlayhead();
+        if (clipId === this.selClipId) this._updatePromptContext();
     }
 }
 
 _handleUp() {
     this._trimDrag = null;
-    if (this._dragState) { this._dragState = null; this._saveClips(); }
+    if (this._dragState) {
+        const clipId = this._dragState.clipId;
+        this._dragState = null;
+        this._saveClips();
+        if (clipId === this.selClipId) this._updatePromptContext();
+    }
 }
 
 // ── audio loading ─────────────────────────────────────────────────────────
