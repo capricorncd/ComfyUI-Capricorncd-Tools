@@ -1,5 +1,8 @@
 import logging
 import os
+import shutil
+import subprocess
+import sys
 
 from aiohttp import web
 
@@ -12,6 +15,10 @@ from .cap_audio_timeline import (
 from .cap_data_json_parser import (
     NODE_CLASS_MAPPINGS as _CDP_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CDP_NAMES,
+)
+from .cap_seq_to_video import (
+    NODE_CLASS_MAPPINGS as _STV_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _STV_NAMES,
 )
 from .timecode import (
     IMAGE_EXTENSIONS,
@@ -26,6 +33,7 @@ NODE_CLASS_MAPPINGS = {
     "CAP_RichPromptInput": CAP_RichPromptInput,
     **_CAT_CLASS,
     **_CDP_CLASS,
+    **_STV_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -33,6 +41,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CAP_RichPromptInput": "Rich Prompt Input",
     **_CAT_NAMES,
     **_CDP_NAMES,
+    **_STV_NAMES,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
@@ -71,6 +80,21 @@ def _register_routes():
         if not os.path.isfile(path):
             return web.Response(status=404, text="Not found")
         return web.FileResponse(path)
+
+    @routes.get("/cap/ffmpeg_status")
+    async def api_ffmpeg_status(_request: web.Request) -> web.Response:
+        path = shutil.which("ffmpeg")
+        if not path:
+            return web.json_response({"available": False, "version": None, "path": None})
+        try:
+            kwargs: dict = {"capture_output": True, "text": True, "timeout": 5}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            r = subprocess.run(["ffmpeg", "-version"], **kwargs)
+            version = r.stdout.splitlines()[0] if r.returncode == 0 else None
+        except Exception:
+            version = None
+        return web.json_response({"available": True, "version": version, "path": path})
 
     logging.info("[CapricorncdTools] Registered API routes.")
 
