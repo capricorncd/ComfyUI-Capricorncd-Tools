@@ -1,0 +1,78 @@
+{
+  "CAP_PromptInput": {
+    "display_name": "提示词输入",
+    "inputs": {
+      "prompt": { "name": "提示词" }
+    },
+    "outputs": {
+      "prompt": { "name": "提示词" }
+    }
+  },
+
+  "CAP_RichPromptInput": {
+    "display_name": "富文本提示词输入",
+    "inputs": {
+      "prompt": { "name": "提示词" }
+    },
+    "outputs": {
+      "prompt": { "name": "提示词" }
+    }
+  },
+
+  "CAP_AudioTimeline": {
+    "display_name": "音频时间轴",
+    "inputs": {
+      "audio":          { "name": "音频" },
+      "start_time":     { "name": "开始时间" },
+      "end_time":       { "name": "结束时间" },
+      "fps":            { "name": "帧率" },
+      "width":          { "name": "宽度" },
+      "height":         { "name": "高度" },
+      "keyframe_dir":   { "name": "关键帧目录" },
+      "one_shot":       { "name": "单次模式" },
+      "global_prompt":  { "name": "全局提示词" },
+      "clips_json":     { "name": "片段数据" },
+      "trim_offset":    { "name": "修剪偏移（秒）" }
+    },
+    "outputs": {
+      "audio":             { "name": "音频" },
+      "fps":               { "name": "帧率" },
+      "one_shot":          { "name": "单次模式" },
+      "width":             { "name": "宽度" },
+      "height":            { "name": "高度" },
+      "global_prompt":     { "name": "全局提示词" },
+      "data_json":         { "name": "配置数据" },
+      "clips_length":      { "name": "片段数量" },
+      "total_frame_count": { "name": "总帧数" }
+    }
+  },
+
+  "CAP_DataJsonClipParser": {
+    "display_name": "数据解析（片段）",
+    "inputs": {
+      "data_json":    { "name": "配置数据" },
+      "index":        { "name": "索引" },
+      "trim_offset":  { "name": "修剪偏移（秒）" }
+    },
+    "outputs": {
+      "audio":       { "name": "音频" },
+      "frame_count": { "name": "帧数" },
+      "first_frame": { "name": "首帧" },
+      "last_frame":  { "name": "尾帧" },
+      "prompt":      { "name": "提示词" }
+    }
+  },
+
+  "CAP_SeqToVideo": {
+    "display_name": "序列帧合成视频",
+    "inputs": {
+      "frames_dir":       { "name": "序列帧目录" },
+      "fps":              { "name": "帧率" },
+      "filename_prefix":  { "name": "文件名前缀" },
+      "audio":            { "name": "音频" }
+    },
+    "outputs": {
+      "filename": { "name": "文件名" }
+    }
+  }
+}

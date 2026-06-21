@@ -1,0 +1,78 @@
+{
+  "CAP_PromptInput": {
+    "display_name": "Prompt Input",
+    "inputs": {
+      "prompt": { "name": "Prompt" }
+    },
+    "outputs": {
+      "prompt": { "name": "Prompt" }
+    }
+  },
+
+  "CAP_RichPromptInput": {
+    "display_name": "Rich Prompt Input",
+    "inputs": {
+      "prompt": { "name": "Prompt" }
+    },
+    "outputs": {
+      "prompt": { "name": "Prompt" }
+    }
+  },
+
+  "CAP_AudioTimeline": {
+    "display_name": "Audio Timeline",
+    "inputs": {
+      "audio":          { "name": "Audio" },
+      "start_time":     { "name": "Start Time" },
+      "end_time":       { "name": "End Time" },
+      "fps":            { "name": "FPS" },
+      "width":          { "name": "Width" },
+      "height":         { "name": "Height" },
+      "keyframe_dir":   { "name": "Keyframe Dir" },
+      "one_shot":       { "name": "One Shot" },
+      "global_prompt":  { "name": "Global Prompt" },
+      "clips_json":     { "name": "Clips JSON" },
+      "trim_offset":    { "name": "Trim Offset (s)" }
+    },
+    "outputs": {
+      "audio":             { "name": "Audio" },
+      "fps":               { "name": "FPS" },
+      "one_shot":          { "name": "One Shot" },
+      "width":             { "name": "Width" },
+      "height":            { "name": "Height" },
+      "global_prompt":     { "name": "Global Prompt" },
+      "data_json":         { "name": "Data JSON" },
+      "clips_length":      { "name": "Clips Length" },
+      "total_frame_count": { "name": "Total Frames" }
+    }
+  },
+
+  "CAP_DataJsonClipParser": {
+    "display_name": "Data Json Clip Parser",
+    "inputs": {
+      "data_json":    { "name": "Data JSON" },
+      "index":        { "name": "Index" },
+      "trim_offset":  { "name": "Trim Offset (s)" }
+    },
+    "outputs": {
+      "audio":       { "name": "Audio" },
+      "frame_count": { "name": "Frame Count" },
+      "first_frame": { "name": "First Frame" },
+      "last_frame":  { "name": "Last Frame" },
+      "prompt":      { "name": "Prompt" }
+    }
+  },
+
+  "CAP_SeqToVideo": {
+    "display_name": "Seq To Video",
+    "inputs": {
+      "frames_dir":       { "name": "Frames Dir" },
+      "fps":              { "name": "FPS" },
+      "filename_prefix":  { "name": "Filename Prefix" },
+      "audio":            { "name": "Audio" }
+    },
+    "outputs": {
+      "filename": { "name": "Filename" }
+    }
+  }
+}
