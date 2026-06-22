@@ -1,14 +1,37 @@
+/* ── root container ─────────────────────────────────────────────────────── */
+
 .stv-root {
     width: 100%;
     background: #0d0d0d;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    box-sizing: border-box;
     border-radius: 4px;
     overflow: hidden;
     position: relative;
-    box-sizing: border-box;
 }
+
+/* Placeholder / error state: fixed height, centered content */
+.stv-root:not(.stv-loaded) {
+    height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Video loaded: height follows the video's natural aspect ratio */
+.stv-root.stv-loaded {
+    display: block;
+    height: auto;
+}
+
+/* ── video element ──────────────────────────────────────────────────────── */
+
+.stv-video {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* ── placeholder ────────────────────────────────────────────────────────── */
 
 .stv-placeholder {
     color: #555;
@@ -17,12 +40,7 @@
     pointer-events: none;
 }
 
-.stv-video {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    display: block;
-}
+/* ── error banner ───────────────────────────────────────────────────────── */
 
 .stv-error {
     display: flex;
