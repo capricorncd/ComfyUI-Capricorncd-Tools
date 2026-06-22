@@ -166,24 +166,17 @@ function _buildPlayer(node) {
         configurable: true,
     });
 
-    // ── Hover unmute: attach to root so black-bar area also triggers ────────
-    root.addEventListener("mouseenter", () => {
-        if (!node._stvVideo) return;
-        node._stvVideo.volume = 1;
-        node._stvVideo.muted  = false;
-    });
-    root.addEventListener("mouseleave", () => {
-        if (!node._stvVideo) return;
-        node._stvVideo.muted = true;
-    });
-
     // ── ResizeObserver: update getHeight when video changes root size ───────
+    // Use current node width explicitly — never let computeSize() dictate the width,
+    // as its base implementation returns LiteGraph's minimum (280px) when widgets
+    // don't report a fixed size, which would shrink the node on every DOM resize.
     const ro = new ResizeObserver(() => {
         const h = root.offsetHeight;
         if (h > 0 && h !== node._stvPlayerH) {
             node._stvPlayerH = h;
-            const newSize = node.computeSize?.() ?? [...node.size];
-            node.setSize(newSize);
+            const curW = node.size?.[0] ?? MIN_NODE_WIDTH;
+            const newH = (node.computeSize?.() ?? [curW, h])[1];
+            node.setSize([curW, newH]);
             app.graph?.setDirtyCanvas(true, true);
         }
     });
@@ -229,10 +222,13 @@ function _loadVideo(node, url) {
     const video = document.createElement("video");
     video.className   = "stv-video";
     video.loop        = true;
-    video.muted       = true;   // start muted; root mouseenter will unmute
+    video.muted       = true;   // start muted per browser autoplay policy
     video.autoplay    = false;
     video.playsInline = true;
-    // No controls
+
+    // Hover unmute — attach directly to <video> (same pattern as VideoHelperSuite)
+    video.onmouseenter = () => { video.muted = false; video.volume = 1; };
+    video.onmouseleave = () => { video.muted = true; };
 
     video.src = url;
     video.addEventListener("canplay", () => { video.play().catch(() => {}); }, { once: true });
