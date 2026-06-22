@@ -111,9 +111,9 @@ _buildDom() {
           <button class="cat-tplay" disabled>▶</button>
           <span class="cat-ttime">00:00.00</span>
           <span class="cat-tdur"></span>
-          <button class="cat-addclip" disabled>＋ 添加图片</button>
-          <button class="cat-export" title="导出时间线配置为 JSON 文件">导出</button>
-          <button class="cat-import" title="从 JSON 文件导入时间线配置">导入</button>
+          <button class="cat-addclip" disabled>＋ Add Image</button>
+          <button class="cat-export" title="Export timeline config as JSON">Export</button>
+          <button class="cat-import" title="Import timeline config from JSON">Import</button>
           <input class="cat-import-file" type="file" accept=".json" style="display:none">
         </div>
         <div class="cat-tl-body">
@@ -130,14 +130,14 @@ _buildDom() {
       </div>
 
       <div class="cat-prompt-section">
-        <div class="cat-prompt-label">关键帧提示词</div>
-        <textarea class="cat-prompt-input" placeholder="选择素材后输入提示词…" rows="3" disabled></textarea>
+        <div class="cat-prompt-label">Keyframe Prompt</div>
+        <textarea class="cat-prompt-input" placeholder="Select a clip to enter prompt…" rows="3" disabled></textarea>
       </div>
 
       <div class="cat-picker" style="display:none">
         <div class="cat-picker-hd">
-          <span class="cat-picker-title">选择图片</span>
-          <button class="cat-picker-refresh" title="刷新图片列表">↻</button>
+          <span class="cat-picker-title">Select Image</span>
+          <button class="cat-picker-refresh" title="Refresh image list">↻</button>
           <button class="cat-picker-x">✕</button>
         </div>
         <div class="cat-picker-grid"></div>
@@ -857,13 +857,13 @@ _updatePromptContext() {
         const fps = this.getFps();
         const start = formatTimecode(clip.startMs, fps);
         const end = formatTimecode(clip.endMs, fps);
-        this.promptLabel.textContent = `关键帧提示词 · ${start}~${end}`;
+        this.promptLabel.textContent = `Keyframe Prompt · ${start}~${end}`;
         this.promptLabel.classList.add("clip-mode");
         this.promptInput.classList.add("clip-mode");
         this.promptInput.value = clip.prompt ?? "";
         this.promptInput.disabled = false;
     } else {
-        this.promptLabel.textContent = "关键帧提示词";
+        this.promptLabel.textContent = "Keyframe Prompt";
         this.promptLabel.classList.remove("clip-mode");
         this.promptInput.classList.remove("clip-mode");
         this.promptInput.value = "";
@@ -1006,7 +1006,7 @@ _renderPickerGrid() {
 
 _showAddClipPicker(atMs = this.playheadMs) {
     this._pickerCtx = { mode: "add", atMs };
-    this.pickerTitle.textContent = "添加图片";
+    this.pickerTitle.textContent = "Add Image";
     this._renderPickerGrid();
     this.pickerEl.style.display = "flex";
 }
@@ -1066,8 +1066,11 @@ _exportJson() {
     const a = document.createElement("a");
     const audio = wv("audio");
     const stem  = audio ? String(audio).replace(/\.[^.]+$/, "").split(/[\\/]/).pop() : "timeline";
+    const now   = new Date();
+    const pad   = n => String(n).padStart(2, "0");
+    const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     a.href = url;
-    a.download = `${stem}.json`;
+    a.download = `${stem}_${stamp}.json`;
     a.click();
     URL.revokeObjectURL(url);
 }
