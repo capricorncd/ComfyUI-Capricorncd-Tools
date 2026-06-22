@@ -1,9 +1,10 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const NODE_CLASS = "CAP_SeqToVideo";
-const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
-const PLAYER_H   = 200;   // px
+const NODE_CLASS    = "CAP_SeqToVideo";
+const EXT_PREFIX    = "ComfyUI-Capricorncd-Tools";
+const PLAYER_H      = 200;   // px
+const MIN_NODE_WIDTH = 300;  // px
 
 function loadCss() {
     if (document.getElementById("stv-styles")) return;
@@ -18,6 +19,16 @@ function videoUrl(info) {
     return api.apiURL(
         `/view?filename=${encodeURIComponent(info.filename)}&type=${info.type}&subfolder=${encodeURIComponent(info.subfolder ?? "")}`
     );
+}
+
+function clampWidth(size) {
+    return [Math.max(size[0], MIN_NODE_WIDTH), size[1]];
+}
+
+/** DOM widgets use (widget.width ?? node.width); clear stale value on select/configure. */
+function clearStvWidgetWidth(node) {
+    const w = node._stvWidget;
+    if (w && w.width != null) delete w.width;
 }
 
 // ── ffmpeg status — checked once, result cached ────────────────────────────
@@ -41,6 +52,39 @@ app.registerExtension({
         if (nodeData.name !== NODE_CLASS) return;
         loadCss();
 
+        // ── prevent automatic layout from narrowing the node ────────────────
+        nodeType.prototype.setSize = function (size) {
+            const isUserResize = app.canvas?.resizing_node === this;
+            if (!isUserResize) {
+                const curW = this.size?.[0] ?? 0;
+                if (curW > 0 && size[0] < curW) size = [curW, size[1]];
+            }
+            this.size = clampWidth(size);
+            this.onResize?.(this.size);
+        };
+
+        const computeSize = nodeType.prototype.computeSize;
+        nodeType.prototype.computeSize = function (out) {
+            const size = computeSize?.apply(this, arguments) ?? (out ? [...out] : [0, 0]);
+            return clampWidth(size);
+        };
+
+        // ── clear stale widget.width after configure / select ───────────────
+        const configure = nodeType.prototype.configure;
+        nodeType.prototype.configure = function (info) {
+            configure?.apply(this, arguments);
+            if ((this.size?.[0] ?? 0) < MIN_NODE_WIDTH) {
+                this.setSize([MIN_NODE_WIDTH, this.size[1]]);
+            }
+            clearStvWidgetWidth(this);
+        };
+
+        const onSelected = nodeType.prototype.onSelected;
+        nodeType.prototype.onSelected = function () {
+            onSelected?.apply(this, arguments);
+            clearStvWidgetWidth(this);
+        };
+
         // ── node created ────────────────────────────────────────────────────
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
@@ -48,6 +92,7 @@ app.registerExtension({
             this._stvRoot    = null;
             this._stvVideo   = null;
             this._stvHolder  = null;
+            this._stvWidget  = null;
             this._stvCurrent = null;
             _buildPlayer(this);
         };
@@ -92,13 +137,22 @@ function _buildPlayer(node) {
     });
     w.serialize = false;
 
+    // Prevent stale widget.width from narrowing the player when the node is selected
+    Object.defineProperty(w, "width", {
+        get() { return undefined; },
+        set() {},
+        enumerable: true,
+        configurable: true,
+    });
+
     node._stvRoot   = root;
     node._stvHolder = holder;
+    node._stvWidget = w;
 
     // Async ffmpeg check — update placeholder if not found
     checkFfmpeg().then(status => {
-        if (!node._stvRoot) return;          // node already removed
-        if (node._stvVideo) return;          // video already playing, don't overwrite
+        if (!node._stvRoot) return;
+        if (node._stvVideo) return;
         if (!status.available) {
             _showError(node, "未检测到 ffmpeg，请安装后重启 ComfyUI");
         }
@@ -149,6 +203,7 @@ function _destroyPlayer(node) {
     node._stvVideo?.removeAttribute("src");
     node._stvVideo   = null;
     node._stvRoot    = null;
+    node._stvWidget  = null;
     node._stvCurrent = null;
 }
 
