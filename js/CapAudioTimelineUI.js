@@ -1167,6 +1167,12 @@ _onKeyDown(e) {
 
     if (isTyping) return;
 
+    if (e.key === " ") {
+        this._toggleTlPlay();
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+        return;
+    }
+
     if ((e.key === "Delete" || e.key === "Backspace") && this.selClipId) {
         this._deleteClip(this.selClipId);
         e.preventDefault(); e.stopImmediatePropagation?.();
