@@ -184,6 +184,7 @@ The node scans `frames_dir` for image files (`jpg`, `jpeg`, `png`, `webp`, `bmp`
 | `frames_dir` | STRING | — | Absolute path to the directory containing the image sequence |
 | `fps` | FLOAT | 24.0 | Frame rate for the output video |
 | `filename_prefix` | STRING | `STV` | Prefix for the output filename |
+| `use_seq_duration` | BOOLEAN | `true` | `true` — video length follows the image sequence; `false` — video length follows the audio (stops when audio ends) |
 | `audio` | AUDIO | *(optional)* | Audio to mix into the video; omit for video-only output |
 
 **Outputs**

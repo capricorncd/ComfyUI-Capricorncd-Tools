@@ -63,6 +63,7 @@ class CAP_SeqToVideo:
                 "frames_dir": ("STRING", {"default": ""}),
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
                 "filename_prefix": ("STRING", {"default": "STV"}),
+                "use_seq_duration": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "audio": ("AUDIO",),
@@ -77,10 +78,11 @@ class CAP_SeqToVideo:
     DESCRIPTION = "Compose image sequence and optional audio into MP4 using ffmpeg."
 
     @classmethod
-    def IS_CHANGED(cls, frames_dir, fps, filename_prefix, audio=None):
+    def IS_CHANGED(cls, frames_dir, fps, filename_prefix, use_seq_duration=True, audio=None):
         return float("nan")  # always re-run
 
-    def execute(self, frames_dir: str, fps: float, filename_prefix: str, audio=None):
+    def execute(self, frames_dir: str, fps: float, filename_prefix: str,
+                use_seq_duration: bool = True, audio=None):
         frames_dir = str(frames_dir).strip()
         if not frames_dir or not os.path.isdir(frames_dir):
             raise ValueError(f"frames_dir 不是有效目录: {frames_dir!r}")
@@ -116,12 +118,9 @@ class CAP_SeqToVideo:
         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         if audio_tmp:
-            cmd += [
-                "-c:a", "aac",
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-shortest",
-            ]
+            cmd += ["-c:a", "aac", "-map", "0:v:0", "-map", "1:a:0"]
+            if not use_seq_duration:
+                cmd.append("-shortest")
 
         cmd.append(output_path)
         log.info("[CAP_SeqToVideo] cmd: %s", " ".join(cmd))

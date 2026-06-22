@@ -66,10 +66,11 @@
   "CAP_SeqToVideo": {
     "display_name": "Seq To Video",
     "inputs": {
-      "frames_dir":       { "name": "Frames Dir" },
-      "fps":              { "name": "FPS" },
-      "filename_prefix":  { "name": "Filename Prefix" },
-      "audio":            { "name": "Audio" }
+      "frames_dir":        { "name": "Frames Dir" },
+      "fps":               { "name": "FPS" },
+      "filename_prefix":   { "name": "Filename Prefix" },
+      "use_seq_duration":  { "name": "Use Seq Duration" },
+      "audio":             { "name": "Audio" }
     },
     "outputs": {
       "filename": { "name": "Filename" }
