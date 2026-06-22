@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 
 def _detect_pattern(frames_dir: str):
-    """Return (ffmpeg_pattern, ext) for the first numeric-named image sequence found."""
+    """Return (ffmpeg_pattern, ext, start_num) for the first numeric image sequence found."""
     exts = ["jpg", "jpeg", "png", "webp", "bmp"]
     files: list[str] = []
     for ext in exts:
@@ -22,17 +22,18 @@ def _detect_pattern(frames_dir: str):
         files.extend(glob.glob(os.path.join(frames_dir, f"*.{ext.upper()}")))
 
     if not files:
-        return None, None
+        return None, None, 0
 
     files = sorted(set(files))
     basename = os.path.basename(files[0])
     m = re.match(r"^(.*?)(\d+)(\.[^.]+)$", basename)
     if not m:
-        return None, None
+        return None, None, 0
 
     prefix, num_str, ext = m.group(1), m.group(2), m.group(3)
+    start_num = int(num_str)
     pattern = f"{prefix}%0{len(num_str)}d{ext}"
-    return os.path.join(frames_dir, pattern), ext.lstrip(".").lower()
+    return os.path.join(frames_dir, pattern), ext.lstrip(".").lower(), start_num
 
 
 def _write_audio_tmp(audio: dict) -> str | None:
@@ -44,7 +45,8 @@ def _write_audio_tmp(audio: dict) -> str | None:
             waveform = waveform[0]
         fd, path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
-        torchaudio.save(path, waveform, sample_rate)
+        torchaudio.save(path, waveform.cpu(), sample_rate,
+                        encoding="PCM_S16", bits_per_sample=16)
         return path
     except Exception as exc:
         log.warning("[CAP_SeqToVideo] failed to write audio temp file: %s", exc)
@@ -83,7 +85,7 @@ class CAP_SeqToVideo:
         if not frames_dir or not os.path.isdir(frames_dir):
             raise ValueError(f"frames_dir 不是有效目录: {frames_dir!r}")
 
-        pattern, _ = _detect_pattern(frames_dir)
+        pattern, _, start_num = _detect_pattern(frames_dir)
         if not pattern:
             raise ValueError(f"在目录中未找到图片序列: {frames_dir}")
 
@@ -93,24 +95,36 @@ class CAP_SeqToVideo:
         output_filename = f"{prefix}_{stamp}.mp4"
         output_path = os.path.join(output_dir, output_filename)
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-framerate", str(float(fps)),
-            "-i", pattern,
-        ]
-
         audio_tmp = None
         if audio is not None:
             audio_tmp = _write_audio_tmp(audio)
             if audio_tmp:
-                cmd += ["-i", audio_tmp]
+                log.info("[CAP_SeqToVideo] audio tmp: %s", audio_tmp)
+            else:
+                log.warning("[CAP_SeqToVideo] audio 写入失败，将跳过音频轨道")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-start_number", str(start_num),
+            "-framerate", str(float(fps)),
+            "-i", pattern,
+        ]
+
+        if audio_tmp:
+            cmd += ["-i", audio_tmp]
 
         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         if audio_tmp:
-            cmd += ["-c:a", "aac", "-shortest"]
+            cmd += [
+                "-c:a", "aac",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-shortest",
+            ]
 
         cmd.append(output_path)
+        log.info("[CAP_SeqToVideo] cmd: %s", " ".join(cmd))
 
         kwargs: dict = {"capture_output": True, "text": True, "timeout": 600}
         if sys.platform == "win32":

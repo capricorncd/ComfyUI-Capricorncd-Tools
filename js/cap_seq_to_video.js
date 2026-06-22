@@ -75,6 +75,26 @@ app.registerExtension({
                 this.setSize([MIN_NODE_WIDTH, this.size[1]]);
             }
             clearStvWidgetWidth(this);
+            // Restore last video after workflow reload / browser refresh
+            const vi = info?.properties?.stv_video;
+            if (vi && !this._stvCurrent) {
+                this._stvLastVideoInfo = vi;
+                const url = videoUrl(vi);
+                this._stvCurrent = url;
+                requestAnimationFrame(() => {
+                    if (this._stvRoot && !this._stvVideo) _loadVideo(this, url);
+                });
+            }
+        };
+
+        // Persist last video info in workflow JSON
+        const onSerialize = nodeType.prototype.onSerialize;
+        nodeType.prototype.onSerialize = function (info) {
+            onSerialize?.apply(this, arguments);
+            if (!info.properties) info.properties = {};
+            if (this._stvLastVideoInfo) {
+                info.properties.stv_video = this._stvLastVideoInfo;
+            }
         };
 
         const onSelected = nodeType.prototype.onSelected;
@@ -87,13 +107,14 @@ app.registerExtension({
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
-            this._stvRoot      = null;
-            this._stvVideo     = null;
-            this._stvHolder    = null;
-            this._stvWidget    = null;
-            this._stvCurrent   = null;
-            this._stvPlayerH   = PLAYER_H;
-            this._stvResizeObs = null;
+            this._stvRoot          = null;
+            this._stvVideo         = null;
+            this._stvHolder        = null;
+            this._stvWidget        = null;
+            this._stvCurrent       = null;
+            this._stvLastVideoInfo = null;
+            this._stvPlayerH       = PLAYER_H;
+            this._stvResizeObs     = null;
             _buildPlayer(this);
         };
 
@@ -103,6 +124,7 @@ app.registerExtension({
             onExecuted?.apply(this, arguments);
             const info = output?.video?.[0];
             if (!info || !this._stvRoot) return;
+            this._stvLastVideoInfo = info;  // persist across refresh
             const url = videoUrl(info);
             if (url === this._stvCurrent) return;
             this._stvCurrent = url;
