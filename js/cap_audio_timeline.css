@@ -361,12 +361,51 @@
     border-top: 1px solid #2a2a2a;
     padding-top: 5px;
 }
+.cat-prompt-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
 .cat-prompt-label {
     font-size: 10px;
     color: #666;
     transition: color 0.15s;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .cat-prompt-label.clip-mode { color: #ffd166; }
+
+.cat-prompt-use-global {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    color: #666;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    opacity: 0.45;
+    transition: color 0.15s, opacity 0.15s;
+}
+.cat-prompt-use-global.clip-mode {
+    color: #a0aec0;
+    opacity: 1;
+}
+.cat-prompt-use-global input {
+    margin: 0;
+    cursor: pointer;
+}
+.cat-prompt-use-global input:disabled {
+    cursor: not-allowed;
+}
+
+.cat-prompt-wrap {
+    position: relative;
+    width: 100%;
+}
 
 .cat-prompt-input {
     width: 100%;
@@ -395,6 +434,10 @@
 }
 .cat-prompt-input.clip-mode { border-color: #4a5a2a; }
 .cat-prompt-input.clip-mode:focus { border-color: #8a9a4a; }
+
+.cap-rich-prompt-mirror {
+    background: transparent !important;
+}
 
 /* ── Image picker ───────────────────────── */
 

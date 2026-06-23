@@ -69,6 +69,26 @@ class CAP_DataJsonClipParser:
         arr = np.array(img).astype(np.float32) / 255.0
         return torch.from_numpy(arr).unsqueeze(0)  # [1, H, W, 3]
 
+    def _clip_use_global_prompt(self, clip: dict) -> bool:
+        if "use_global_prompt" in clip:
+            return bool(clip["use_global_prompt"])
+        return not bool(self._strip_comment_lines(clip.get("prompt") or "").strip())
+
+    def _strip_comment_lines(self, text: str) -> str:
+        return "\n".join(
+            line for line in str(text or "").split("\n")
+            if not line.startswith("#")
+        )
+
+    def _compose_prompt(self, clip: dict, global_prompt: str) -> str:
+        clip_prompt = self._strip_comment_lines(clip.get("prompt") or "")
+        global_prompt = self._strip_comment_lines(global_prompt)
+        if not self._clip_use_global_prompt(clip):
+            return clip_prompt
+        if global_prompt and clip_prompt:
+            return f"{global_prompt}\n{clip_prompt}"
+        return global_prompt or clip_prompt
+
     def execute(self, data_json: str, index: int, trim_offset: int = 1):
         try:
             data = json.loads(data_json or "{}")
@@ -94,7 +114,7 @@ class CAP_DataJsonClipParser:
         seconds = duration_ms // 1000
         ms_rem = duration_ms % 1000
         frame_count = max(1, int(seconds * fps) + round(ms_rem * fps / 1000))
-        prompt = clip.get("prompt") or global_prompt
+        prompt = self._compose_prompt(clip, global_prompt)
 
         # Trimmed audio for this clip
         if audio_path and os.path.isfile(audio_path):

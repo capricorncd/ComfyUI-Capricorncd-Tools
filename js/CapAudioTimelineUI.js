@@ -1,11 +1,17 @@
 import { api } from "../../scripts/api.js";
 import WaveSurfer from "./wavesurfer.esm.js";
 import { clamp, formatTimecode, parseTimecode, segmentFrameCount } from "./timecode.js";
+import { attachRichPromptHandler, detachRichPromptHandler, updateRichPromptMirror } from "./rich_prompt.js";
 
 const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
 
 function uid() {
     return `cl_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function clipUseGlobalPrompt(raw) {
+    if (raw.use_global_prompt !== undefined) return raw.use_global_prompt !== false;
+    return !String(raw.prompt ?? "").trim();
 }
 
 function loadCss() {
@@ -62,6 +68,7 @@ constructor(node) {
     this._attachWidget();
     this._bindWidgets();
     this._bindEvents();
+    attachRichPromptHandler(this.promptInput, { mode: "overlay" });
     this._initWavePlay();
     this._initTlPlay();
     this._loadFromWidget();
@@ -131,8 +138,16 @@ _buildDom() {
       </div>
 
       <div class="cat-prompt-section">
-        <div class="cat-prompt-label">Keyframe Prompt</div>
-        <textarea class="cat-prompt-input" placeholder="Select a clip to enter prompt…" rows="3" disabled></textarea>
+        <div class="cat-prompt-header">
+          <div class="cat-prompt-label">Keyframe Prompt</div>
+          <label class="cat-prompt-use-global" title="When enabled, Data Json Clip Parser outputs global prompt + keyframe prompt">
+            <input class="cat-prompt-use-global-cb" type="checkbox" checked disabled />
+            <span>Use Global</span>
+          </label>
+        </div>
+        <div class="cat-prompt-wrap">
+          <textarea class="cat-prompt-input" placeholder="Select a clip to enter prompt… (Ctrl+/ comment)" rows="3" disabled></textarea>
+        </div>
       </div>
 
       <div class="cat-picker" style="display:none">
@@ -175,6 +190,9 @@ _buildDom() {
     this.playheadEl = root.querySelector(".cat-playhead");
 
     this.promptLabel = root.querySelector(".cat-prompt-label");
+    this.promptUseGlobal = root.querySelector(".cat-prompt-use-global");
+    this.promptUseGlobalCb = root.querySelector(".cat-prompt-use-global-cb");
+    this.promptWrap = root.querySelector(".cat-prompt-wrap");
     this.promptInput = root.querySelector(".cat-prompt-input");
 
     this.pickerEl    = root.querySelector(".cat-picker");
@@ -257,7 +275,11 @@ _bindWidgets() {
         const w = this._w(name);
         if (!w) continue;
         const orig = w.callback;
-        w.callback = v => { orig?.(v); this._renderTimeline(); };
+        w.callback = v => {
+            orig?.(v);
+            this._renderTimeline();
+            if (name === "fps") this._updatePromptContext();
+        };
     }
 
     const dirW = this._w("keyframe_dir");
@@ -342,6 +364,7 @@ _bindEvents() {
     // prompt input
     this.promptInput.addEventListener("input", () => this._onPromptChange());
     this.promptInput.addEventListener("keydown", e => e.stopPropagation()); // don't leak to canvas
+    this.promptUseGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
 
     // image picker close / refresh
     this.pickerRefreshBtn.addEventListener("click", () => this._refreshPicker());
@@ -773,7 +796,7 @@ _deselectAll() {
 _addClip(startMs, startImage = null) {
     const defaultDur = Math.min(2000, Math.round(this._tlDurMs() / 4));
     // Use startMs only for ordering; _packClips will assign the actual position.
-    const clip = { id: uid(), startMs, endMs: startMs + defaultDur, startImage, endImage: null, prompt: "", disabled: false };
+    const clip = { id: uid(), startMs, endMs: startMs + defaultDur, startImage, endImage: null, prompt: "", useGlobalPrompt: true, disabled: false };
     this.clips.push(clip);
     this._packClips();
     this._selectClip(clip.id);
@@ -892,17 +915,26 @@ _updatePromptContext() {
         const fps = this.getFps();
         const start = formatTimecode(clip.startMs, fps);
         const end = formatTimecode(clip.endMs, fps);
-        this.promptLabel.textContent = `Keyframe Prompt · ${start}~${end}`;
+        const frames = segmentFrameCount(clip.startMs, clip.endMs, fps);
+        this.promptLabel.textContent = `Keyframe Prompt · ${start}~${end} （${frames}）`;
         this.promptLabel.classList.add("clip-mode");
         this.promptInput.classList.add("clip-mode");
         this.promptInput.value = clip.prompt ?? "";
         this.promptInput.disabled = false;
+        this.promptUseGlobalCb.disabled = false;
+        this.promptUseGlobalCb.checked = clip.useGlobalPrompt !== false;
+        this.promptUseGlobal.classList.add("clip-mode");
+        updateRichPromptMirror(this.promptInput);
     } else {
         this.promptLabel.textContent = "Keyframe Prompt";
         this.promptLabel.classList.remove("clip-mode");
         this.promptInput.classList.remove("clip-mode");
         this.promptInput.value = "";
         this.promptInput.disabled = true;
+        this.promptUseGlobalCb.checked = true;
+        this.promptUseGlobalCb.disabled = true;
+        this.promptUseGlobal.classList.remove("clip-mode");
+        updateRichPromptMirror(this.promptInput);
     }
 }
 
@@ -912,6 +944,13 @@ _onPromptChange() {
     clip.prompt = this.promptInput.value;
     this._saveClips();
     this._renderClips();
+}
+
+_onUseGlobalChange() {
+    const clip = this.clips.find(c => c.id === this.selClipId);
+    if (!clip) return;
+    clip.useGlobalPrompt = !!this.promptUseGlobalCb.checked;
+    this._saveClips();
 }
 
 // ── context menu ──────────────────────────────────────────────────────────
@@ -1104,6 +1143,7 @@ _exportJson() {
             start_image: c.startImage ?? null,
             end_image:   c.endImage ?? null,
             prompt:      c.prompt ?? "",
+            use_global_prompt: c.useGlobalPrompt !== false,
             disabled:    c.disabled ?? false,
         })),
     };
@@ -1145,6 +1185,7 @@ _importJson(e) {
                     startImage: c.start_image ?? null,
                     endImage:   c.end_image   ?? null,
                     prompt:     c.prompt ?? "",
+                    useGlobalPrompt: clipUseGlobalPrompt(c),
                     disabled:   c.disabled ?? false,
                 }));
                 this._saveClips();
@@ -1170,6 +1211,7 @@ _saveClips() {
         start_image: c.startImage ?? null,
         end_image: c.endImage ?? null,
         prompt: c.prompt ?? "",
+        use_global_prompt: c.useGlobalPrompt !== false,
         disabled: c.disabled ?? false,
     })));
     this.node.setDirtyCanvas(true, true);
@@ -1188,6 +1230,7 @@ _loadFromWidget() {
                 startImage: c.start_image ?? null,
                 endImage: c.end_image ?? null,
                 prompt: c.prompt ?? "",
+                useGlobalPrompt: clipUseGlobalPrompt(c),
                 disabled: c.disabled ?? false,
             }));
         }
@@ -1479,6 +1522,7 @@ destroy() {
     this._resizeObs?.disconnect();
     this._resizeObs = null;
     this._clipElMap.clear();
+    detachRichPromptHandler(this.promptInput);
     window.removeEventListener("mousemove", this._onMove);
     window.removeEventListener("mouseup", this._onUp);
     window.removeEventListener("dragend", this._onDragEnd);

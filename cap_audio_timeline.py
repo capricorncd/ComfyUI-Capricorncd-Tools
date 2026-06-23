@@ -5,6 +5,12 @@ import folder_paths
 from .timecode import parse_timecode, resolve_keyframe_dir
 
 
+def _clip_use_global_prompt(clip: dict) -> bool:
+    if "use_global_prompt" in clip:
+        return bool(clip["use_global_prompt"])
+    return not bool(str(clip.get("prompt") or "").strip())
+
+
 def _list_audio_files():
     input_dir = folder_paths.get_input_directory()
     files = folder_paths.filter_files_content_types(os.listdir(input_dir), ["audio", "video"])
@@ -36,7 +42,7 @@ class CAP_AudioTimeline:
                     {
                         "default": "[]",
                         "multiline": True,
-                        "tooltip": "JSON: [{start_ms, end_ms, start_image, end_image, prompt}, ...] Times are relative to trimmed audio start.",
+                        "tooltip": "JSON: [{start_ms, end_ms, start_image, end_image, prompt, use_global_prompt}, ...] Times are relative to trimmed audio start.",
                     },
                 ),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
@@ -133,6 +139,7 @@ class CAP_AudioTimeline:
                 "start_image": resolve_img(c.get("start_image") or ""),
                 "end_image": resolve_img(c.get("end_image") or ""),
                 "prompt": c.get("prompt") or "",
+                "use_global_prompt": _clip_use_global_prompt(c),
             }
             for c in clips
             if not c.get("disabled", False)
@@ -156,6 +163,7 @@ class CAP_AudioTimeline:
                     "start_image": r["start_image"],
                     "end_image": end_image,
                     "prompt": r["prompt"],
+                    "use_global_prompt": bool(r.get("use_global_prompt", True)),
                 }
             )
 
