@@ -125,6 +125,7 @@ class CAP_AudioTimeline:
             return name
 
         # Build resolved clips with start/end images before applying end_image rules
+        # Skip disabled clips entirely
         resolved = [
             {
                 "start_ms": c.get("start_ms", 0),
@@ -134,6 +135,7 @@ class CAP_AudioTimeline:
                 "prompt": c.get("prompt") or "",
             }
             for c in clips
+            if not c.get("disabled", False)
         ]
 
         # Apply end_image rules per one_shot mode
@@ -158,7 +160,10 @@ class CAP_AudioTimeline:
             )
 
         clips_length = len(clips_for_json)
-        total_frame_count = max(1, int(round((end_ms - start_ms) * fps / 1000)))
+        total_frame_count = max(1, sum(
+            int(round((r["end_ms"] - r["start_ms"]) * fps / 1000))
+            for r in resolved
+        ) if resolved else 1)
 
         data_json = json.dumps(
             {

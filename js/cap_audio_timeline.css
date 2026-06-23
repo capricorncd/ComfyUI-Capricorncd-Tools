@@ -235,6 +235,13 @@
     box-shadow: 0 0 0 1px #ffd16633;
 }
 .cat-clip:active { cursor: grabbing; }
+.cat-clip.cat-clip-disabled {
+    opacity: 0.38;
+    filter: grayscale(55%);
+}
+.cat-clip.cat-clip-disabled .cat-clip-lbl {
+    text-decoration: line-through;
+}
 
 /* thumbnail fills the full clip; width scales proportionally */
 .cat-clip-thumb {
@@ -479,5 +486,15 @@
     color: #bbb;
     cursor: pointer;
     transition: background 0.08s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
 }
 .cat-ctx-item:hover { background: #2a2a44; color: #eee; }
+.cat-ctx-key {
+    color: #666;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+.cat-ctx-item:hover .cat-ctx-key { color: #999; }

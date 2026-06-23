@@ -96,6 +96,35 @@ def _register_routes():
             version = None
         return web.json_response({"available": True, "version": version, "path": path})
 
+    @routes.post("/cap/upload_keyframe")
+    async def api_upload_keyframe(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        try:
+            reader = await request.multipart()
+            field = await reader.next()
+            if field is None or field.name != "image":
+                return web.json_response({"error": "Missing image field"}, status=400)
+            filename = os.path.basename(field.filename or "upload.png")
+            input_dir = _fp.get_input_directory()
+            dest = os.path.join(input_dir, filename)
+            # Avoid overwriting: append counter suffix if needed
+            if os.path.exists(dest):
+                base, ext = os.path.splitext(filename)
+                counter = 1
+                while os.path.exists(dest):
+                    dest = os.path.join(input_dir, f"{base}_{counter}{ext}")
+                    counter += 1
+            with open(dest, "wb") as f:
+                while True:
+                    chunk = await field.read_chunk(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            return web.json_response({"path": dest})
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] upload_keyframe error")
+            return web.json_response({"error": str(exc)}, status=500)
+
     logging.info("[CapricorncdTools] Registered API routes.")
 
 

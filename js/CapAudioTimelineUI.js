@@ -352,6 +352,16 @@ _bindEvents() {
     window.addEventListener("mousemove", this._onMove);
     window.addEventListener("mouseup", this._onUp);
     window.addEventListener("dragend", this._onDragEnd);
+
+    // capture-phase keyboard handler: fires before ComfyUI's document-level shortcuts
+    this._onKeyDownBound = e => this._onKeyDown(e);
+    document.addEventListener("keydown", this._onKeyDownBound, { capture: true });
+
+    // focus root on timeline background click so spacebar etc. work without a selected clip
+    this.tlScroll.addEventListener("click", e => {
+        if (!e.target.closest(".cat-clip")) this.root.focus();
+    });
+    this.waveWrap.addEventListener("click", () => this.root.focus());
 }
 
 // ── trim ─────────────────────────────────────────────────────────────────
@@ -705,6 +715,7 @@ _layoutClips({ animate = false, dragId = null } = {}) {
         const isDragged = dragId != null && clip.id === dragId;
 
         el.classList.toggle("selected", clip.id === this.selClipId);
+        el.classList.toggle("cat-clip-disabled", !!clip.disabled);
         el.classList.toggle("cat-clip-dragging", isDragged);
         el.classList.toggle("cat-clip-anim", animate && !isDragged);
         el.style.width = `${width}px`;
@@ -740,6 +751,7 @@ _renderPlayhead() {
 
 _selectClip(id) {
     this.selClipId = id;
+    this.root.focus();
     this._selTrim = null;
     this._updateTrimUI();
     this._renderClips();
@@ -758,7 +770,7 @@ _deselectAll() {
 _addClip(startMs, startImage = null) {
     const defaultDur = Math.min(2000, Math.round(this._tlDurMs() / 4));
     // Use startMs only for ordering; _packClips will assign the actual position.
-    const clip = { id: uid(), startMs, endMs: startMs + defaultDur, startImage, endImage: null, prompt: "" };
+    const clip = { id: uid(), startMs, endMs: startMs + defaultDur, startImage, endImage: null, prompt: "", disabled: false };
     this.clips.push(clip);
     this._packClips();
     this._selectClip(clip.id);
@@ -818,6 +830,26 @@ _pasteClip() {
     this._packClips();
     this._selectClip(clip.id);
     this._saveClips();
+}
+
+_toggleDisable(id) {
+    const c = this.clips.find(c => c.id === id);
+    if (!c) return;
+    c.disabled = !c.disabled;
+    this._saveClips();
+    this._renderClips();
+}
+
+_disableOthers(id) {
+    const others = this.clips.filter(c => c.id !== id);
+    if (!others.length) return;
+    // All others disabled → enable all; otherwise disable all
+    const target = others.every(c => c.disabled) ? false : true;
+    let changed = false;
+    for (const c of others) {
+        if (c.disabled !== target) { c.disabled = target; changed = true; }
+    }
+    if (changed) { this._saveClips(); this._renderClips(); }
 }
 
 _snapMs(ms, excludeId) {
@@ -890,18 +922,28 @@ _showContextMenu(clipId, e) {
     menu.className = "cat-ctx-menu";
     menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:9999`;
 
+    const disableLabel = clip.disabled ? "Enable" : "Disable";
+    const others = this.clips.filter(c => c.id !== clipId);
+    const othersAllDisabled = others.length > 0 && others.every(c => c.disabled);
+    const othersLabel = othersAllDisabled ? "Enable Others" : "Disable Others";
     const items = [
         { label: "替换素材",       fn: () => this._openPicker(clipId, "startImage", "替换素材") },
         { label: "选择尾帧图片",   fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
         { label: "删除",           fn: () => this._deleteClip(clipId) },
         { label: "复制",           fn: () => this._copyClip(clipId) },
+        { label: disableLabel,     shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
+        { label: othersLabel,      shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
     ];
     if (clip.endImage) items.push({ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) });
 
-    for (const { label, fn } of items) {
+    for (const { label, shortcut, fn } of items) {
         const div = document.createElement("div");
         div.className = "cat-ctx-item";
-        div.textContent = label;
+        if (shortcut) {
+            div.innerHTML = `<span>${label}</span><span class="cat-ctx-key">${shortcut}</span>`;
+        } else {
+            div.textContent = label;
+        }
         div.addEventListener("click", () => { fn(); removeContextMenu(); });
         menu.appendChild(div);
     }
@@ -1059,6 +1101,7 @@ _exportJson() {
             start_image: c.startImage ?? null,
             end_image:   c.endImage ?? null,
             prompt:      c.prompt ?? "",
+            disabled:    c.disabled ?? false,
         })),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -1099,6 +1142,7 @@ _importJson(e) {
                     startImage: c.start_image ?? null,
                     endImage:   c.end_image   ?? null,
                     prompt:     c.prompt ?? "",
+                    disabled:   c.disabled ?? false,
                 }));
                 this._saveClips();
             }
@@ -1123,6 +1167,7 @@ _saveClips() {
         start_image: c.startImage ?? null,
         end_image: c.endImage ?? null,
         prompt: c.prompt ?? "",
+        disabled: c.disabled ?? false,
     })));
     this.node.setDirtyCanvas(true, true);
 }
@@ -1140,6 +1185,7 @@ _loadFromWidget() {
                 startImage: c.start_image ?? null,
                 endImage: c.end_image ?? null,
                 prompt: c.prompt ?? "",
+                disabled: c.disabled ?? false,
             }));
         }
     } catch {}
@@ -1148,6 +1194,9 @@ _loadFromWidget() {
 // ── keyboard ──────────────────────────────────────────────────────────────
 
 _onKeyDown(e) {
+    // Only handle when this timeline's root (or a child) is the active element
+    if (!this.root.contains(document.activeElement)) return;
+
     const isTyping = e.target?.tagName === "INPUT" || e.target?.tagName === "TEXTAREA";
     const isPrompt = e.target?.classList?.contains("cat-prompt-input");
 
@@ -1185,6 +1234,16 @@ _onKeyDown(e) {
     if (e.key === "w" && this.selClipId) {
         this._trimRight(this.selClipId);
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+    }
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "b" && this.selClipId) {
+        this._toggleDisable(this.selClipId);
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+        return;
+    }
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "g" && this.selClipId) {
+        this._disableOthers(this.selClipId);
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+        return;
     }
     if (e.ctrlKey && e.key === "c" && this.selClipId) {
         this._copyClip(this.selClipId);
