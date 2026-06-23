@@ -35,7 +35,7 @@
       "trim_offset":    { "name": "修剪偏移（秒）" }
     },
     "outputs": {
-      "audio":             { "name": "音频" },
+      "trimmed_audio":     { "name": "修剪音频" },
       "fps":               { "name": "帧率" },
       "one_shot":          { "name": "一镜到底" },
       "width":             { "name": "宽度" },
@@ -43,7 +43,8 @@
       "global_prompt":     { "name": "全局提示词" },
       "data_json":         { "name": "配置数据" },
       "clips_length":      { "name": "片段数量" },
-      "total_frame_count": { "name": "总帧数" }
+      "total_frame_count": { "name": "总帧数" },
+      "clips_audio":       { "name": "片段音频" }
     }
   },
 

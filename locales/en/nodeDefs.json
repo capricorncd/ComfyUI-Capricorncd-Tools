@@ -35,7 +35,7 @@
       "trim_offset":    { "name": "Trim Offset (s)" }
     },
     "outputs": {
-      "audio":             { "name": "Audio" },
+      "trimmed_audio":     { "name": "Trimmed Audio" },
       "fps":               { "name": "FPS" },
       "one_shot":          { "name": "One Shot" },
       "width":             { "name": "Width" },
@@ -43,7 +43,8 @@
       "global_prompt":     { "name": "Global Prompt" },
       "data_json":         { "name": "Data JSON" },
       "clips_length":      { "name": "Clips Length" },
-      "total_frame_count": { "name": "Total Frames" }
+      "total_frame_count": { "name": "Total Frames" },
+      "clips_audio":       { "name": "Clips Audio" }
     }
   },
 

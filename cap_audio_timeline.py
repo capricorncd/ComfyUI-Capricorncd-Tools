@@ -5,10 +5,17 @@ import folder_paths
 from .timecode import parse_timecode, resolve_keyframe_dir
 
 
+def _strip_comment_lines(text: str) -> str:
+    return "\n".join(
+        line for line in str(text or "").split("\n")
+        if not line.startswith("#")
+    )
+
+
 def _clip_use_global_prompt(clip: dict) -> bool:
     if "use_global_prompt" in clip:
         return bool(clip["use_global_prompt"])
-    return not bool(str(clip.get("prompt") or "").strip())
+    return not bool(_strip_comment_lines(clip.get("prompt") or "").strip())
 
 
 def _list_audio_files():
@@ -46,17 +53,22 @@ class CAP_AudioTimeline:
                     },
                 ),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
-                                        "tooltip": "音频修剪时长偏移（秒），AUDIO 输出的结束时间 = end_ms + trim_offset × 1000，不影响 data_json 时间轴。"}),
+                                        "tooltip": "音频修剪时长偏移（秒），trimmed_audio 的结束时间 = end_ms + trim_offset × 1000，不影响 data_json 时间轴与 clips_audio。"}),
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "FLOAT", "BOOLEAN", "INT", "INT", "STRING", "STRING", "INT", "INT")
-    RETURN_NAMES = ("audio", "fps", "one_shot", "width", "height", "global_prompt", "data_json", "clips_length", "total_frame_count")
+    RETURN_TYPES = ("AUDIO", "FLOAT", "BOOLEAN", "INT", "INT", "STRING", "STRING", "INT", "INT", "AUDIO")
+    RETURN_NAMES = (
+        "trimmed_audio", "fps", "one_shot", "width", "height",
+        "global_prompt", "data_json", "clips_length", "total_frame_count", "clips_audio",
+    )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "Audio timeline with waveform trim, image keyframe editor, "
-        "and per-clip / global prompts."
+        "and per-clip / global prompts. "
+        "trimmed_audio: full trim range (+trim_offset); "
+        "clips_audio: concatenated audio from enabled clips only."
     )
 
     @classmethod
@@ -93,6 +105,21 @@ class CAP_AudioTimeline:
         e = max(s + 1, min(int(round(end_ms / 1000 * sample_rate)), n))
         return self._pack(waveform[..., s:e], sample_rate)
 
+    def _concat_clips_audio(self, waveform, sample_rate, trim_start_ms, clips: list[dict]):
+        import torch
+
+        ordered = sorted(clips, key=lambda c: int(c.get("start_ms", 0)))
+        segments = []
+        for clip in ordered:
+            abs_start = trim_start_ms + int(clip.get("start_ms", 0))
+            abs_end = trim_start_ms + int(clip.get("end_ms", abs_start))
+            seg = self._trim(waveform, sample_rate, abs_start, abs_end)
+            segments.append(seg["waveform"])
+
+        if not segments:
+            return self._trim(waveform, sample_rate, trim_start_ms, trim_start_ms + 1)
+        return self._pack(torch.cat(segments, dim=-1), sample_rate)
+
     def execute(self, audio, audioUI, start_time, end_time, fps, width, height,
                 keyframe_dir, one_shot, global_prompt, clips_json, trim_offset=1):
         del audioUI
@@ -100,7 +127,7 @@ class CAP_AudioTimeline:
         width = max(1, int(width))
         height = max(1, int(height))
         one_shot = bool(one_shot)
-        global_prompt = str(global_prompt or "")
+        global_prompt = _strip_comment_lines(global_prompt)
 
         audio_path = folder_paths.get_annotated_filepath(audio)
         waveform, sample_rate = self._load_audio(audio)
@@ -111,7 +138,7 @@ class CAP_AudioTimeline:
         end_ms = max(start_ms + 1, min(end_ms, dur))
 
         # Always output the trimmed audio segment (end extended by trim_offset seconds)
-        audio_out = self._trim(waveform, sample_rate, start_ms, end_ms + int(trim_offset) * 1000)
+        trimmed_audio_out = self._trim(waveform, sample_rate, start_ms, end_ms + int(trim_offset) * 1000)
 
         try:
             clips = json.loads(clips_json or "[]")
@@ -138,7 +165,7 @@ class CAP_AudioTimeline:
                 "end_ms": c.get("end_ms", 0),
                 "start_image": resolve_img(c.get("start_image") or ""),
                 "end_image": resolve_img(c.get("end_image") or ""),
-                "prompt": c.get("prompt") or "",
+                "prompt": _strip_comment_lines(c.get("prompt") or ""),
                 "use_global_prompt": _clip_use_global_prompt(c),
             }
             for c in clips
@@ -173,6 +200,8 @@ class CAP_AudioTimeline:
             for r in resolved
         ) if resolved else 1)
 
+        clips_audio_out = self._concat_clips_audio(waveform, sample_rate, start_ms, resolved)
+
         data_json = json.dumps(
             {
                 "audio_path": audio_path,
@@ -190,7 +219,7 @@ class CAP_AudioTimeline:
         )
 
         return (
-            audio_out,
+            trimmed_audio_out,
             fps,
             one_shot,
             width,
@@ -199,6 +228,7 @@ class CAP_AudioTimeline:
             data_json,
             clips_length,
             total_frame_count,
+            clips_audio_out,
         )
 
 
