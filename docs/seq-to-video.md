@@ -33,14 +33,9 @@ Each run produces a unique file; no previous renders are overwritten.
 
 ---
 
-## `use_seq_duration`
+## Video duration
 
-| Value | Video length |
-|-------|-------------|
-| `true` (default) | Follows the image sequence — audio is truncated if it is longer than the video |
-| `false` | Follows the audio — video stops when the audio ends (`-shortest` flag) |
-
-Set to `false` when the audio (e.g. from **Audio Timeline**) is slightly longer than the generated frames and you want the video to end exactly with the audio.
+Output length always follows the image sequence: `frame_count / fps`. If the audio track is longer than the video, it is truncated to match.
 
 ---
 
@@ -51,7 +46,6 @@ Set to `false` when the audio (e.g. from **Audio Timeline**) is slightly longer 
 | `frames_dir` | STRING | — | Absolute path to the directory containing the image sequence |
 | `fps` | FLOAT | 24.0 | Frame rate for the output video |
 | `filename_prefix` | STRING | `STV` | Prefix for the output filename |
-| `use_seq_duration` | BOOLEAN | `true` | `true` — length follows image sequence; `false` — length follows audio |
 | `audio` | AUDIO | *(optional)* | Audio to mix into the video; omit for video-only output |
 
 ## Outputs

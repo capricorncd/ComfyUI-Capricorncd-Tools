@@ -69,7 +69,6 @@
       "frames_dir":        { "name": "Frames Dir" },
       "fps":               { "name": "FPS" },
       "filename_prefix":   { "name": "Filename Prefix" },
-      "use_seq_duration":  { "name": "Use Seq Duration" },
       "audio":             { "name": "Audio" }
     },
     "outputs": {

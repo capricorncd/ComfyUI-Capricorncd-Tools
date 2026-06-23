@@ -69,7 +69,6 @@
       "frames_dir":        { "name": "序列帧目录" },
       "fps":               { "name": "帧率" },
       "filename_prefix":   { "name": "文件名前缀" },
-      "use_seq_duration":  { "name": "按序列帧时长" },
       "audio":             { "name": "音频" }
     },
     "outputs": {
