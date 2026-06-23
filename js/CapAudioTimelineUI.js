@@ -96,6 +96,7 @@ _buildDom() {
           <div class="cat-overlay">
             <div class="cat-shade cat-sl"></div>
             <div class="cat-shade cat-sr"></div>
+            <div class="cat-sel-region"></div>
             <div class="cat-hdl cat-hs"></div>
             <div class="cat-hdl cat-he"></div>
           </div>
@@ -154,6 +155,7 @@ _buildDom() {
     this.waveWrap = root.querySelector(".cat-wave-wrap");
     this.shadeL   = root.querySelector(".cat-sl");
     this.shadeR   = root.querySelector(".cat-sr");
+    this.selRegion = root.querySelector(".cat-sel-region");
     this.hdlS     = root.querySelector(".cat-hs");
     this.hdlE     = root.querySelector(".cat-he");
     this.wPlayBtn = root.querySelector(".cat-wplay");
@@ -410,6 +412,7 @@ _renderTrim() {
     const r = this._msToWavePct(endMs);
     this.shadeL.style.width = `${l}%`;
     this.shadeR.style.cssText = `width:${100-r}%; left:${r}%`;
+    this.selRegion.style.cssText = `left:${l}%; width:${r-l}%`;
     this.hdlS.style.left = `${l}%`;
     this.hdlE.style.left = `${r}%`;
 }
