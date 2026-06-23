@@ -1,7 +1,7 @@
 import { api } from "../../scripts/api.js";
 import WaveSurfer from "./wavesurfer.esm.js";
 import { clamp, formatTimecode, parseTimecode, segmentFrameCount } from "./timecode.js";
-import { attachRichPromptHandler, detachRichPromptHandler, updateRichPromptMirror } from "./rich_prompt.js";
+import { attachRichPromptHandler, detachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 
 const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
 
@@ -361,9 +361,16 @@ _bindEvents() {
         else removeContextMenu();
     });
 
-    // prompt input
+    // prompt input — stop bubbling so canvas shortcuts don't steal keys
+    this.promptWrap.addEventListener("mousedown", e => {
+        e.stopPropagation();
+        if (!this.promptInput.disabled) this.promptInput.focus();
+    });
+    this.promptInput.addEventListener("mousedown", e => e.stopPropagation());
+    this.promptInput.addEventListener("keydown", e => e.stopPropagation());
+    this.promptInput.addEventListener("keyup", e => e.stopPropagation());
+    this.promptInput.addEventListener("keypress", e => e.stopPropagation());
     this.promptInput.addEventListener("input", () => this._onPromptChange());
-    this.promptInput.addEventListener("keydown", e => e.stopPropagation()); // don't leak to canvas
     this.promptUseGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
 
     // image picker close / refresh
@@ -777,7 +784,6 @@ _renderPlayhead() {
 
 _selectClip(id) {
     this.selClipId = id;
-    this.root.focus();
     this._selTrim = null;
     this._updateTrimUI();
     this._renderClips();
@@ -919,22 +925,22 @@ _updatePromptContext() {
         this.promptLabel.textContent = `Keyframe Prompt · ${start}~${end} （${frames}）`;
         this.promptLabel.classList.add("clip-mode");
         this.promptInput.classList.add("clip-mode");
-        this.promptInput.value = clip.prompt ?? "";
         this.promptInput.disabled = false;
+        this.promptInput.tabIndex = 0;
+        setRichPromptValue(this.promptInput, clip.prompt ?? "", true);
         this.promptUseGlobalCb.disabled = false;
         this.promptUseGlobalCb.checked = clip.useGlobalPrompt !== false;
         this.promptUseGlobal.classList.add("clip-mode");
-        updateRichPromptMirror(this.promptInput);
     } else {
         this.promptLabel.textContent = "Keyframe Prompt";
         this.promptLabel.classList.remove("clip-mode");
         this.promptInput.classList.remove("clip-mode");
-        this.promptInput.value = "";
         this.promptInput.disabled = true;
+        this.promptInput.tabIndex = -1;
+        setRichPromptValue(this.promptInput, "", false);
         this.promptUseGlobalCb.checked = true;
         this.promptUseGlobalCb.disabled = true;
         this.promptUseGlobal.classList.remove("clip-mode");
-        updateRichPromptMirror(this.promptInput);
     }
 }
 
@@ -1240,6 +1246,9 @@ _loadFromWidget() {
 // ── keyboard ──────────────────────────────────────────────────────────────
 
 _onKeyDown(e) {
+    // Keyframe prompt: let the textarea handle all keys (incl. shortcuts)
+    if (e.target?.classList?.contains("cat-prompt-input")) return;
+
     // Only handle when this timeline's root (or a child) is the active element
     if (!this.root.contains(document.activeElement)) return;
 

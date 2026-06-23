@@ -1,5 +1,15 @@
 import { app } from "../../scripts/app.js";
-import { attachRichPromptHandler } from "./rich_prompt.js";
+import { bindRichPromptWidget } from "./rich_prompt.js";
+
+function scheduleBind(widget, node) {
+    const tryBind = (tries = 0) => {
+        if (bindRichPromptWidget(widget)) return;
+        if (tries < 100 && document.contains(node?.el ?? node)) {
+            setTimeout(() => tryBind(tries + 1), 50);
+        }
+    };
+    tryBind();
+}
 
 app.registerExtension({
     name: "Capricorncd.RichPromptInput",
@@ -9,14 +19,7 @@ app.registerExtension({
 
         for (const widget of node.widgets ?? []) {
             if (widget.name !== "prompt") continue;
-
-            const ta = widget.inputEl ?? widget.element;
-            if (ta instanceof HTMLTextAreaElement) {
-                attachRichPromptHandler(ta, { mode: "widget" });
-            } else if (ta) {
-                const inner = ta.querySelector?.("textarea");
-                if (inner) attachRichPromptHandler(inner, { mode: "widget" });
-            }
+            scheduleBind(widget, node);
             break;
         }
     },

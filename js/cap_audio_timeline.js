@@ -21,6 +21,7 @@ function getActiveCatNode() {
 
 function onGlobalKeyDown(e) {
     if (e.defaultPrevented || e.repeat) return;
+    if (e.target?.classList?.contains("cat-prompt-input")) return;
     // Let prompt textarea handle its own typing
     if (isTypingTarget(e.target) && e.target.closest?.(".cat-prompt-input")) return;
     if (isTypingTarget(e.target)) return;
