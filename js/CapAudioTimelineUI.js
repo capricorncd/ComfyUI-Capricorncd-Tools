@@ -65,9 +65,7 @@ constructor(node) {
     this._tlReady = false;
     this._dragState = null;
     this._clipboard = null;
-    this._imgFiles = [];
-    this._dirTimer = null;
-    this._pickerCtx = null;  // {clipId, field}
+    this._imgCtx = null;     // {mode, clipId?, field?, atMs?} – pending native file pick
     this._clipElMap = new Map(); // clipId → HTMLElement
 
     loadCss();
@@ -79,8 +77,6 @@ constructor(node) {
     this._initWavePlay();
     this._initTlPlay();
     this._loadFromWidget();
-    const dir = this._w("keyframe_dir")?.value;
-    if (dir) this._scheduleDir();
 }
 
 // ── widget access ─────────────────────────────────────────────────────────
@@ -88,7 +84,6 @@ constructor(node) {
 _w(name) { return this.node.widgets?.find(w => w.name === name); }
 getFps()  { return Math.max(1, parseInt(this._w("fps")?.value ?? 24, 10) || 24); }
 getOneShot() { return !!this._w("one_shot")?.value; }
-_dir()    { return String(this._w("keyframe_dir")?.value ?? "").trim(); }
 _frameMs(){ return Math.max(1, Math.round(1000 / this.getFps())); }
 
 // ── DOM build ─────────────────────────────────────────────────────────────
@@ -158,14 +153,7 @@ _buildDom() {
         </div>
       </div>
 
-      <div class="cat-picker" style="display:none">
-        <div class="cat-picker-hd">
-          <span class="cat-picker-title">Select Image</span>
-          <button class="cat-picker-refresh" title="Refresh image list">↻</button>
-          <button class="cat-picker-x">✕</button>
-        </div>
-        <div class="cat-picker-grid"></div>
-      </div>
+      <input class="cat-img-file" type="file" accept="image/*" style="display:none">
     `;
 
     // refs
@@ -205,11 +193,7 @@ _buildDom() {
     this.promptWrap = root.querySelector(".cat-prompt-wrap");
     this.promptInput = root.querySelector(".cat-prompt-input");
 
-    this.pickerEl    = root.querySelector(".cat-picker");
-    this.pickerGrid  = root.querySelector(".cat-picker-grid");
-    this.pickerTitle      = root.querySelector(".cat-picker-title");
-    this.pickerRefreshBtn = root.querySelector(".cat-picker-refresh");
-    this.pickerCloseBtn   = root.querySelector(".cat-picker-x");
+    this.imgFileEl = root.querySelector(".cat-img-file");
 
     // shared frame preview panel (populated on badge hover)
     this.framePreview = document.createElement("div");
@@ -292,17 +276,6 @@ _bindWidgets() {
         };
     }
 
-    const dirW = this._w("keyframe_dir");
-    if (dirW) {
-        const orig = dirW.callback;
-        dirW.callback = v => { orig?.(v); this._scheduleDir(); };
-        const el = dirW.inputEl ?? dirW.element;
-        if (el && !el._catDirBound) {
-            el._catDirBound = true;
-            el.addEventListener("blur", () => this._scheduleDir());
-        }
-    }
-
     // prompt area starts disabled; _updatePromptContext enables it when a clip is selected
 }
 
@@ -345,8 +318,9 @@ _bindEvents() {
     this.clearBtn.addEventListener("click", () => this._clearTimeline());
     this.importBtn.addEventListener("click", () => this.importFileEl.click());
     this.exportBtn.addEventListener("click", () => this._exportJson());
-    this.addClipBtn.addEventListener("click", () => this._showAddClipPicker());
+    this.addClipBtn.addEventListener("click", () => this._selectImage({ mode: "add", atMs: this.playheadMs }));
     this.importFileEl.addEventListener("change", e => this._importJson(e));
+    this.imgFileEl.addEventListener("change", e => this._onImageFileChange(e));
 
     // playhead triangle click → select playhead without moving it
     this.playheadTri.addEventListener("click", e => {
@@ -399,9 +373,6 @@ _bindEvents() {
     this.promptInput.addEventListener("input", () => this._onPromptChange());
     this.promptUseGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
 
-    // image picker close / refresh
-    this.pickerRefreshBtn.addEventListener("click", () => this._refreshPicker());
-    this.pickerCloseBtn.addEventListener("click", () => this._hidePicker());
 
     // global mouse — dragend clears state if native drag intercepts mouseup
     this._onMove    = e => this._handleMove(e);
@@ -1038,8 +1009,8 @@ _showContextMenu(clipId, e) {
     const othersAllDisabled = others.length > 0 && others.every(c => c.disabled);
     const othersLabel = othersAllDisabled ? "Enable Others" : "Disable Others";
     const items = [
-        { label: "替换素材",       fn: () => this._openPicker(clipId, "startImage", "替换素材") },
-        { label: "选择尾帧图片",   fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
+        { label: "替换素材",       fn: () => this._selectImage({ mode: "replace", clipId, field: "startImage" }) },
+        { label: "选择尾帧图片",   fn: () => this._selectImage({ mode: "replace", clipId, field: "endImage" }) },
         { label: disableLabel,     shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
         { label: othersLabel,      shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
         { label: "复制",           fn: () => this._copyClip(clipId) },
@@ -1070,7 +1041,7 @@ _showFramePreview(clip, badgeEl) {
 
     const makeImg = (src) => {
         const img = document.createElement("img");
-        img.src = `/audio_keyframe_timeline/keyframe_image?dir=${encodeURIComponent(this._getKeyframeDir())}&name=${encodeURIComponent(src)}`;
+        img.src = this._imgUrl(src);
         img.style.cssText = "height:100%;width:auto;display:block;border-radius:3px;";
         return img;
     };
@@ -1098,99 +1069,46 @@ _hideFramePreview() {
     this.framePreview.style.display = "none";
 }
 
-_getKeyframeDir() {
-    return this.node.widgets?.find(w => w.name === "keyframe_dir")?.value ?? "";
+// ── image select (native file picker) ────────────────────────────────────
+
+_selectImage(ctx) {
+    this._imgCtx = ctx;
+    this.imgFileEl.click();
 }
 
-// ── image picker ──────────────────────────────────────────────────────────
-
-_openPicker(clipId, field, title = "选择图片") {
-    this._pickerCtx = { mode: "replace", clipId, field };
-    this.pickerTitle.textContent = title;
-    this._renderPickerGrid();
-    this.pickerEl.style.display = "flex";
-}
-
-_hidePicker() {
-    this.pickerEl.style.display = "none";
-    this._pickerCtx = null;
-}
-
-async _refreshPicker() {
-    this.pickerRefreshBtn.disabled = true;
-    await this._fetchImages();
-    this._renderPickerGrid();
-    this.pickerRefreshBtn.disabled = false;
-}
-
-_renderPickerGrid() {
-    this.pickerGrid.replaceChildren();
-    if (!this._imgFiles.length) {
-        const msg = document.createElement("div");
-        msg.className = "cat-picker-empty";
-        msg.textContent = this._dir() ? "目录中无图片" : "请先设置 keyframe_dir";
-        this.pickerGrid.appendChild(msg);
-        return;
+async _onImageFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !this._imgCtx) return;
+    const ctx = this._imgCtx;
+    this._imgCtx = null;
+    try {
+        const body = new FormData();
+        body.append("image", file);
+        body.append("type", "input");
+        body.append("overwrite", "false");
+        const resp = await api.fetchApi("/upload/image", { method: "POST", body });
+        if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
+        const data = await resp.json();
+        const filename = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+        if (ctx.mode === "add") {
+            this._addClip(ctx.atMs, filename);
+        } else {
+            this._updateClip(ctx.clipId, { [ctx.field]: filename });
+        }
+    } catch (err) {
+        console.error("[CAP_AudioTimeline] image upload failed:", err);
     }
-    for (const file of this._imgFiles) {
-        const item = document.createElement("div");
-        item.className = "cat-picker-item";
-        const img = document.createElement("img");
-        img.src = this._imgUrl(file);
-        img.alt = "";
-        img.onerror = () => img.style.display = "none";
-        const nm = document.createElement("div");
-        nm.className = "cat-picker-name";
-        nm.textContent = file.split(/[\\/]/).pop();
-        item.append(img, nm);
-        item.addEventListener("click", () => {
-            if (!this._pickerCtx) return;
-            if (this._pickerCtx.mode === "add") {
-                this._addClip(this._pickerCtx.atMs, file);
-            } else {
-                const { clipId, field } = this._pickerCtx;
-                this._updateClip(clipId, { [field]: file });
-            }
-            this._hidePicker();
-        });
-        this.pickerGrid.appendChild(item);
-    }
-}
-
-_showAddClipPicker(atMs = this.playheadMs) {
-    this._pickerCtx = { mode: "add", atMs };
-    this.pickerTitle.textContent = "Add Image";
-    this._renderPickerGrid();
-    this.pickerEl.style.display = "flex";
 }
 
 _imgUrl(filename) {
     if (!filename) return "";
-    const dir = this._dir();
-    if (dir) {
-        return api.apiURL(
-            `/audio_keyframe_timeline/keyframe_image?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(filename)}`
-        );
-    }
-    return api.apiURL(`/view?filename=${encodeURIComponent(filename.split(/[\\/]/).pop())}&type=input`);
-}
-
-// ── image dir ─────────────────────────────────────────────────────────────
-
-_scheduleDir() {
-    clearTimeout(this._dirTimer);
-    this._dirTimer = setTimeout(() => this._fetchImages(), 200);
-}
-
-async _fetchImages() {
-    const dir = this._dir();
-    if (!dir) { this._imgFiles = []; return; }
-    try {
-        const r = await fetch(api.apiURL(`/audio_keyframe_timeline/keyframes?dir=${encodeURIComponent(dir)}`));
-        if (!r.ok) throw new Error();
-        const d = await r.json();
-        this._imgFiles = Array.isArray(d.files) ? d.files : [];
-    } catch { this._imgFiles = []; }
+    const parts = filename.split(/[\\/]/);
+    const name = parts.pop();
+    const subfolder = parts.join("/");
+    const p = new URLSearchParams({ filename: name, type: "input" });
+    if (subfolder) p.set("subfolder", subfolder);
+    return api.apiURL(`/view?${p}`);
 }
 
 // ── import / export ───────────────────────────────────────────────────────
@@ -1203,7 +1121,6 @@ _exportJson() {
         fps:           wv("fps"),
         width:         wv("width"),
         height:        wv("height"),
-        keyframe_dir:  wv("keyframe_dir"),
         one_shot:      wv("one_shot"),
         global_prompt: wv("global_prompt"),
         clips: this.clips.map(c => ({
@@ -1243,7 +1160,6 @@ _importJson(e) {
             set("height",        data.height);
             set("one_shot",      data.one_shot);
             set("global_prompt", data.global_prompt);
-            set("keyframe_dir",  data.keyframe_dir);
             if (data.start_time != null) { set("start_time", data.start_time); this.sIn.value = data.start_time; }
             if (data.end_time   != null) { set("end_time",   data.end_time);   this.eIn.value = data.end_time; }
             if (Array.isArray(data.clips)) {
@@ -1259,7 +1175,6 @@ _importJson(e) {
                 }));
                 this._saveClips();
             }
-            if (data.keyframe_dir) this._scheduleDir();
             if (this.isReady) this._renderTimeline();
             this._updatePromptContext();
         } catch (err) {
@@ -1375,7 +1290,6 @@ _onKeyDown(e, ignoreFocus = false) {
     }
     if (e.key === "Escape") {
         this._deselectAll();
-        this._hidePicker();
         removeContextMenu();
     }
 }
@@ -1598,8 +1512,6 @@ _syncFromConfigure(info) {
         this._loadTimer = setTimeout(() => this._loadAudio(), 120);
     }
 
-    // Also refresh keyframe_dir if set
-    if (this._dir()) this._scheduleDir();
 }
 
 // ── destroy ───────────────────────────────────────────────────────────────
@@ -1614,7 +1526,6 @@ destroy() {
     window.removeEventListener("mouseup", this._onUp);
     window.removeEventListener("dragend", this._onDragEnd);
     clearTimeout(this._loadTimer);
-    clearTimeout(this._dirTimer);
     this._waveAudio?.pause();
     this._waveAudio?.removeAttribute?.("src");
     this._tlAudio?.pause();
