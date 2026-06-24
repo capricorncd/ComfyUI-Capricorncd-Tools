@@ -53,8 +53,9 @@ constructor(node) {
     this._waveAudio = null;
     this._waveReady = false;
     this._waveUrl = null;
-    this._trimDrag = null;   // 'start'|'end'
-    this._selTrim = null;    // 'start'|'end'|null
+    this._trimDrag = null;      // 'start'|'end'
+    this._selTrim = null;       // 'start'|'end'|null
+    this._selPlayhead = false;  // playhead selected for arrow-key nudge
 
     // timeline
     this.clips = [];
@@ -125,9 +126,10 @@ _buildDom() {
           <button class="cat-tplay" disabled>▶</button>
           <span class="cat-ttime">00:00.00</span>
           <span class="cat-tdur"></span>
-          <button class="cat-addclip" disabled>＋ Add Image</button>
-          <button class="cat-export" title="Export timeline config as JSON">Export</button>
+          <button class="cat-clear" title="清空时间轴素材">Clear</button>
           <button class="cat-import" title="Import timeline config from JSON">Import</button>
+          <button class="cat-export" title="Export timeline config as JSON">Export</button>
+          <button class="cat-addclip" disabled>＋ Add Image</button>
           <input class="cat-import-file" type="file" accept=".json" style="display:none">
         </div>
         <div class="cat-tl-body">
@@ -137,7 +139,7 @@ _buildDom() {
               <div class="cat-tl-tracks">
                 <div class="cat-clip-track"></div>
               </div>
-              <div class="cat-playhead"></div>
+              <div class="cat-playhead"><div class="cat-playhead-tri"></div></div>
             </div>
           </div>
         </div>
@@ -185,15 +187,17 @@ _buildDom() {
     this.tPlayBtn   = root.querySelector(".cat-tplay");
     this.tTimeEl    = root.querySelector(".cat-ttime");
     this.tDurEl     = root.querySelector(".cat-tdur");
-    this.addClipBtn = root.querySelector(".cat-addclip");
-    this.exportBtn    = root.querySelector(".cat-export");
+    this.clearBtn     = root.querySelector(".cat-clear");
     this.importBtn    = root.querySelector(".cat-import");
+    this.exportBtn    = root.querySelector(".cat-export");
+    this.addClipBtn   = root.querySelector(".cat-addclip");
     this.importFileEl = root.querySelector(".cat-import-file");
     this.tlScroll   = root.querySelector(".cat-tl-scroll");
     this.tlInner    = root.querySelector(".cat-tl-inner");
     this.rulerEl    = root.querySelector(".cat-ruler");
     this.clipTrack  = root.querySelector(".cat-clip-track");
-    this.playheadEl = root.querySelector(".cat-playhead");
+    this.playheadEl  = root.querySelector(".cat-playhead");
+    this.playheadTri = root.querySelector(".cat-playhead-tri");
 
     this.promptLabel = root.querySelector(".cat-prompt-label");
     this.promptUseGlobal = root.querySelector(".cat-prompt-use-global");
@@ -323,11 +327,13 @@ _bindEvents() {
         this._updateTrimUI();
     });
 
-    // waveform background click → deselect trim
+    // waveform background click → deselect trim and playhead
     this.waveWrap.addEventListener("mousedown", e => {
         if (!e.target.classList.contains("cat-hdl")) {
             this._selTrim = null;
+            this._selPlayhead = false;
             this._updateTrimUI();
+            this._renderPlayhead();
         }
     });
 
@@ -335,15 +341,29 @@ _bindEvents() {
     this.wPlayBtn.addEventListener("click", () => this._toggleWavePlay());
     this.tPlayBtn.addEventListener("click", () => this._toggleTlPlay());
 
-    // add clip / export / import buttons
-    this.addClipBtn.addEventListener("click", () => this._showAddClipPicker());
-    this.exportBtn.addEventListener("click", () => this._exportJson());
+    // timeline header buttons
+    this.clearBtn.addEventListener("click", () => this._clearTimeline());
     this.importBtn.addEventListener("click", () => this.importFileEl.click());
+    this.exportBtn.addEventListener("click", () => this._exportJson());
+    this.addClipBtn.addEventListener("click", () => this._showAddClipPicker());
     this.importFileEl.addEventListener("change", e => this._importJson(e));
+
+    // playhead triangle click → select playhead without moving it
+    this.playheadTri.addEventListener("click", e => {
+        e.stopPropagation();
+        this._selTrim = null;
+        this._updateTrimUI();
+        this._selPlayhead = true;
+        this._renderPlayhead();
+        this.root.focus();
+    });
 
     // timeline click → set playhead (not on clips)
     this.tlScroll.addEventListener("click", e => {
         if (e.target.closest(".cat-clip")) return;
+        this._selTrim = null;
+        this._updateTrimUI();
+        this._selPlayhead = true;
         const ms = this._tlPxToMs(e.clientX);
         this._setPlayhead(clamp(ms, 0, this._tlDurMs()));
         this.selClipId = null;
@@ -578,6 +598,7 @@ _canTlPlay() { return this._tlReady && this.isReady; }
 
 _updTlCtrl() {
     this.tPlayBtn.disabled = !this._canTlPlay();
+    this.clearBtn.disabled = !this.clips.length;
     this.addClipBtn.disabled = !this.isReady;
     const fps = this.getFps();
     this.tDurEl.textContent = `/ ${formatTimecode(this._tlDurMs(), fps)}`;
@@ -790,6 +811,7 @@ _layoutClips({ animate = false, dragId = null } = {}) {
 
 _renderPlayhead() {
     this.playheadEl.style.left = `${this._tlMsToPx(this.playheadMs)}px`;
+    this.playheadEl.classList.toggle("selected", this._selPlayhead);
 }
 
 // ── clip operations ───────────────────────────────────────────────────────
@@ -797,17 +819,22 @@ _renderPlayhead() {
 _selectClip(id) {
     this.selClipId = id;
     this._selTrim = null;
+    this._selPlayhead = false;
     this._updateTrimUI();
     this._renderClips();
+    this._renderPlayhead();
     this._updatePromptContext();
+    this.root.focus();
     this.node.setDirtyCanvas(true, true);
 }
 
 _deselectAll() {
     this.selClipId = null;
     this._selTrim = null;
+    this._selPlayhead = false;
     this._updateTrimUI();
     this._renderClips();
+    this._renderPlayhead();
     this._updatePromptContext();
 }
 
@@ -819,6 +846,17 @@ _addClip(startMs, startImage = null) {
     this._packClips();
     this._selectClip(clip.id);
     this._saveClips();
+    this._updTlCtrl();
+}
+
+_confirmAction(message) {
+    return window.confirm(message);
+}
+
+_confirmDeleteClip(id) {
+    if (!id || !this.clips.some(c => c.id === id)) return;
+    if (!this._confirmAction("确定要删除该素材吗？")) return;
+    this._deleteClip(id);
 }
 
 _deleteClip(id) {
@@ -827,6 +865,18 @@ _deleteClip(id) {
     this._packClips();
     this._saveClips();
     this._renderClips();
+    this._updTlCtrl();
+}
+
+_clearTimeline() {
+    if (!this.clips.length) return;
+    if (!this._confirmAction("确定要清空时间轴上的所有素材吗？")) return;
+    this.clips = [];
+    this.selClipId = null;
+    this._updatePromptContext();
+    this._saveClips();
+    this._renderClips();
+    this._updTlCtrl();
 }
 
 _updateClip(id, patch) {
@@ -992,7 +1042,7 @@ _showContextMenu(clipId, e) {
         { label: disableLabel,     shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
         { label: othersLabel,      shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
         { label: "复制",           fn: () => this._copyClip(clipId) },
-        { label: "删除",           fn: () => this._deleteClip(clipId) },
+        { label: "删除",           shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
     ];
     if (clip.endImage) items.push({ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) });
 
@@ -1292,8 +1342,8 @@ _onKeyDown(e, ignoreFocus = false) {
     }
 
     if ((e.key === "Delete" || e.key === "Backspace") && this.selClipId) {
-        this._deleteClip(this.selClipId);
-        e.preventDefault(); e.stopImmediatePropagation?.();
+        this._confirmDeleteClip(this.selClipId);
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
         return;
     }
     if (e.key === "q" && this.selClipId) {

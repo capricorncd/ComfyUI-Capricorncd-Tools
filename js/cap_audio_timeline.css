@@ -103,7 +103,7 @@
 
 /* ── Shared button / time styles ──────── */
 
-.cat-wplay, .cat-tplay, .cat-addclip {
+.cat-wplay, .cat-tplay {
     border: 1px solid #5580bb;
     border-radius: 3px;
     cursor: pointer;
@@ -118,26 +118,36 @@
 .cat-wplay:hover, .cat-tplay:hover { background: #3a5a9a; }
 .cat-wplay:disabled, .cat-tplay:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.cat-clear, .cat-export, .cat-import, .cat-addclip {
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 2px 7px;
+    font-size: 11px;
+    transition: background 0.1s;
+}
+
+.cat-clear {
+    margin-left: auto;
+    border: 1px solid #7a3a3a;
+    background: #3a1a1a;
+    color: #e8a0a0;
+}
+.cat-clear:hover { background: #5a2828; color: #f0c0c0; }
+.cat-clear:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .cat-addclip {
     background: #2a3d1a;
-    border-color: #4a7a3a;
+    border: 1px solid #4a7a3a;
     color: #9dda9d;
-    margin-left: auto;
     padding: 2px 8px;
-    font-size: 11px;
 }
 .cat-addclip:hover { background: #3a5a28; }
 .cat-addclip:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .cat-export, .cat-import {
     border: 1px solid #5a5a7a;
-    border-radius: 3px;
-    cursor: pointer;
-    padding: 2px 7px;
-    font-size: 11px;
     background: #2a2a3e;
     color: #aaa;
-    transition: background 0.1s;
 }
 .cat-export:hover, .cat-import:hover { background: #3a3a5a; color: #ddd; }
 
@@ -344,14 +354,20 @@
     pointer-events: none;
     z-index: 20;
 }
-.cat-playhead::before {
-    content: "";
+.cat-playhead-tri {
     position: absolute;
-    top: 0; left: -5.5px;
-    width: 12px; height: 10px;
+    top: 0;
+    left: -5px;
+    width: 11px;
+    height: 10px;
     background: #ff4444;
     clip-path: polygon(50% 100%, 0 0, 100% 0);
+    pointer-events: auto;
+    cursor: pointer;
+    transition: background 0.1s;
 }
+.cat-playhead-tri:hover { background: #ff6666; }
+.cat-playhead.selected .cat-playhead-tri { background: #ffd166; }
 
 /* ── Prompt area ────────────────────────── */
 

@@ -30,13 +30,20 @@ function onGlobalKeyDown(e) {
     const nodeUi = node?._catUI;
 
     // Ctrl+B / Ctrl+G conflict with ComfyUI's built-in Bypass / Group keybindings.
-    // Handle them BEFORE the defaultPrevented check, and use _lastActive as fallback
-    // so they work even when the LiteGraph node isn't selected in the canvas (users
-    // often interact with the widget without first clicking the node header).
+    // Delete removes the selected clip — use _lastActive as fallback so shortcuts work
+    // even when the LiteGraph node isn't selected in the canvas (users often interact
+    // with the widget without first clicking the node header).
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "b" || e.key === "g")) {
         const ui = nodeUi ?? CapAudioTimelineUI._lastActive;
         if (ui) ui._onKeyDown(e, true);
         return;
+    }
+    if ((e.key === "Delete" || e.key === "Backspace") && !isTypingTarget(e.target)) {
+        const ui = nodeUi ?? CapAudioTimelineUI._lastActive;
+        if (ui?.selClipId) {
+            ui._onKeyDown(e, true);
+            return;
+        }
     }
 
     // For all other shortcuts (including Ctrl+C / Ctrl+V), require the LiteGraph node
