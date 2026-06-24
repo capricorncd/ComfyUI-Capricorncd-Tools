@@ -15,6 +15,7 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 | **Audio Timeline** | Waveform trim + image keyframe clip track + per-clip prompts | [→](docs/audio-timeline.md) |
 | **Data Json Clip Parser** | Extracts a single clip from Audio Timeline's `data_json` output | [→](docs/data-json-clip-parser.md) |
 | **Seq To Video** | Composes an image sequence and audio into MP4 via ffmpeg | [→](docs/seq-to-video.md) |
+| **Save Images** | Saves a batch of images to a configurable directory; returns the directory path and a comma-separated list of saved file paths | [→](docs/save-images.md) |
 
 ---
 
@@ -22,12 +23,13 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 
 ```
 Audio Timeline
-  ├── audio        ──► (audio processing)
-  ├── data_json    ──► Data Json Clip Parser (looped per clip)
-  │                        ├── audio, frame_count, first_frame, last_frame, prompt
-  │                        └── ──► generation nodes ──► frames_dir
-  └── clips_length ──► loop limit
-                                          └── frames_dir ──► Seq To Video
+  ├── trimmed_audio  ──► (audio processing)
+  ├── clips_audio    ──► (per-clip audio)
+  ├── frame_seq_dir  ──► Save Images (output directory for frame sequences)
+  ├── data_json      ──► Data Json Clip Parser (looped per clip)
+  │                          ├── audio, frame_count, first_frame, last_frame, prompt
+  │                          └── ──► generation nodes ──► Save Images ──► Seq To Video
+  └── clips_length   ──► loop limit
 ```
 
 The **Disable / Enable** feature in Audio Timeline lets you re-generate a single segment without touching the rest of the timeline — disable all other clips, re-run, then re-enable. See the [Audio Timeline doc](docs/audio-timeline.md#clip-disable--enable) for details.

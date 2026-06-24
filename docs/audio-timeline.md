@@ -43,12 +43,11 @@ Clips are always contiguous — they pack left automatically after any move, res
 |------|----------|-------------|
 | Select Start Image | — | Open image picker to assign a start keyframe |
 | Select End Image | — | Open image picker to assign an end keyframe |
-| Clear End Image | — | Remove the end keyframe assignment |
-| Copy | — | Copy this clip to the clipboard |
-| Paste | — | Paste the clipboard clip at the end of the timeline |
-| Delete | — | Remove this clip |
 | Disable / Enable | `Ctrl+B` | Toggle the clip's disabled state |
 | Disable / Enable Others | `Ctrl+G` | Disable all other clips; if all others are already disabled, re-enable them all |
+| Copy | — | Copy this clip to the internal clipboard |
+| Delete | — | Remove this clip |
+| Clear End Image | — | Remove the end keyframe assignment (visible only when an end image is set) |
 
 ### Clip disable / enable
 
@@ -94,7 +93,7 @@ The picker panel (opened via right-click → Select Start/End Image) lists all i
 
 ## Keyboard shortcuts
 
-The timeline must have focus (click anywhere on the waveform or clip track first).
+Click anywhere on the waveform or clip track to give the timeline focus. `Ctrl+B` and `Ctrl+G` work whenever a clip is selected regardless of focus.
 
 | Key | Action |
 |-----|--------|
@@ -128,7 +127,7 @@ The timeline must have focus (click anywhere on the waveform or clip track first
 
 | Name | Type | Description |
 |------|------|-------------|
-| `audio` | AUDIO | Trimmed audio extended by `trim_offset` seconds |
+| `trimmed_audio` | AUDIO | Trimmed audio extended by `trim_offset` seconds |
 | `fps` | FLOAT | Frames per second |
 | `one_shot` | BOOLEAN | One-shot flag |
 | `width` | INT | Video width |
@@ -137,6 +136,8 @@ The timeline must have focus (click anywhere on the waveform or clip track first
 | `data_json` | STRING | Full configuration as JSON (see below); only active (non-disabled) clips are included |
 | `clips_length` | INT | Number of active clips |
 | `total_frame_count` | INT | Total frame count across all active clips |
+| `clips_audio` | AUDIO | Concatenated audio segments from enabled clips only (excludes disabled clips and gaps) |
+| `frame_seq_dir` | STRING | Temp directory for frame sequences (`output/temp/capricorncd-frame-sequences`); created on first run, fully cleared on each subsequent run |
 
 ---
 
@@ -159,10 +160,20 @@ The timeline must have focus (click anywhere on the waveform or clip track first
       "end_ms": 5000,
       "start_image": "/absolute/path/to/frame_001.jpg",
       "end_image": "/absolute/path/to/frame_010.jpg",
-      "prompt": "close up portrait"
+      "prompt": "close up portrait",
+      "use_global_prompt": false
     }
   ]
 }
 ```
+
+| Clip field | Type | Description |
+|------------|------|-------------|
+| `start_ms` | number | Clip start time in milliseconds, relative to the trim start |
+| `end_ms` | number | Clip end time in milliseconds, relative to the trim start |
+| `start_image` | string | Absolute path to the start keyframe image (empty string if not set) |
+| `end_image` | string | Absolute path to the end keyframe image; in `one_shot` mode, non-last clips use the next clip's `start_image` |
+| `prompt` | string | Per-clip prompt (empty string if not set) |
+| `use_global_prompt` | boolean | `true` if the clip uses the global prompt (either explicitly set or because per-clip prompt is empty) |
 
 Disabled clips are **not** written to `clips`. The `total_frame_count` is the sum of active clip durations only.
