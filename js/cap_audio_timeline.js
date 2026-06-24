@@ -26,24 +26,25 @@ function onGlobalKeyDown(e) {
     if (isTypingTarget(e.target) && e.target.closest?.(".cat-prompt-input")) return;
     if (isTypingTarget(e.target)) return;
 
-    // Prefer the LiteGraph-selected node's UI; fall back to the last-active timeline
-    // (set on mousedown in CapAudioTimelineUI) so shortcuts work even when the user
-    // interacts with the widget without first clicking the node header to select it.
     const node = getActiveCatNode();
-    const ui = node?._catUI ?? CapAudioTimelineUI._lastActive;
-    if (!ui) return;
+    const nodeUi = node?._catUI;
 
     // Ctrl+B / Ctrl+G conflict with ComfyUI's built-in Bypass / Group keybindings.
-    // Handle them BEFORE the defaultPrevented check: ComfyUI's keybindHandler is
-    // registered on window (bubble phase) and may set defaultPrevented before our
-    // document-capture handler in some edge cases.
+    // Handle them BEFORE the defaultPrevented check, and use _lastActive as fallback
+    // so they work even when the LiteGraph node isn't selected in the canvas (users
+    // often interact with the widget without first clicking the node header).
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "b" || e.key === "g")) {
-        ui._onKeyDown(e, true);
+        const ui = nodeUi ?? CapAudioTimelineUI._lastActive;
+        if (ui) ui._onKeyDown(e, true);
         return;
     }
 
+    // For all other shortcuts (including Ctrl+C / Ctrl+V), require the LiteGraph node
+    // to be selected. Using _lastActive here would cause _copyClip / _pasteClip to fire
+    // unintentionally when the user copies or pastes ComfyUI nodes.
+    if (!nodeUi) return;
     if (e.defaultPrevented) return;
-    ui._onKeyDown(e, true);
+    nodeUi._onKeyDown(e, true);
 }
 
 const MIN_NODE_WIDTH = 480;
