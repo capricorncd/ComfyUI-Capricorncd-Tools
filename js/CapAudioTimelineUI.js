@@ -33,6 +33,12 @@ function removeContextMenu() {
 export class CapAudioTimelineUI {
 // ═════════════════════════════════════════════════════════════════════════════
 
+// Tracks the most recently interacted-with instance.
+// Used by onGlobalKeyDown as a fallback when the ComfyUI node is not selected
+// in LiteGraph (users often click directly into the widget without first
+// clicking the node header to select it in the canvas).
+static _lastActive = null;
+
 constructor(node) {
     this.node = node;
 
@@ -384,6 +390,12 @@ _bindEvents() {
     window.addEventListener("mousemove", this._onMove);
     window.addEventListener("mouseup", this._onUp);
     window.addEventListener("dragend", this._onDragEnd);
+
+    // Mark this instance as the last-active timeline on any user interaction,
+    // so keyboard shortcuts work even when the ComfyUI node isn't selected.
+    this.root.addEventListener("mousedown", () => {
+        CapAudioTimelineUI._lastActive = this;
+    }, true);
 
     // capture-phase keyboard handler: fires before ComfyUI's document-level shortcuts
     this._onKeyDownBound = e => this._onKeyDown(e);
@@ -1245,12 +1257,14 @@ _loadFromWidget() {
 
 // ── keyboard ──────────────────────────────────────────────────────────────
 
-_onKeyDown(e) {
+_onKeyDown(e, ignoreFocus = false) {
     // Keyframe prompt: let the textarea handle all keys (incl. shortcuts)
     if (e.target?.classList?.contains("cat-prompt-input")) return;
 
-    // Only handle when this timeline's root (or a child) is the active element
-    if (!this.root.contains(document.activeElement)) return;
+    // Only handle when this timeline's root (or a child) is the active element.
+    // ignoreFocus=true is passed by onGlobalKeyDown (cap_audio_timeline.js) which
+    // already verified the correct node is selected — no focus guard needed there.
+    if (!ignoreFocus && !this.root.contains(document.activeElement)) return;
 
     const isTyping = e.target?.tagName === "INPUT" || e.target?.tagName === "TEXTAREA";
     const isPrompt = e.target?.classList?.contains("cat-prompt-input");
@@ -1528,6 +1542,7 @@ _syncFromConfigure(info) {
 // ── destroy ───────────────────────────────────────────────────────────────
 
 destroy() {
+    if (CapAudioTimelineUI._lastActive === this) CapAudioTimelineUI._lastActive = null;
     this._resizeObs?.disconnect();
     this._resizeObs = null;
     this._clipElMap.clear();

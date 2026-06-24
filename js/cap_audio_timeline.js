@@ -20,16 +20,30 @@ function getActiveCatNode() {
 }
 
 function onGlobalKeyDown(e) {
-    if (e.defaultPrevented || e.repeat) return;
+    if (e.repeat) return;
     if (e.target?.classList?.contains("cat-prompt-input")) return;
     // Let prompt textarea handle its own typing
     if (isTypingTarget(e.target) && e.target.closest?.(".cat-prompt-input")) return;
     if (isTypingTarget(e.target)) return;
 
+    // Prefer the LiteGraph-selected node's UI; fall back to the last-active timeline
+    // (set on mousedown in CapAudioTimelineUI) so shortcuts work even when the user
+    // interacts with the widget without first clicking the node header to select it.
     const node = getActiveCatNode();
-    const ui = node?._catUI;
+    const ui = node?._catUI ?? CapAudioTimelineUI._lastActive;
     if (!ui) return;
-    ui._onKeyDown(e);
+
+    // Ctrl+B / Ctrl+G conflict with ComfyUI's built-in Bypass / Group keybindings.
+    // Handle them BEFORE the defaultPrevented check: ComfyUI's keybindHandler is
+    // registered on window (bubble phase) and may set defaultPrevented before our
+    // document-capture handler in some edge cases.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "b" || e.key === "g")) {
+        ui._onKeyDown(e, true);
+        return;
+    }
+
+    if (e.defaultPrevented) return;
+    ui._onKeyDown(e, true);
 }
 
 const MIN_NODE_WIDTH = 480;
