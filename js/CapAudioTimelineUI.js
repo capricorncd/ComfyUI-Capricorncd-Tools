@@ -989,10 +989,10 @@ _showContextMenu(clipId, e) {
     const items = [
         { label: "替换素材",       fn: () => this._openPicker(clipId, "startImage", "替换素材") },
         { label: "选择尾帧图片",   fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
-        { label: "删除",           fn: () => this._deleteClip(clipId) },
-        { label: "复制",           fn: () => this._copyClip(clipId) },
         { label: disableLabel,     shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
         { label: othersLabel,      shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
+        { label: "复制",           fn: () => this._copyClip(clipId) },
+        { label: "删除",           fn: () => this._deleteClip(clipId) },
     ];
     if (clip.endImage) items.push({ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) });
 

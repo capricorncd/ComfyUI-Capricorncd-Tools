@@ -57,10 +57,11 @@ class CAP_AudioTimeline:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "FLOAT", "BOOLEAN", "INT", "INT", "STRING", "STRING", "INT", "INT", "AUDIO")
+    RETURN_TYPES = ("AUDIO", "FLOAT", "BOOLEAN", "INT", "INT", "STRING", "STRING", "INT", "INT", "AUDIO", "STRING")
     RETURN_NAMES = (
         "trimmed_audio", "fps", "one_shot", "width", "height",
         "global_prompt", "data_json", "clips_length", "total_frame_count", "clips_audio",
+        "frame_seq_dir",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -68,7 +69,8 @@ class CAP_AudioTimeline:
         "Audio timeline with waveform trim, image keyframe editor, "
         "and per-clip / global prompts. "
         "trimmed_audio: full trim range (+trim_offset); "
-        "clips_audio: concatenated audio from enabled clips only."
+        "clips_audio: concatenated audio from enabled clips only; "
+        "frame_seq_dir: temp directory for frame sequences (created/cleared on each run)."
     )
 
     @classmethod
@@ -104,6 +106,17 @@ class CAP_AudioTimeline:
         s = max(0, min(int(round(start_ms / 1000 * sample_rate)), max(0, n - 1)))
         e = max(s + 1, min(int(round(end_ms / 1000 * sample_rate)), n))
         return self._pack(waveform[..., s:e], sample_rate)
+
+    def _prepare_frame_seq_dir(self) -> str:
+        import shutil
+        seq_dir = os.path.join(folder_paths.get_output_directory(), "temp", "capricorncd-frame-sequences")
+        if os.path.exists(seq_dir):
+            for name in os.listdir(seq_dir):
+                item = os.path.join(seq_dir, name)
+                shutil.rmtree(item) if os.path.isdir(item) else os.remove(item)
+        else:
+            os.makedirs(seq_dir)
+        return seq_dir
 
     def _concat_clips_audio(self, waveform, sample_rate, trim_start_ms, clips: list[dict]):
         import torch
@@ -201,6 +214,7 @@ class CAP_AudioTimeline:
         ) if resolved else 1)
 
         clips_audio_out = self._concat_clips_audio(waveform, sample_rate, start_ms, resolved)
+        frame_seq_dir = self._prepare_frame_seq_dir()
 
         data_json = json.dumps(
             {
@@ -229,6 +243,7 @@ class CAP_AudioTimeline:
             clips_length,
             total_frame_count,
             clips_audio_out,
+            frame_seq_dir,
         )
 
 
