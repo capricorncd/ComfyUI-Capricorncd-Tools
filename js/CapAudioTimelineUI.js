@@ -880,6 +880,15 @@ _trimRight(id) {
     if (id === this.selClipId) this._updatePromptContext();
 }
 
+_swapFrames(id) {
+    const c = this.clips.find(c => c.id === id);
+    if (!c) return;
+    [c.startImage, c.endImage] = [c.endImage, c.startImage];
+    this._saveClips();
+    this._renderClips();
+    if (id === this.selClipId) this._updatePromptContext();
+}
+
 _copyClip(id) {
     const c = this.clips.find(c => c.id === id);
     if (!c) return;
@@ -1016,6 +1025,7 @@ _showContextMenu(clipId, e) {
         { label: "复制",           fn: () => this._copyClip(clipId) },
         { label: "删除",           shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
     ];
+    if (clip.startImage && clip.endImage) items.splice(2, 0, { label: "交换首尾帧", fn: () => this._swapFrames(clipId) });
     if (clip.endImage) items.push({ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) });
 
     for (const { label, shortcut, fn } of items) {
