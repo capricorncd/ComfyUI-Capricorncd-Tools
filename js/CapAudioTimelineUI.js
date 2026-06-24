@@ -506,7 +506,7 @@ _initWavePlay() {
     this._waveAudio.addEventListener("timeupdate", () => this._onWaveTick());
     this._waveAudio.addEventListener("ended", () => {
         this.wPlayBtn.textContent = "▶";
-        this._seekWave(this._getTrimMs().endMs);
+        this._seekWave(this._getTrimMs().startMs);
     });
     this._waveAudio.addEventListener("pause", () => { this.wPlayBtn.textContent = "▶"; });
     this._waveAudio.addEventListener("play",  () => { this.wPlayBtn.textContent = "⏸"; });
@@ -532,13 +532,14 @@ _seekWave(ms) {
     if (!this._waveAudio || !this._waveReady) return;
     this._waveAudio.currentTime = ms / 1000;
     this.wTimeEl.textContent = formatTimecode(ms, this.getFps());
+    try { this.wavesurfer?.setTime(ms / 1000); } catch {}
 }
 
 _onWaveTick() {
     if (!this._waveAudio) return;
-    const { endMs } = this._getTrimMs();
+    const { startMs, endMs } = this._getTrimMs();
     const ms = Math.round(this._waveAudio.currentTime * 1000);
-    if (ms >= endMs) { this._waveAudio.pause(); this._seekWave(endMs); return; }
+    if (ms >= endMs) { this._waveAudio.pause(); this._seekWave(startMs); return; }
     this.wTimeEl.textContent = formatTimecode(ms, this.getFps());
     try { this.wavesurfer?.setTime(this._waveAudio.currentTime); } catch {}
 }
@@ -589,7 +590,7 @@ _initTlPlay() {
     this._tlAudio.addEventListener("loadedmetadata", () => { this._tlReady = true; this._updTlCtrl(); });
     this._tlAudio.addEventListener("error", () => { this._tlReady = false; this._updTlCtrl(); });
     this._tlAudio.addEventListener("timeupdate", () => this._onTlTick());
-    this._tlAudio.addEventListener("ended",  () => this._stopTlPlay());
+    this._tlAudio.addEventListener("ended",  () => { this._stopTlPlay(); this._setPlayhead(0); });
     this._tlAudio.addEventListener("pause",  () => { this.tPlayBtn.textContent = "▶"; });
     this._tlAudio.addEventListener("play",   () => { this.tPlayBtn.textContent = "⏸"; });
 }
@@ -614,7 +615,7 @@ _onTlTick() {
     if (!this._tlAudio) return;
     const { startMs } = this._getTrimMs();
     const rel = Math.max(0, Math.round(this._tlAudio.currentTime * 1000) - startMs);
-    if (rel >= this._tlDurMs()) { this._stopTlPlay(); return; }
+    if (rel >= this._tlDurMs()) { this._stopTlPlay(); this._setPlayhead(0); return; }
     this._setPlayhead(rel);
 }
 
@@ -1502,9 +1503,10 @@ async _loadAudio() {
         this.wavesurfer = WaveSurfer.create({
             container: this.waveEl,
             height: 72,
-            waveColor: "#4a6fa5",
-            progressColor: "#8ab4ff",
+            waveColor: "#5a9fd8",
+            progressColor: "#5a9fd8",  // same as waveColor → uniform waveform
             cursorColor: "#ffd166",
+            cursorWidth: 2,
             barWidth: 2, barGap: 1,
             normalize: true,
             backend: "WebAudio",
@@ -1537,6 +1539,17 @@ async _loadAudio() {
             console.error("[CAP_AudioTimeline]", err);
             this.loadEl.textContent = "波形加载失败";
             this.isReady = false;
+        });
+
+        // Click on waveform → seek to that position (clamped to trim) and start playback
+        this.wavesurfer.on("interaction", (clickedTimeSec) => {
+            if (!this._canWavePlay()) return;
+            const { startMs, endMs } = this._getTrimMs();
+            const ms = clamp(Math.round(clickedTimeSec * 1000), startMs, endMs - 1);
+            this._seekWave(ms);  // syncs _waveAudio + wavesurfer cursor
+            if (this._waveAudio.paused) {
+                this._waveAudio.play().catch(() => {});
+            }
         });
 
         const { peaks, duration } = await this._fetchPeaks(url);
