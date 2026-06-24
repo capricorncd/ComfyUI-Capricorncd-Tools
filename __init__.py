@@ -20,6 +20,10 @@ from .cap_seq_to_video import (
     NODE_CLASS_MAPPINGS as _STV_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _STV_NAMES,
 )
+from .cap_save_images import (
+    NODE_CLASS_MAPPINGS as _CSI_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CSI_NAMES,
+)
 from .timecode import (
     IMAGE_EXTENSIONS,
     list_keyframe_files_ordered,
@@ -34,6 +38,7 @@ NODE_CLASS_MAPPINGS = {
     **_CAT_CLASS,
     **_CDP_CLASS,
     **_STV_CLASS,
+    **_CSI_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -42,6 +47,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CAT_NAMES,
     **_CDP_NAMES,
     **_STV_NAMES,
+    **_CSI_NAMES,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
