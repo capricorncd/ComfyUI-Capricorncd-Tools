@@ -26,7 +26,7 @@ Each clip represents one generation segment: a time range, a start keyframe imag
 
 | Method | Behaviour |
 |--------|-----------|
-| `＋ Add Image` button | Opens the OS file browser; the selected image is uploaded and a clip is placed at the current playhead position |
+| `＋ Add Image` button | Opens the image picker; the selected image is added and a clip is placed at the current playhead position |
 | Double-click the track | Adds a clip at that time position (no image assigned) |
 
 Clips are always contiguous — they pack left automatically after any move, resize, or delete.
@@ -34,20 +34,21 @@ Clips are always contiguous — they pack left automatically after any move, res
 **Clip thumbnails and badges**
 
 - Thumbnail shows the start keyframe image if assigned
-- `[S]` badge: only a start frame is assigned; click the badge to preview it
-- `[S/E]` badge: both start and end frames are assigned; click to preview both
+- `[首]` badge: only a start frame is assigned; hover to preview it
+- `[首尾]` badge: both start and end frames are assigned; hover to preview both
 
 **Right-click context menu**
 
 | Item | Shortcut | Description |
 |------|----------|-------------|
-| Select Start Image | — | Open image picker to assign a start keyframe |
-| Select End Image | — | Open image picker to assign an end keyframe |
+| 替换素材 | — | Open image picker to replace the start keyframe |
+| 选择尾帧图片 | — | Open image picker to assign an end keyframe |
+| 首尾帧交换 | — | Swap start and end keyframe images (visible only when both are set) |
 | Disable / Enable | `Ctrl+B` | Toggle the clip's disabled state |
 | Disable / Enable Others | `Ctrl+G` | Disable all other clips; if all others are already disabled, re-enable them all |
-| Copy | — | Copy this clip to the internal clipboard |
-| Delete | — | Remove this clip |
-| Clear End Image | — | Remove the end keyframe assignment (visible only when an end image is set) |
+| 复制 | — | Copy this clip to the internal clipboard |
+| 删除 | `Delete` | Remove this clip |
+| 清除尾帧图片 | — | Remove the end keyframe assignment (visible only when an end image is set) |
 
 ### Clip disable / enable
 
@@ -73,12 +74,15 @@ Disabled clips:
 
 ---
 
-## Image picker
+## Assets directory (`assets_dir`)
 
-The picker panel (opened via right-click → Select Start/End Image) lists all images found in `keyframe_dir`.
+`assets_dir` is the shared resource directory for both **audio files** and **keyframe images**.
 
-- **↻ Refresh** re-scans the directory without closing the picker
-- **Browse from disk** uploads an image from anywhere on disk and adds it to the list
+- The image picker lists all image files found in this directory
+- On Import, the audio filename stored in the exported JSON is resolved relative to this directory
+- A `！` hint icon appears next to the input field — hover over it for a reminder
+
+**↻ Refresh** re-scans the directory without closing the picker.
 
 ---
 
@@ -86,8 +90,8 @@ The picker panel (opened via right-click → Select Start/End Image) lists all i
 
 | Button | Behaviour |
 |--------|-----------|
-| **Export** | Saves the full timeline configuration (all widget values + clip list) as `{audio-stem}_{yyyyMMdd_HHmmss}.json` |
-| **Import** | Restores widget values and clip list from a previously exported `.json` file |
+| **Export** | Saves the full timeline configuration (all widget values including `audio` filename + clip list) as `{audio-stem}_{yyyyMMdd_HHmmss}.json` |
+| **Import** | Restores all widget values (including audio) and the clip list from a previously exported `.json` file; triggers waveform reload automatically |
 
 ---
 
@@ -118,7 +122,7 @@ Click anywhere on the waveform or clip track to give the timeline focus. `Ctrl+B
 | `fps` | FLOAT | 24.0 | Frames per second |
 | `width` | INT | 720 | Output video width (passed through to `data_json`) |
 | `height` | INT | 1280 | Output video height (passed through to `data_json`) |
-| `keyframe_dir` | STRING | — | Directory containing keyframe images for the picker |
+| `assets_dir` | STRING | — | Directory containing keyframe images and audio files; used by the image picker and during import |
 | `one_shot` | BOOLEAN | true | In one-shot mode each non-last clip's end frame is automatically set to the next clip's start frame |
 | `global_prompt` | STRING | — | Default prompt for clips that have no per-clip prompt |
 | `trim_offset` | INT | 1 | Extra seconds appended to the `AUDIO` output end time for fade/overlap; does **not** affect `data_json` timings or frame counts |
