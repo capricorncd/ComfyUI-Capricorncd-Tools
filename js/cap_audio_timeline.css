@@ -574,7 +574,7 @@
 .cat-picker-item img {
     width: 100%;
     height: 48px;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
 }
 .cat-picker-name {

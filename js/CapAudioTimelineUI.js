@@ -79,7 +79,7 @@ constructor(node) {
     this._initWavePlay();
     this._initTlPlay();
     this._loadFromWidget();
-    const dir = this._w("keyframe_dir")?.value;
+    const dir = this._w("assets_dir")?.value;
     if (dir) this._scheduleDir();
 }
 
@@ -88,7 +88,7 @@ constructor(node) {
 _w(name) { return this.node.widgets?.find(w => w.name === name); }
 getFps()  { return Math.max(1, parseInt(this._w("fps")?.value ?? 24, 10) || 24); }
 getOneShot() { return !!this._w("one_shot")?.value; }
-_dir()    { return String(this._w("keyframe_dir")?.value ?? "").trim(); }
+_dir()    { return String(this._w("assets_dir")?.value ?? "").trim(); }
 _frameMs(){ return Math.max(1, Math.round(1000 / this.getFps())); }
 
 // ── DOM build ─────────────────────────────────────────────────────────────
@@ -292,7 +292,7 @@ _bindWidgets() {
         };
     }
 
-    const dirW = this._w("keyframe_dir");
+    const dirW = this._w("assets_dir");
     if (dirW) {
         const orig = dirW.callback;
         dirW.callback = v => { orig?.(v); this._scheduleDir(); };
@@ -927,6 +927,16 @@ _pasteClip() {
     this._saveClips();
 }
 
+_swapKeyframes(id) {
+    const c = this.clips.find(c => c.id === id);
+    if (!c) return;
+    const tmp = c.startImage;
+    c.startImage = c.endImage;
+    c.endImage = tmp;
+    this._saveClips();
+    this._renderClips();
+}
+
 _toggleDisable(id) {
     const c = this.clips.find(c => c.id === id);
     if (!c) return;
@@ -1045,6 +1055,7 @@ _showContextMenu(clipId, e) {
         { label: "复制",           fn: () => this._copyClip(clipId) },
         { label: "删除",           shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
     ];
+    if (clip.startImage || clip.endImage) items.splice(2, 0, { label: "首尾帧交换", fn: () => this._swapKeyframes(clipId) });
     if (clip.endImage) items.push({ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) });
 
     for (const { label, shortcut, fn } of items) {
@@ -1099,7 +1110,7 @@ _hideFramePreview() {
 }
 
 _getKeyframeDir() {
-    return this.node.widgets?.find(w => w.name === "keyframe_dir")?.value ?? "";
+    return this.node.widgets?.find(w => w.name === "assets_dir")?.value ?? "";
 }
 
 // ── image picker ──────────────────────────────────────────────────────────
@@ -1128,7 +1139,7 @@ _renderPickerGrid() {
     if (!this._imgFiles.length) {
         const msg = document.createElement("div");
         msg.className = "cat-picker-empty";
-        msg.textContent = this._dir() ? "目录中无图片" : "请先设置 keyframe_dir";
+        msg.textContent = this._dir() ? "目录中无图片" : "请先设置 assets_dir";
         this.pickerGrid.appendChild(msg);
         return;
     }
@@ -1198,12 +1209,13 @@ async _fetchImages() {
 _exportJson() {
     const wv = name => this._w(name)?.value ?? null;
     const data = {
+        audio:         wv("audio"),
         start_time:    wv("start_time"),
         end_time:      wv("end_time"),
         fps:           wv("fps"),
         width:         wv("width"),
         height:        wv("height"),
-        keyframe_dir:  wv("keyframe_dir"),
+        assets_dir:  wv("assets_dir"),
         one_shot:      wv("one_shot"),
         global_prompt: wv("global_prompt"),
         clips: this.clips.map(c => ({
@@ -1243,9 +1255,13 @@ _importJson(e) {
             set("height",        data.height);
             set("one_shot",      data.one_shot);
             set("global_prompt", data.global_prompt);
-            set("keyframe_dir",  data.keyframe_dir);
+            set("assets_dir",  data.assets_dir);
             if (data.start_time != null) { set("start_time", data.start_time); this.sIn.value = data.start_time; }
             if (data.end_time   != null) { set("end_time",   data.end_time);   this.eIn.value = data.end_time; }
+            if (data.audio != null) {
+                const audioW = this._w("audio");
+                if (audioW) { audioW.value = data.audio; audioW.callback?.(data.audio); }
+            }
             if (Array.isArray(data.clips)) {
                 this.clips = data.clips.map(c => ({
                     id:         uid(),
@@ -1259,7 +1275,7 @@ _importJson(e) {
                 }));
                 this._saveClips();
             }
-            if (data.keyframe_dir) this._scheduleDir();
+            if (data.assets_dir) this._scheduleDir();
             if (this.isReady) this._renderTimeline();
             this._updatePromptContext();
         } catch (err) {
@@ -1598,7 +1614,7 @@ _syncFromConfigure(info) {
         this._loadTimer = setTimeout(() => this._loadAudio(), 120);
     }
 
-    // Also refresh keyframe_dir if set
+    // Also refresh assets_dir if set
     if (this._dir()) this._scheduleDir();
 }
 

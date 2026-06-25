@@ -28,7 +28,7 @@
       "fps":            { "name": "FPS" },
       "width":          { "name": "Width" },
       "height":         { "name": "Height" },
-      "keyframe_dir":   { "name": "Keyframe Dir" },
+      "assets_dir":     { "name": "Assets Dir" },
       "one_shot":       { "name": "One Shot" },
       "global_prompt":  { "name": "Global Prompt" },
       "clips_json":     { "name": "Clips JSON" },

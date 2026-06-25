@@ -60,7 +60,7 @@ def format_timecode(ms: int, fps: int = 24) -> str:
     return f"{minutes:02d}:{sec_part}"
 
 
-def resolve_keyframe_dir(path: str) -> str:
+def resolve_assets_dir(path: str) -> str:
     """Resolve keyframe directory to an absolute path under ComfyUI folders when relative."""
     import folder_paths
     import os
@@ -97,7 +97,7 @@ def list_keyframe_files_ordered(directory: str) -> list[str]:
     """List image files in directory, ordered for use as keyframe sequence (index 0, 1, 2…)."""
     import os
 
-    directory = resolve_keyframe_dir(directory)
+    directory = resolve_assets_dir(directory)
     if not directory or not os.path.isdir(directory):
         return []
 

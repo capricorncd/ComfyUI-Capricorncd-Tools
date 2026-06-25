@@ -27,7 +27,7 @@ from .cap_save_images import (
 from .timecode import (
     IMAGE_EXTENSIONS,
     list_keyframe_files_ordered,
-    resolve_keyframe_dir,
+    resolve_assets_dir,
 )
 
 WEB_DIRECTORY = "./js"
@@ -65,7 +65,7 @@ def _register_routes():
     @routes.get("/audio_keyframe_timeline/keyframes")
     async def api_list_keyframes(request: web.Request) -> web.Response:
         directory = request.rel_url.query.get("dir", "")
-        resolved = resolve_keyframe_dir(directory)
+        resolved = resolve_assets_dir(directory)
         files = list_keyframe_files_ordered(directory)
         return web.json_response({"files": files, "resolved_dir": resolved, "count": len(files)})
 
@@ -73,7 +73,7 @@ def _register_routes():
     async def api_keyframe_image(request: web.Request) -> web.Response:
         directory = request.rel_url.query.get("dir", "")
         name = request.rel_url.query.get("name", "")
-        resolved = resolve_keyframe_dir(directory)
+        resolved = resolve_assets_dir(directory)
         if not resolved or not name:
             return web.Response(status=400, text="Missing dir or name")
         safe_name = os.path.basename(name)

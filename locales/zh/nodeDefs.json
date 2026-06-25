@@ -28,7 +28,7 @@
       "fps":            { "name": "帧率" },
       "width":          { "name": "宽度" },
       "height":         { "name": "高度" },
-      "keyframe_dir":   { "name": "关键帧目录" },
+      "assets_dir":     { "name": "资源目录" },
       "one_shot":       { "name": "一镜到底" },
       "global_prompt":  { "name": "全局提示词" },
       "clips_json":     { "name": "片段数据" },

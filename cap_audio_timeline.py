@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 import os
 import folder_paths
-from .timecode import parse_timecode, resolve_keyframe_dir
+from .timecode import parse_timecode, resolve_assets_dir
 
 
 def _strip_comment_lines(text: str) -> str:
@@ -38,7 +38,7 @@ class CAP_AudioTimeline:
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
                 "width": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
                 "height": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
-                "keyframe_dir": ("STRING", {"default": "", "multiline": False}),
+                "assets_dir": ("STRING", {"default": "", "multiline": False}),
                 "one_shot": ("BOOLEAN", {"default": True}),
                 "global_prompt": (
                     "STRING",
@@ -75,9 +75,9 @@ class CAP_AudioTimeline:
 
     @classmethod
     def IS_CHANGED(cls, audio, start_time, end_time, fps, width, height,
-                   keyframe_dir, one_shot, global_prompt, clips_json, trim_offset, **_):
+                   assets_dir, one_shot, global_prompt, clips_json, trim_offset, **_):
         return (audio, start_time, end_time, fps, width, height,
-                keyframe_dir, one_shot, global_prompt, clips_json, trim_offset)
+                assets_dir, one_shot, global_prompt, clips_json, trim_offset)
 
     @classmethod
     def VALIDATE_INPUTS(cls, audio, **_):
@@ -134,7 +134,7 @@ class CAP_AudioTimeline:
         return self._pack(torch.cat(segments, dim=-1), sample_rate)
 
     def execute(self, audio, audioUI, start_time, end_time, fps, width, height,
-                keyframe_dir, one_shot, global_prompt, clips_json, trim_offset=1):
+                assets_dir, one_shot, global_prompt, clips_json, trim_offset=1):
         del audioUI
         fps = max(1.0, float(fps))
         width = max(1, int(width))
@@ -161,7 +161,7 @@ class CAP_AudioTimeline:
             clips = []
 
         # Resolve image paths to absolute paths for data_json
-        img_dir = resolve_keyframe_dir(keyframe_dir) if keyframe_dir else ""
+        img_dir = resolve_assets_dir(assets_dir) if assets_dir else ""
 
         def resolve_img(name: str) -> str:
             if not name:
