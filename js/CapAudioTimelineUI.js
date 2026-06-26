@@ -937,6 +937,31 @@ _swapKeyframes(id) {
     this._renderClips();
 }
 
+_splitClip(id) {
+    const c = this.clips.find(c => c.id === id);
+    if (!c) return;
+    const ms = this.playheadMs;
+    if (ms <= c.startMs || ms >= c.endMs) return;
+    const left = {
+        id: uid(), startMs: c.startMs, endMs: ms,
+        startImage: c.startImage, endImage: null,
+        prompt: c.prompt, useGlobalPrompt: c.useGlobalPrompt, disabled: c.disabled,
+    };
+    const right = {
+        id: uid(), startMs: ms, endMs: c.endMs,
+        startImage: null, endImage: c.endImage,
+        prompt: c.prompt, useGlobalPrompt: c.useGlobalPrompt, disabled: c.disabled,
+    };
+    const idx = this.clips.findIndex(c => c.id === id);
+    this.clips.splice(idx, 1, left, right);
+    if (this.selClipId === id) this.selClipId = left.id;
+    this._packClips();
+    this._saveClips();
+    this._renderClips();
+    this._updTlCtrl();
+    this._updatePromptContext();
+}
+
 _toggleDisable(id) {
     const c = this.clips.find(c => c.id === id);
     if (!c) return;
@@ -1047,16 +1072,18 @@ _showContextMenu(clipId, e) {
     const others = this.clips.filter(c => c.id !== clipId);
     const othersAllDisabled = others.length > 0 && others.every(c => c.disabled);
     const othersLabel = othersAllDisabled ? "Enable Others" : "Disable Others";
+    const canSplit = this.playheadMs > clip.startMs && this.playheadMs < clip.endMs;
     const items = [
-        { label: "替换素材",       fn: () => this._openPicker(clipId, "startImage", "替换素材") },
-        { label: "选择尾帧图片",   fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
-        { label: disableLabel,     shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
-        { label: othersLabel,      shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
-        { label: "复制",           fn: () => this._copyClip(clipId) },
-        { label: "删除",           shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
+        { label: "替换素材",     fn: () => this._openPicker(clipId, "startImage", "替换素材") },
+        { label: "选择尾帧图片", fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
+        ...(clip.startImage && clip.endImage ? [{ label: "首尾帧交换", fn: () => this._swapKeyframes(clipId) }] : []),
+        ...(canSplit ? [{ label: "分割素材", fn: () => this._splitClip(clipId) }] : []),
+        { label: disableLabel,   shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
+        { label: othersLabel,    shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
+        { label: "复制",         fn: () => this._copyClip(clipId) },
+        { label: "删除",         shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
+        ...(clip.endImage ? [{ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) }] : []),
     ];
-    if (clip.startImage || clip.endImage) items.splice(2, 0, { label: "首尾帧交换", fn: () => this._swapKeyframes(clipId) });
-    if (clip.endImage) items.push({ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) });
 
     for (const { label, shortcut, fn } of items) {
         const div = document.createElement("div");

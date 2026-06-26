@@ -44,6 +44,7 @@ Clips are always contiguous — they pack left automatically after any move, res
 | 替换素材 | — | Open image picker to replace the start keyframe |
 | 选择尾帧图片 | — | Open image picker to assign an end keyframe |
 | 首尾帧交换 | — | Swap start and end keyframe images (visible only when both are set) |
+| 分割素材 | — | Split the clip at the current playhead position into two clips; left clip keeps the start keyframe, right clip keeps the end keyframe (visible only when the playhead is inside the clip) |
 | Disable / Enable | `Ctrl+B` | Toggle the clip's disabled state |
 | Disable / Enable Others | `Ctrl+G` | Disable all other clips; if all others are already disabled, re-enable them all |
 | 复制 | — | Copy this clip to the internal clipboard |
