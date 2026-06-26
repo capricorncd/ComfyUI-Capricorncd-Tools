@@ -4,6 +4,8 @@
 
 A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) focused on prompt editing, audio/image keyframe timeline editing, and video compositing.
 
+![Audio Timeline/ComfyUI-Capricorncd-Tools](docs/audio-timeline-00.jpg)
+
 ---
 
 ## Nodes
