@@ -273,9 +273,19 @@
     z-index: 0;
 }
 .cat-clip-thumb img {
+    position: relative;
+    z-index: 2;
     height: 100%;
     width: auto;
     display: block;
+}
+
+.cat-clip-thumb img + img {
+    z-index: 1;
+    height: 100%;
+    width: auto;
+    position: absolute;
+    right: 0; top: 0;
 }
 
 /* filename overlay at the bottom */

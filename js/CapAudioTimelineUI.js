@@ -704,6 +704,15 @@ _createClipElement(clip) {
         thumb.appendChild(img);
     }
 
+    if (clip.endImage) {
+        const img = document.createElement("img");
+        img.src = this._imgUrl(clip.endImage);
+        img.alt = "";
+        img.draggable = false;
+        img.onerror = () => img.remove();
+        thumb.appendChild(img);
+    }
+
     const lbl = document.createElement("div");
     lbl.className = "cat-clip-lbl";
     const fname = clip.startImage?.split(/[\\/]/).pop() ?? "（未选图片）";
