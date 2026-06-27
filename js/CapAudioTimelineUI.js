@@ -1419,11 +1419,13 @@ _onKeyDown(e, ignoreFocus = false) {
     }
     if (e.ctrlKey && e.key === "c" && this.selClipId) {
         this._copyClip(this.selClipId);
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+        return;
     }
     if (e.ctrlKey && e.key === "v") {
         this._pasteClip();
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
+        return;
     }
     if (e.key === "Escape") {
         this._deselectAll();
