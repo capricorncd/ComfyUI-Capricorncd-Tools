@@ -75,10 +75,6 @@ function markNoSerialize(node) {
         if (w.name === "audioUI" || w.name === "cat_ui") {
             w.serialize = false;
         }
-        // Canvas widgets — hide by type so LiteGraph skips draw + height
-        if (w.name === "start_time" || w.name === "end_time") {
-            w.type = "hidden";
-        }
         // DOM widgets (textarea) — hide element + zero out size
         if (w.name === "clips_json") {
             if (w.element) w.element.style.display = "none";
