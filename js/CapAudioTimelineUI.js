@@ -60,6 +60,7 @@ constructor(node) {
     // timeline
     this.clips = [];
     this.selClipId = null;
+    this.selClipIds = new Set();
     this.playheadMs = 0;
     this._tlAudio = null;
     this._tlReady = false;
@@ -367,6 +368,7 @@ _bindEvents() {
         const ms = this._tlPxToMs(e.clientX);
         this._setPlayhead(clamp(ms, 0, this._tlDurMs()));
         this.selClipId = null;
+        this.selClipIds.clear();
         this._renderClips();
         this._updatePromptContext();
     });
@@ -744,12 +746,15 @@ _createClipElement(clip) {
         if (e.target.classList.contains("cat-resize-hdl")) return;
         e.preventDefault();
         e.stopPropagation();
-        this._selectClip(clip.id);
-        this._dragState = {
-            type: "move", clipId: clip.id,
-            originMs: this._tlPxToMs(e.clientX),
-            os: clip.startMs, oe: clip.endMs,
-        };
+        const multi = e.ctrlKey || e.metaKey;
+        this._selectClip(clip.id, multi);
+        if (!multi) {
+            this._dragState = {
+                type: "move", clipId: clip.id,
+                originMs: this._tlPxToMs(e.clientX),
+                os: clip.startMs, oe: clip.endMs,
+            };
+        }
     });
 
     rh.addEventListener("mousedown", e => {
@@ -790,7 +795,7 @@ _layoutClips({ animate = false, dragId = null } = {}) {
         const width = Math.max(4, (clip.endMs - clip.startMs) * pxPerMs);
         const isDragged = dragId != null && clip.id === dragId;
 
-        el.classList.toggle("selected", clip.id === this.selClipId);
+        el.classList.toggle("selected", this.selClipIds.has(clip.id));
         el.classList.toggle("cat-clip-disabled", !!clip.disabled);
         el.classList.toggle("cat-clip-dragging", isDragged);
         el.classList.toggle("cat-clip-anim", animate && !isDragged);
@@ -826,8 +831,21 @@ _renderPlayhead() {
 
 // ── clip operations ───────────────────────────────────────────────────────
 
-_selectClip(id) {
-    this.selClipId = id;
+_selectClip(id, addToSelection = false) {
+    if (addToSelection) {
+        if (this.selClipIds.has(id)) {
+            this.selClipIds.delete(id);
+            this.selClipId = this.selClipIds.size > 0
+                ? [...this.selClipIds].at(-1) : null;
+        } else {
+            this.selClipIds.add(id);
+            this.selClipId = id;
+        }
+    } else {
+        this.selClipIds.clear();
+        this.selClipIds.add(id);
+        this.selClipId = id;
+    }
     this._selTrim = null;
     this._selPlayhead = false;
     this._updateTrimUI();
@@ -840,6 +858,7 @@ _selectClip(id) {
 
 _deselectAll() {
     this.selClipId = null;
+    this.selClipIds.clear();
     this._selTrim = null;
     this._selPlayhead = false;
     this._updateTrimUI();
@@ -871,7 +890,8 @@ _confirmDeleteClip(id) {
 
 _deleteClip(id) {
     this.clips = this.clips.filter(c => c.id !== id);
-    if (this.selClipId === id) { this.selClipId = null; this._updatePromptContext(); }
+    this.selClipIds.delete(id);
+    if (this.selClipId === id) { this.selClipId = this.selClipIds.size > 0 ? [...this.selClipIds].at(-1) : null; this._updatePromptContext(); }
     this._packClips();
     this._saveClips();
     this._renderClips();
@@ -883,6 +903,7 @@ _clearTimeline() {
     if (!this._confirmAction("确定要清空时间轴上的所有素材吗？")) return;
     this.clips = [];
     this.selClipId = null;
+    this.selClipIds.clear();
     this._updatePromptContext();
     this._saveClips();
     this._renderClips();
@@ -982,10 +1003,53 @@ _toggleDisable(id) {
 _disableOthers(id) {
     const others = this.clips.filter(c => c.id !== id);
     if (!others.length) return;
-    // All others disabled → enable all; otherwise disable all
     const target = others.every(c => c.disabled) ? false : true;
     let changed = false;
     for (const c of others) {
+        if (c.disabled !== target) { c.disabled = target; changed = true; }
+    }
+    if (changed) { this._saveClips(); this._renderClips(); }
+}
+
+_areContiguous(ids) {
+    if (ids.length < 2) return true;
+    const idSet = new Set(ids);
+    const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
+    const indices = sorted.reduce((acc, c, i) => { if (idSet.has(c.id)) acc.push(i); return acc; }, []);
+    if (indices.length !== ids.length) return false;
+    for (let i = 1; i < indices.length; i++) {
+        if (indices[i] !== indices[i - 1] + 1) return false;
+    }
+    return true;
+}
+
+_mergeSelected() {
+    if (this.selClipIds.size < 2) return;
+    const idSet = this.selClipIds;
+    const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
+    const selected = sorted.filter(c => idSet.has(c.id));
+    if (selected.length < 2 || !this._areContiguous([...idSet])) return;
+    const first = selected[0];
+    const last  = selected[selected.length - 1];
+    first.endMs = last.endMs;
+    const toRemove = new Set(selected.slice(1).map(c => c.id));
+    this.clips = this.clips.filter(c => !toRemove.has(c.id));
+    this.selClipIds.clear();
+    this.selClipIds.add(first.id);
+    this.selClipId = first.id;
+    this._packClips();
+    this._saveClips();
+    this._renderClips();
+    this._updTlCtrl();
+    this._updatePromptContext();
+}
+
+_toggleDisableSelected() {
+    if (!this.selClipIds.size) return;
+    const selected = this.clips.filter(c => this.selClipIds.has(c.id));
+    const target = selected.every(c => c.disabled) ? false : true;
+    let changed = false;
+    for (const c of selected) {
         if (c.disabled !== target) { c.disabled = target; changed = true; }
     }
     if (changed) { this._saveClips(); this._renderClips(); }
@@ -1068,14 +1132,46 @@ _onUseGlobalChange() {
 
 // ── context menu ──────────────────────────────────────────────────────────
 
-_showContextMenu(clipId, e) {
-    removeContextMenu();
-    const clip = this.clips.find(c => c.id === clipId);
-    if (!clip) return;
-
+_buildMenu(items, e) {
     const menu = document.createElement("div");
     menu.className = "cat-ctx-menu";
     menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:9999`;
+    for (const { label, shortcut, fn } of items) {
+        const div = document.createElement("div");
+        div.className = "cat-ctx-item";
+        if (shortcut) {
+            div.innerHTML = `<span>${label}</span><span class="cat-ctx-key">${shortcut}</span>`;
+        } else {
+            div.textContent = label;
+        }
+        div.addEventListener("click", () => { fn(); removeContextMenu(); });
+        menu.appendChild(div);
+    }
+    document.body.appendChild(menu);
+    setTimeout(() => document.addEventListener("click", removeContextMenu, { once: true }), 0);
+}
+
+_showContextMenu(clipId, e) {
+    removeContextMenu();
+    if (!this.clips.some(c => c.id === clipId)) return;
+
+    // Multi-select menu when right-clicking on a selected clip in a multi-selection
+    if (this.selClipIds.size > 1 && this.selClipIds.has(clipId)) {
+        const selectedIds = [...this.selClipIds];
+        const allDisabled = selectedIds.every(id => this.clips.find(c => c.id === id)?.disabled);
+        const canMerge = this._areContiguous(selectedIds);
+        const items = [
+            ...(canMerge ? [{ label: "合并", fn: () => this._mergeSelected() }] : []),
+            { label: allDisabled ? "启用选中项" : "禁用选中项", shortcut: "Ctrl+B", fn: () => this._toggleDisableSelected() },
+        ];
+        this._buildMenu(items, e);
+        return;
+    }
+
+    // Single-select menu (ensure only this clip is selected)
+    if (this.selClipId !== clipId) this._selectClip(clipId);
+    const clip = this.clips.find(c => c.id === clipId);
+    if (!clip) return;
 
     const disableLabel = clip.disabled ? "Enable" : "Disable";
     const others = this.clips.filter(c => c.id !== clipId);
@@ -1093,20 +1189,7 @@ _showContextMenu(clipId, e) {
         { label: "删除",         shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
         ...(clip.endImage ? [{ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) }] : []),
     ];
-
-    for (const { label, shortcut, fn } of items) {
-        const div = document.createElement("div");
-        div.className = "cat-ctx-item";
-        if (shortcut) {
-            div.innerHTML = `<span>${label}</span><span class="cat-ctx-key">${shortcut}</span>`;
-        } else {
-            div.textContent = label;
-        }
-        div.addEventListener("click", () => { fn(); removeContextMenu(); });
-        menu.appendChild(div);
-    }
-    document.body.appendChild(menu);
-    setTimeout(() => document.addEventListener("click", removeContextMenu, { once: true }), 0);
+    this._buildMenu(items, e);
 }
 
 // ── frame preview (badge hover) ───────────────────────────────────────────
@@ -1408,7 +1491,8 @@ _onKeyDown(e, ignoreFocus = false) {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
     }
     if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "b" && this.selClipId) {
-        this._toggleDisable(this.selClipId);
+        if (this.selClipIds.size > 1) this._toggleDisableSelected();
+        else this._toggleDisable(this.selClipId);
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
         return;
     }
