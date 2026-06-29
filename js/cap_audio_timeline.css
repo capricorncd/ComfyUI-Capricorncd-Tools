@@ -176,7 +176,7 @@
     height: 26px;
 }
 
-.cat-tl-body { display: flex; height: 110px; gap: 0; }
+.cat-tl-body { display: flex; height: 150px; gap: 0; }
 
 .cat-tl-scroll {
     flex: 1;
@@ -222,6 +222,14 @@
 
 .cat-tl-tracks { display: flex; flex-direction: column; }
 
+/* Overlay (sub) track: above main, half height, z-index 2 layer */
+.cat-overlay-track {
+    height: 40px;
+    position: relative;
+    background: #100d18;
+    border-bottom: 1px solid #2a2a2a;
+}
+
 .cat-clip-track {
     height: 80px;
     position: relative;
@@ -252,6 +260,18 @@
 }
 .cat-clip:hover { border-color: #6090c0; }
 .cat-clip.selected {
+    border-color: #ffd166;
+    box-shadow: 0 0 0 1px #ffd16633;
+}
+
+/* Overlay (sub) track clips — distinct purple tint, z-index 2 */
+.cat-clip.cat-clip-overlay {
+    top: 3px; bottom: 3px;
+    background: #3a2a52;
+    border-color: #7a5aa0;
+}
+.cat-clip.cat-clip-overlay:hover { border-color: #a786d6; }
+.cat-clip.cat-clip-overlay.selected {
     border-color: #ffd166;
     box-shadow: 0 0 0 1px #ffd16633;
 }

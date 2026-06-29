@@ -55,7 +55,7 @@ function onGlobalKeyDown(e) {
 }
 
 const MIN_NODE_WIDTH = 480;
-const MIN_NODE_HEIGHT = 440;
+const MIN_NODE_HEIGHT = 480;
 
 function clampAbsMin(size) {
     return [

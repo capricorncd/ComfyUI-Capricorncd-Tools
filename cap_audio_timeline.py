@@ -18,6 +18,25 @@ def _clip_use_global_prompt(clip: dict) -> bool:
     return not bool(_strip_comment_lines(clip.get("prompt") or "").strip())
 
 
+def _subtract_intervals(start: int, end: int, cuts: list[tuple[int, int]]):
+    """Return the parts of [start, end) not covered by any interval in `cuts`."""
+    pieces = []
+    cur = start
+    for a, b in sorted(cuts):
+        a = max(a, start)
+        b = min(b, end)
+        if b <= cur:
+            continue
+        if a > cur:
+            pieces.append((cur, a))
+        cur = max(cur, b)
+        if cur >= end:
+            break
+    if cur < end:
+        pieces.append((cur, end))
+    return pieces
+
+
 def _list_audio_files():
     input_dir = folder_paths.get_input_directory()
     files = folder_paths.filter_files_content_types(os.listdir(input_dir), ["audio", "video"])
@@ -49,7 +68,7 @@ class CAP_AudioTimeline:
                     {
                         "default": "[]",
                         "multiline": True,
-                        "tooltip": "JSON: [{start_ms, end_ms, start_image, end_image, prompt, use_global_prompt}, ...] Times are relative to trimmed audio start.",
+                        "tooltip": "JSON: [{start_ms, end_ms, start_image, end_image, prompt, use_global_prompt, track, z_index}, ...] Times are relative to trimmed audio start. track 1 = overlay sub-track (z_index 2) that occludes the main track beneath it.",
                     },
                 ),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
@@ -170,28 +189,58 @@ class CAP_AudioTimeline:
                 return os.path.join(img_dir, name)
             return name
 
-        # Build resolved clips with start/end images before applying end_image rules
-        # Skip disabled clips entirely
-        resolved = [
-            {
-                "start_ms": c.get("start_ms", 0),
-                "end_ms": c.get("end_ms", 0),
+        def base_clip(c: dict, z_index: int) -> dict:
+            return {
                 "start_image": resolve_img(c.get("start_image") or ""),
                 "end_image": resolve_img(c.get("end_image") or ""),
                 "prompt": _strip_comment_lines(c.get("prompt") or ""),
                 "use_global_prompt": _clip_use_global_prompt(c),
+                "z_index": z_index,
             }
-            for c in clips
-            if not c.get("disabled", False)
+
+        # Split clips by track: main (track 0/absent) is the base layer; the overlay
+        # (track 1) sub-track sits on top with z_index 2 and occludes the main track.
+        main_clips = [c for c in clips if int(c.get("track", 0) or 0) != 1]
+        overlay_clips = [c for c in clips if int(c.get("track", 0) or 0) == 1]
+
+        # Enabled overlay intervals occlude main-track clips beneath them.
+        enabled_overlays = [c for c in overlay_clips if not c.get("disabled", False)]
+        overlay_cuts = [
+            (int(c.get("start_ms", 0)), int(c.get("end_ms", 0)))
+            for c in enabled_overlays
         ]
 
-        # Apply end_image rules per one_shot mode
+        # Build the flattened segment list (disabled clips contribute nothing).
+        segments = []
+        # Overlay segments — output as-is, z_index 2.
+        for c in enabled_overlays:
+            seg = base_clip(c, 2)
+            seg["start_ms"] = int(c.get("start_ms", 0))
+            seg["end_ms"] = int(c.get("end_ms", 0))
+            segments.append(seg)
+        # Main segments — occluded ranges removed, z_index 1.
+        for c in main_clips:
+            if c.get("disabled", False):
+                continue
+            s = int(c.get("start_ms", 0))
+            e = int(c.get("end_ms", 0))
+            for ps, pe in _subtract_intervals(s, e, overlay_cuts):
+                if pe <= ps:
+                    continue
+                seg = base_clip(c, 1)
+                seg["start_ms"] = ps
+                seg["end_ms"] = pe
+                segments.append(seg)
+
+        segments.sort(key=lambda r: (r["start_ms"], r["z_index"]))
+
+        # Apply end_image rules per one_shot mode over the flattened timeline.
         clips_for_json = []
-        last_idx = len(resolved) - 1
-        for i, r in enumerate(resolved):
+        last_idx = len(segments) - 1
+        for i, r in enumerate(segments):
             if one_shot and i < last_idx:
                 # One-shot: non-last clip's end frame = next clip's start frame
-                end_image = resolved[i + 1]["start_image"]
+                end_image = segments[i + 1]["start_image"]
             else:
                 # one_shot last clip, or one_shot=False: use configured end_image,
                 # fall back to this clip's start_image when not set
@@ -204,16 +253,17 @@ class CAP_AudioTimeline:
                     "end_image": end_image,
                     "prompt": r["prompt"],
                     "use_global_prompt": bool(r.get("use_global_prompt", True)),
+                    "z_index": r["z_index"],
                 }
             )
 
         clips_length = len(clips_for_json)
         total_frame_count = max(1, sum(
             int(round((r["end_ms"] - r["start_ms"]) * fps / 1000))
-            for r in resolved
-        ) if resolved else 1)
+            for r in segments
+        ) if segments else 1)
 
-        clips_audio_out = self._concat_clips_audio(waveform, sample_rate, start_ms, resolved)
+        clips_audio_out = self._concat_clips_audio(waveform, sample_rate, start_ms, segments)
         frame_seq_dir = self._prepare_frame_seq_dir()
 
         data_json = json.dumps(
