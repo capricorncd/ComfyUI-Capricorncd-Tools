@@ -49,6 +49,7 @@ constructor(node) {
     this._loadingAudio = false;
     this._lastAudio = null;
     this._loadTimer = null;
+    this._resetTrimOnLoad = false;  // reset start/end time when a new audio is picked
     this._suppress = false;
     this._waveAudio = null;
     this._waveReady = false;
@@ -279,6 +280,8 @@ _bindWidgets() {
             this._reloadTlPlay(url);
             if (v === this._lastAudio) return;
             this._lastAudio = v;
+            // User picked a different audio → reset trim to the new full range on load.
+            this._resetTrimOnLoad = true;
             clearTimeout(this._loadTimer);
             this._loadTimer = setTimeout(() => this._loadAudio(), 80);
         };
@@ -1510,6 +1513,8 @@ _importJson(e) {
             if (data.audio != null) {
                 const audioW = this._w("audio");
                 if (audioW) { audioW.value = data.audio; audioW.callback?.(data.audio); }
+                // Imported config already carries its own start/end time → keep them.
+                this._resetTrimOnLoad = false;
             }
             if (Array.isArray(data.clips)) {
                 this.clips = data.clips.map(c => ({
@@ -1801,13 +1806,24 @@ async _loadAudio() {
             this.loadEl.style.display = "none";
             const fps = this.getFps();
             const ew = this._w("end_time");
-            if (!String(ew?.value ?? "").trim()) {
-                const tc = formatTimecode(this.durationMs, fps);
-                if (ew) ew.value = tc;
-                this.eIn.value = tc;
-            }
             const sw = this._w("start_time");
-            this.sIn.value = sw?.value || formatTimecode(0, fps);
+            if (this._resetTrimOnLoad) {
+                // New audio selected (possibly different duration): reset trim to full range.
+                this._resetTrimOnLoad = false;
+                const stc = formatTimecode(0, fps);
+                const etc = formatTimecode(this.durationMs, fps);
+                if (sw) sw.value = stc;
+                if (ew) ew.value = etc;
+                this.sIn.value = stc;
+                this.eIn.value = etc;
+            } else {
+                if (!String(ew?.value ?? "").trim()) {
+                    const tc = formatTimecode(this.durationMs, fps);
+                    if (ew) ew.value = tc;
+                    this.eIn.value = tc;
+                }
+                this.sIn.value = sw?.value || formatTimecode(0, fps);
+            }
             this._renderTrim();
             this._renderTimeline();
             this._loadFromWidget();
