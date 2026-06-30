@@ -1309,15 +1309,20 @@ _showFramePreview(clip, badgeEl) {
     const fp = this.framePreview;
     fp.replaceChildren();
 
-    const makeImg = (src) => {
+    const makeItem = (src, label) => {
+        const wrap = document.createElement("div");
+        wrap.className = "cat-frame-preview-item";
         const img = document.createElement("img");
         img.src = `/audio_keyframe_timeline/keyframe_image?dir=${encodeURIComponent(this._getKeyframeDir())}&name=${encodeURIComponent(src)}`;
-        img.style.cssText = "height:100%;width:auto;display:block;border-radius:3px;";
-        return img;
+        const tag = document.createElement("div");
+        tag.className = "cat-frame-preview-tag";
+        tag.textContent = label;
+        wrap.append(img, tag);
+        return wrap;
     };
 
-    if (clip.startImage) fp.appendChild(makeImg(clip.startImage));
-    if (clip.endImage) fp.appendChild(makeImg(clip.endImage));
+    if (clip.startImage) fp.appendChild(makeItem(clip.startImage, "首"));
+    if (clip.endImage) fp.appendChild(makeItem(clip.endImage, "尾"));
 
     fp.style.display = "flex";
 
