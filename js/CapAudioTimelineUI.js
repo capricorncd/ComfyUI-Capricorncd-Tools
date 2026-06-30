@@ -1307,6 +1307,9 @@ _showContextMenu(clipId, e) {
 
 _showFramePreview(clip, badgeEl) {
     const fp = this.framePreview;
+    fp.classList.remove("cat-frame-preview--center");
+    fp.style.right = "";
+    fp.style.transform = "";
     fp.replaceChildren();
 
     const makeItem = (src, label) => {
@@ -1342,6 +1345,31 @@ _showFramePreview(clip, badgeEl) {
 
 _hideFramePreview() {
     this.framePreview.style.display = "none";
+    this.framePreview.classList.remove("cat-frame-preview--center");
+    this.framePreview.style.right = "";
+    this.framePreview.style.transform = "";
+}
+
+// Large preview for a picker image, anchored below the hovered icon, centered horizontally.
+_showImagePreview(file, anchorEl) {
+    const fp = this.framePreview;
+    fp.replaceChildren();
+    const wrap = document.createElement("div");
+    wrap.className = "cat-frame-preview-item";
+    const img = document.createElement("img");
+    img.src = this._imgUrl(file);
+    wrap.append(img);
+    fp.appendChild(wrap);
+    fp.classList.add("cat-frame-preview--center");
+    fp.style.display = "flex";
+
+    const root = this.root;
+    const rootR = root.getBoundingClientRect();
+    const zoom = rootR.width / root.clientWidth;
+    const ar = anchorEl.getBoundingClientRect();
+    const bottomLayout = (ar.bottom - rootR.top) / zoom;
+    fp.style.left = "50%";
+    fp.style.top = `${bottomLayout + 6}px`;
 }
 
 _getKeyframeDir() {
@@ -1388,7 +1416,16 @@ _renderPickerGrid() {
         const nm = document.createElement("div");
         nm.className = "cat-picker-name";
         nm.textContent = file.split(/[\\/]/).pop();
-        item.append(img, nm);
+
+        const zoom = document.createElement("div");
+        zoom.className = "cat-picker-zoom";
+        // zoom.title = "查看大图";
+        zoom.textContent = "🔍";
+        zoom.addEventListener("mouseenter", () => this._showImagePreview(file, zoom));
+        zoom.addEventListener("mouseleave", () => this._hideFramePreview());
+        zoom.addEventListener("click", e => e.stopPropagation());
+
+        item.append(img, nm, zoom);
         item.addEventListener("click", () => {
             if (!this._pickerCtx) return;
             if (this._pickerCtx.mode === "add") {
