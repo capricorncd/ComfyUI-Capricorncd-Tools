@@ -49,6 +49,7 @@ constructor(node) {
     this._loadingAudio = false;
     this._lastAudio = null;
     this._loadTimer = null;
+    this._resetTrimOnLoad = false;  // reset start/end time when a new audio is picked
     this._suppress = false;
     this._waveAudio = null;
     this._waveReady = false;
@@ -60,6 +61,7 @@ constructor(node) {
     // timeline
     this.clips = [];
     this.selClipId = null;
+    this.selClipIds = new Set();
     this.playheadMs = 0;
     this._tlAudio = null;
     this._tlReady = false;
@@ -137,7 +139,8 @@ _buildDom() {
             <div class="cat-tl-inner">
               <div class="cat-ruler"></div>
               <div class="cat-tl-tracks">
-                <div class="cat-clip-track"></div>
+                <div class="cat-overlay-track" data-track="1"></div>
+                <div class="cat-clip-track" data-track="0"></div>
               </div>
               <div class="cat-playhead"><div class="cat-playhead-tri"></div></div>
             </div>
@@ -196,6 +199,7 @@ _buildDom() {
     this.tlInner    = root.querySelector(".cat-tl-inner");
     this.rulerEl    = root.querySelector(".cat-ruler");
     this.clipTrack  = root.querySelector(".cat-clip-track");
+    this.overlayTrack = root.querySelector(".cat-overlay-track");
     this.playheadEl  = root.querySelector(".cat-playhead");
     this.playheadTri = root.querySelector(".cat-playhead-tri");
 
@@ -222,8 +226,8 @@ _attachWidget() {
     const node = this.node;
     const w = node.addDOMWidget("cat_ui", "cat_timeline", this.root, {
         hideOnZoom: false,
-        getMinHeight: () => 440,
-        getHeight: () => 440,
+        getMinHeight: () => 480,
+        getHeight: () => 480,
         afterResize: () => this._onDomWidthChanged(),
     });
     w.serialize = false;
@@ -240,14 +244,14 @@ _attachWidget() {
 
     const baseLayoutSize = w.computeLayoutSize?.bind(w);
     w.computeLayoutSize = () => {
-        const layout = baseLayoutSize?.(node) ?? { minHeight: 440, minWidth: 0 };
+        const layout = baseLayoutSize?.(node) ?? { minHeight: 480, minWidth: 0 };
         // Fixed absolute minimum — do not tie to current node width (blocks user shrink).
-        return { ...layout, minHeight: 440, minWidth: 480 };
+        return { ...layout, minHeight: 480, minWidth: 480 };
     };
 
     node.setSize([
         Math.max(node.size[0], 480),
-        Math.max(node.size[1], 440),
+        Math.max(node.size[1], 480),
     ]);
 
     this._lastDomWidth = 0;
@@ -276,6 +280,8 @@ _bindWidgets() {
             this._reloadTlPlay(url);
             if (v === this._lastAudio) return;
             this._lastAudio = v;
+            // User picked a different audio → reset trim to the new full range on load.
+            this._resetTrimOnLoad = true;
             clearTimeout(this._loadTimer);
             this._loadTimer = setTimeout(() => this._loadAudio(), 80);
         };
@@ -367,25 +373,39 @@ _bindEvents() {
         const ms = this._tlPxToMs(e.clientX);
         this._setPlayhead(clamp(ms, 0, this._tlDurMs()));
         this.selClipId = null;
+        this.selClipIds.clear();
         this._renderClips();
         this._updatePromptContext();
     });
 
-    // double-click clip track → add clip at position
+    // double-click main track → add main clip at position
     this.clipTrack.addEventListener("dblclick", e => {
         if (e.target.closest(".cat-clip")) return;
         const ms = this._tlPxToMs(e.clientX);
-        this._addClip(ms);
+        this._openAddPicker(ms, 0);
     });
 
-    // clip track context menu
-    this.clipTrack.addEventListener("contextmenu", e => {
+    // double-click overlay (sub) track → add overlay clip at position
+    this.overlayTrack.addEventListener("dblclick", e => {
+        if (e.target.closest(".cat-clip")) return;
+        const ms = this._tlPxToMs(e.clientX);
+        if (this._subOverlaps(ms, ms + 1, null)) {
+            alert("副轨道该位置已有素材，无法插入");
+            return;
+        }
+        this._openAddPicker(ms, 1);
+    });
+
+    // context menu (both tracks)
+    const onCtx = e => {
         e.preventDefault();
         e.stopPropagation();
         const clipEl = e.target.closest(".cat-clip");
         if (clipEl) this._showContextMenu(clipEl.dataset.id, e);
         else removeContextMenu();
-    });
+    };
+    this.clipTrack.addEventListener("contextmenu", onCtx);
+    this.overlayTrack.addEventListener("contextmenu", onCtx);
 
     // prompt input — stop bubbling so canvas shortcuts don't steal keys
     this.promptWrap.addEventListener("mousedown", e => {
@@ -653,6 +673,7 @@ _renderTimeline() {
     this.tlInner.style.width = `${totalPx}px`;
     this._renderRuler(dur, pxPerMs, totalPx);
     this.clipTrack.style.width = `${totalPx}px`;
+    this.overlayTrack.style.width = `${totalPx}px`;
     this._renderClips();
     this._renderPlayhead();
     this._updTlCtrl();
@@ -674,15 +695,18 @@ _renderRuler(dur, pxPerMs, totalPx) {
     }
 }
 
+_trackEl(clip) { return (clip.track ?? 0) === 1 ? this.overlayTrack : this.clipTrack; }
+
 _renderClips({ layoutOnly = false, animate = false, dragId = null } = {}) {
     if (!layoutOnly) {
         this.clipTrack.replaceChildren();
+        this.overlayTrack.replaceChildren();
         this._clipElMap.clear();
         const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
         for (const clip of sorted) {
             const el = this._createClipElement(clip);
             this._clipElMap.set(clip.id, el);
-            this.clipTrack.appendChild(el);
+            this._trackEl(clip).appendChild(el);
         }
     }
     this._layoutClips({ animate, dragId });
@@ -691,6 +715,7 @@ _renderClips({ layoutOnly = false, animate = false, dragId = null } = {}) {
 _createClipElement(clip) {
     const el = document.createElement("div");
     el.className = "cat-clip";
+    if ((clip.track ?? 0) === 1) el.classList.add("cat-clip-overlay");
     el.dataset.id = clip.id;
 
     const thumb = document.createElement("div");
@@ -744,12 +769,15 @@ _createClipElement(clip) {
         if (e.target.classList.contains("cat-resize-hdl")) return;
         e.preventDefault();
         e.stopPropagation();
-        this._selectClip(clip.id);
-        this._dragState = {
-            type: "move", clipId: clip.id,
-            originMs: this._tlPxToMs(e.clientX),
-            os: clip.startMs, oe: clip.endMs,
-        };
+        const multi = e.ctrlKey || e.metaKey;
+        this._selectClip(clip.id, multi);
+        if (!multi) {
+            this._dragState = {
+                type: "move", clipId: clip.id,
+                originMs: this._tlPxToMs(e.clientX),
+                os: clip.startMs, oe: clip.endMs,
+            };
+        }
     });
 
     rh.addEventListener("mousedown", e => {
@@ -783,14 +811,15 @@ _layoutClips({ animate = false, dragId = null } = {}) {
         if (!el) {
             el = this._createClipElement(clip);
             this._clipElMap.set(clip.id, el);
-            this.clipTrack.appendChild(el);
+            this._trackEl(clip).appendChild(el);
         }
 
         const left = clip.startMs * pxPerMs;
         const width = Math.max(4, (clip.endMs - clip.startMs) * pxPerMs);
         const isDragged = dragId != null && clip.id === dragId;
 
-        el.classList.toggle("selected", clip.id === this.selClipId);
+        el.classList.toggle("cat-clip-overlay", (clip.track ?? 0) === 1);
+        el.classList.toggle("selected", this.selClipIds.has(clip.id));
         el.classList.toggle("cat-clip-disabled", !!clip.disabled);
         el.classList.toggle("cat-clip-dragging", isDragged);
         el.classList.toggle("cat-clip-anim", animate && !isDragged);
@@ -815,7 +844,7 @@ _layoutClips({ animate = false, dragId = null } = {}) {
         }
         if (pb) pb.title = clip.prompt ?? "";
 
-        this.clipTrack.appendChild(el);
+        this._trackEl(clip).appendChild(el);
     }
 }
 
@@ -826,8 +855,21 @@ _renderPlayhead() {
 
 // ── clip operations ───────────────────────────────────────────────────────
 
-_selectClip(id) {
-    this.selClipId = id;
+_selectClip(id, addToSelection = false) {
+    if (addToSelection) {
+        if (this.selClipIds.has(id)) {
+            this.selClipIds.delete(id);
+            this.selClipId = this.selClipIds.size > 0
+                ? [...this.selClipIds].at(-1) : null;
+        } else {
+            this.selClipIds.add(id);
+            this.selClipId = id;
+        }
+    } else {
+        this.selClipIds.clear();
+        this.selClipIds.add(id);
+        this.selClipId = id;
+    }
     this._selTrim = null;
     this._selPlayhead = false;
     this._updateTrimUI();
@@ -840,6 +882,7 @@ _selectClip(id) {
 
 _deselectAll() {
     this.selClipId = null;
+    this.selClipIds.clear();
     this._selTrim = null;
     this._selPlayhead = false;
     this._updateTrimUI();
@@ -848,15 +891,53 @@ _deselectAll() {
     this._updatePromptContext();
 }
 
-_addClip(startMs, startImage = null) {
+_addClip(startMs, startImage = null, track = 0) {
+    if (track === 1) {
+        // Overlay (sub) track: free position, no overlap, gaps allowed.
+        const dur = this._tlDurMs();
+        startMs = clamp(startMs, 0, dur);
+        const { hi } = this._subSlot(null, startMs, startMs);
+        const wanted = Math.min(2000, Math.round(dur / 4)) || this._frameMs();
+        const endMs = Math.min(startMs + wanted, hi, dur);
+        if (endMs - startMs < this._frameMs()) {
+            alert("副轨道该位置空间不足，无法插入");
+            return;
+        }
+        const clip = { id: uid(), startMs, endMs, startImage, endImage: null, prompt: "", useGlobalPrompt: true, disabled: false, track: 1 };
+        this.clips.push(clip);
+        this._selectClip(clip.id);
+        this._saveClips();
+        this._renderClips();
+        this._updTlCtrl();
+        return;
+    }
     const defaultDur = Math.min(2000, Math.round(this._tlDurMs() / 4));
     // Use startMs only for ordering; _packClips will assign the actual position.
-    const clip = { id: uid(), startMs, endMs: startMs + defaultDur, startImage, endImage: null, prompt: "", useGlobalPrompt: true, disabled: false };
+    const clip = { id: uid(), startMs, endMs: startMs + defaultDur, startImage, endImage: null, prompt: "", useGlobalPrompt: true, disabled: false, track: 0 };
     this.clips.push(clip);
     this._packClips();
     this._selectClip(clip.id);
     this._saveClips();
     this._updTlCtrl();
+}
+
+// Returns the free interval [lo, hi] on the overlay track around a clip's slot,
+// bounded by neighbouring overlay clips (using its original start/end os, oe).
+_subSlot(excludeId, os, oe) {
+    let lo = 0, hi = this._tlDurMs();
+    for (const c of this.clips) {
+        if ((c.track ?? 0) !== 1 || c.id === excludeId) continue;
+        if (c.endMs <= os && c.endMs > lo) lo = c.endMs;
+        if (c.startMs >= oe && c.startMs < hi) hi = c.startMs;
+    }
+    return { lo, hi };
+}
+
+// True if [start, end) overlaps any overlay clip (excluding excludeId).
+_subOverlaps(start, end, excludeId) {
+    return this.clips.some(c =>
+        (c.track ?? 0) === 1 && c.id !== excludeId &&
+        start < c.endMs && end > c.startMs);
 }
 
 _confirmAction(message) {
@@ -871,7 +952,8 @@ _confirmDeleteClip(id) {
 
 _deleteClip(id) {
     this.clips = this.clips.filter(c => c.id !== id);
-    if (this.selClipId === id) { this.selClipId = null; this._updatePromptContext(); }
+    this.selClipIds.delete(id);
+    if (this.selClipId === id) { this.selClipId = this.selClipIds.size > 0 ? [...this.selClipIds].at(-1) : null; this._updatePromptContext(); }
     this._packClips();
     this._saveClips();
     this._renderClips();
@@ -883,6 +965,7 @@ _clearTimeline() {
     if (!this._confirmAction("确定要清空时间轴上的所有素材吗？")) return;
     this.clips = [];
     this.selClipId = null;
+    this.selClipIds.clear();
     this._updatePromptContext();
     this._saveClips();
     this._renderClips();
@@ -902,7 +985,7 @@ _trimLeft(id) {
     const c = this.clips.find(c => c.id === id);
     if (!c || this.playheadMs <= c.startMs || this.playheadMs >= c.endMs) return;
     c.startMs = this.playheadMs;
-    this._packClips();
+    if ((c.track ?? 0) !== 1) this._packClips();
     this._saveClips();
     this._renderClips();
     if (id === this.selClipId) this._updatePromptContext();
@@ -912,9 +995,30 @@ _trimRight(id) {
     const c = this.clips.find(c => c.id === id);
     if (!c || this.playheadMs <= c.startMs || this.playheadMs >= c.endMs) return;
     c.endMs = this.playheadMs;
-    this._packClips();
+    if ((c.track ?? 0) !== 1) this._packClips();
     this._saveClips();
     this._renderClips();
+    if (id === this.selClipId) this._updatePromptContext();
+}
+
+// Move a single clip between main (0) and overlay (1) tracks.
+_moveClipToTrack(id, track) {
+    const c = this.clips.find(c => c.id === id);
+    if (!c || (c.track ?? 0) === track) return;
+    if (track === 1) {
+        if (this._subOverlaps(c.startMs, c.endMs, id)) {
+            alert("副轨道该位置已有素材，无法移动");
+            return;
+        }
+        c.track = 1;
+        this._packClips();  // repack main without this clip
+    } else {
+        c.track = 0;
+        this._packClips();  // insert into main order by current startMs
+    }
+    this._saveClips();
+    this._renderClips();
+    this._updTlCtrl();
     if (id === this.selClipId) this._updatePromptContext();
 }
 
@@ -926,10 +1030,31 @@ _copyClip(id) {
 
 _pasteClip() {
     if (!this._clipboard) return;
-    const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
-    const last = sorted[sorted.length - 1];
+    const cbTrack = this._clipboard.track ?? 0;
+    const durMs = this._clipboard.durationMs;
+    if (cbTrack === 1) {
+        // Paste onto overlay track after the last overlay clip, clamped to no-overlap.
+        const subs = this.clips.filter(c => (c.track ?? 0) === 1).sort((a, b) => a.startMs - b.startMs);
+        const tlDur = this._tlDurMs();
+        let s = subs.length ? subs[subs.length - 1].endMs : 0;
+        let e = s + durMs;
+        if (e > tlDur) { e = tlDur; s = Math.max(0, tlDur - durMs); }
+        if (e - s < this._frameMs() || this._subOverlaps(s, e, null)) {
+            alert("副轨道空间不足，无法粘贴");
+            return;
+        }
+        const clip = { ...this._clipboard, id: uid(), startMs: s, endMs: e, track: 1 };
+        this.clips.push(clip);
+        this._selectClip(clip.id);
+        this._saveClips();
+        this._renderClips();
+        this._updTlCtrl();
+        return;
+    }
+    const main = this.clips.filter(c => (c.track ?? 0) !== 1).sort((a, b) => a.startMs - b.startMs);
+    const last = main[main.length - 1];
     const s = last ? last.endMs : 0;
-    const clip = { ...this._clipboard, id: uid(), startMs: s, endMs: s + this._clipboard.durationMs };
+    const clip = { ...this._clipboard, id: uid(), startMs: s, endMs: s + durMs, track: 0 };
     this.clips.push(clip);
     this._packClips();
     this._selectClip(clip.id);
@@ -955,11 +1080,13 @@ _splitClip(id) {
         id: uid(), startMs: c.startMs, endMs: ms,
         startImage: c.startImage, endImage: null,
         prompt: c.prompt, useGlobalPrompt: c.useGlobalPrompt, disabled: c.disabled,
+        track: c.track ?? 0,
     };
     const right = {
         id: uid(), startMs: ms, endMs: c.endMs,
         startImage: null, endImage: c.endImage,
         prompt: c.prompt, useGlobalPrompt: c.useGlobalPrompt, disabled: c.disabled,
+        track: c.track ?? 0,
     };
     const idx = this.clips.findIndex(c => c.id === id);
     this.clips.splice(idx, 1, left, right);
@@ -982,10 +1109,56 @@ _toggleDisable(id) {
 _disableOthers(id) {
     const others = this.clips.filter(c => c.id !== id);
     if (!others.length) return;
-    // All others disabled → enable all; otherwise disable all
     const target = others.every(c => c.disabled) ? false : true;
     let changed = false;
     for (const c of others) {
+        if (c.disabled !== target) { c.disabled = target; changed = true; }
+    }
+    if (changed) { this._saveClips(); this._renderClips(); }
+}
+
+_areContiguous(ids) {
+    if (ids.length < 2) return true;
+    const idSet = new Set(ids);
+    const sel = this.clips.filter(c => idSet.has(c.id));
+    // Merge only within the same track.
+    if (new Set(sel.map(c => c.track ?? 0)).size > 1) return false;
+    const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
+    const indices = sorted.reduce((acc, c, i) => { if (idSet.has(c.id)) acc.push(i); return acc; }, []);
+    if (indices.length !== ids.length) return false;
+    for (let i = 1; i < indices.length; i++) {
+        if (indices[i] !== indices[i - 1] + 1) return false;
+    }
+    return true;
+}
+
+_mergeSelected() {
+    if (this.selClipIds.size < 2) return;
+    const idSet = this.selClipIds;
+    const sorted = [...this.clips].sort((a, b) => a.startMs - b.startMs);
+    const selected = sorted.filter(c => idSet.has(c.id));
+    if (selected.length < 2 || !this._areContiguous([...idSet])) return;
+    const first = selected[0];
+    const last  = selected[selected.length - 1];
+    first.endMs = last.endMs;
+    const toRemove = new Set(selected.slice(1).map(c => c.id));
+    this.clips = this.clips.filter(c => !toRemove.has(c.id));
+    this.selClipIds.clear();
+    this.selClipIds.add(first.id);
+    this.selClipId = first.id;
+    this._packClips();
+    this._saveClips();
+    this._renderClips();
+    this._updTlCtrl();
+    this._updatePromptContext();
+}
+
+_toggleDisableSelected() {
+    if (!this.selClipIds.size) return;
+    const selected = this.clips.filter(c => this.selClipIds.has(c.id));
+    const target = selected.every(c => c.disabled) ? false : true;
+    let changed = false;
+    for (const c of selected) {
         if (c.disabled !== target) { c.disabled = target; changed = true; }
     }
     if (changed) { this._saveClips(); this._renderClips(); }
@@ -1007,12 +1180,12 @@ _snapMs(ms, excludeId) {
     return best;
 }
 
-// Sort all clips by startMs and pack them contiguously from 0, preserving durations.
+// Pack only the MAIN track contiguously from 0, preserving durations.
+// Overlay (sub) track clips keep their free positions (gaps allowed, no overlap).
 _packClips() {
-    if (!this.clips.length) return;
-    this.clips.sort((a, b) => a.startMs - b.startMs);
+    const main = this.clips.filter(c => (c.track ?? 0) !== 1).sort((a, b) => a.startMs - b.startMs);
     let cursor = 0;
-    for (const c of this.clips) {
+    for (const c of main) {
         const dur = Math.max(this._frameMs(), c.endMs - c.startMs);
         c.startMs = cursor;
         c.endMs   = cursor + dur;
@@ -1068,32 +1241,10 @@ _onUseGlobalChange() {
 
 // ── context menu ──────────────────────────────────────────────────────────
 
-_showContextMenu(clipId, e) {
-    removeContextMenu();
-    const clip = this.clips.find(c => c.id === clipId);
-    if (!clip) return;
-
+_buildMenu(items, e) {
     const menu = document.createElement("div");
     menu.className = "cat-ctx-menu";
     menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:9999`;
-
-    const disableLabel = clip.disabled ? "Enable" : "Disable";
-    const others = this.clips.filter(c => c.id !== clipId);
-    const othersAllDisabled = others.length > 0 && others.every(c => c.disabled);
-    const othersLabel = othersAllDisabled ? "Enable Others" : "Disable Others";
-    const canSplit = this.playheadMs > clip.startMs && this.playheadMs < clip.endMs;
-    const items = [
-        { label: "替换素材",     fn: () => this._openPicker(clipId, "startImage", "替换素材") },
-        { label: "选择尾帧图片", fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
-        ...(clip.startImage && clip.endImage ? [{ label: "首尾帧交换", fn: () => this._swapKeyframes(clipId) }] : []),
-        ...(canSplit ? [{ label: "分割素材", fn: () => this._splitClip(clipId) }] : []),
-        { label: disableLabel,   shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
-        { label: othersLabel,    shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
-        { label: "复制",         fn: () => this._copyClip(clipId) },
-        { label: "删除",         shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
-        ...(clip.endImage ? [{ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) }] : []),
-    ];
-
     for (const { label, shortcut, fn } of items) {
         const div = document.createElement("div");
         div.className = "cat-ctx-item";
@@ -1109,21 +1260,72 @@ _showContextMenu(clipId, e) {
     setTimeout(() => document.addEventListener("click", removeContextMenu, { once: true }), 0);
 }
 
+_showContextMenu(clipId, e) {
+    removeContextMenu();
+    if (!this.clips.some(c => c.id === clipId)) return;
+
+    // Multi-select menu when right-clicking on a selected clip in a multi-selection
+    if (this.selClipIds.size > 1 && this.selClipIds.has(clipId)) {
+        const selectedIds = [...this.selClipIds];
+        const allDisabled = selectedIds.every(id => this.clips.find(c => c.id === id)?.disabled);
+        const canMerge = this._areContiguous(selectedIds);
+        const items = [
+            ...(canMerge ? [{ label: "合并", fn: () => this._mergeSelected() }] : []),
+            { label: allDisabled ? "启用选中项" : "禁用选中项", shortcut: "Ctrl+B", fn: () => this._toggleDisableSelected() },
+        ];
+        this._buildMenu(items, e);
+        return;
+    }
+
+    // Single-select menu (ensure only this clip is selected)
+    if (this.selClipId !== clipId) this._selectClip(clipId);
+    const clip = this.clips.find(c => c.id === clipId);
+    if (!clip) return;
+
+    const disableLabel = clip.disabled ? "Enable" : "Disable";
+    const others = this.clips.filter(c => c.id !== clipId);
+    const othersAllDisabled = others.length > 0 && others.every(c => c.disabled);
+    const othersLabel = othersAllDisabled ? "Enable Others" : "Disable Others";
+    const canSplit = this.playheadMs > clip.startMs && this.playheadMs < clip.endMs;
+    const isOverlay = (clip.track ?? 0) === 1;
+    const items = [
+        { label: "替换素材",     fn: () => this._openPicker(clipId, "startImage", "替换素材") },
+        { label: "选择尾帧图片", fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
+        ...(clip.startImage && clip.endImage ? [{ label: "首尾帧交换", fn: () => this._swapKeyframes(clipId) }] : []),
+        ...(canSplit ? [{ label: "分割素材", fn: () => this._splitClip(clipId) }] : []),
+        { label: isOverlay ? "移到主轨道" : "移到副轨道", fn: () => this._moveClipToTrack(clipId, isOverlay ? 0 : 1) },
+        { label: disableLabel,   shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
+        { label: othersLabel,    shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
+        { label: "复制",         fn: () => this._copyClip(clipId) },
+        { label: "删除",         shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
+        ...(clip.endImage ? [{ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) }] : []),
+    ];
+    this._buildMenu(items, e);
+}
+
 // ── frame preview (badge hover) ───────────────────────────────────────────
 
 _showFramePreview(clip, badgeEl) {
     const fp = this.framePreview;
+    fp.classList.remove("cat-frame-preview--center");
+    fp.style.right = "";
+    fp.style.transform = "";
     fp.replaceChildren();
 
-    const makeImg = (src) => {
+    const makeItem = (src, label) => {
+        const wrap = document.createElement("div");
+        wrap.className = "cat-frame-preview-item";
         const img = document.createElement("img");
         img.src = `/audio_keyframe_timeline/keyframe_image?dir=${encodeURIComponent(this._getKeyframeDir())}&name=${encodeURIComponent(src)}`;
-        img.style.cssText = "height:100%;width:auto;display:block;border-radius:3px;";
-        return img;
+        const tag = document.createElement("div");
+        tag.className = "cat-frame-preview-tag";
+        tag.textContent = label;
+        wrap.append(img, tag);
+        return wrap;
     };
 
-    if (clip.startImage) fp.appendChild(makeImg(clip.startImage));
-    if (clip.endImage) fp.appendChild(makeImg(clip.endImage));
+    if (clip.startImage) fp.appendChild(makeItem(clip.startImage, "首"));
+    if (clip.endImage) fp.appendChild(makeItem(clip.endImage, "尾"));
 
     fp.style.display = "flex";
 
@@ -1143,6 +1345,31 @@ _showFramePreview(clip, badgeEl) {
 
 _hideFramePreview() {
     this.framePreview.style.display = "none";
+    this.framePreview.classList.remove("cat-frame-preview--center");
+    this.framePreview.style.right = "";
+    this.framePreview.style.transform = "";
+}
+
+// Large preview for a picker image, anchored below the hovered icon, centered horizontally.
+_showImagePreview(file, anchorEl) {
+    const fp = this.framePreview;
+    fp.replaceChildren();
+    const wrap = document.createElement("div");
+    wrap.className = "cat-frame-preview-item";
+    const img = document.createElement("img");
+    img.src = this._imgUrl(file);
+    wrap.append(img);
+    fp.appendChild(wrap);
+    fp.classList.add("cat-frame-preview--center");
+    fp.style.display = "flex";
+
+    const root = this.root;
+    const rootR = root.getBoundingClientRect();
+    const zoom = rootR.width / root.clientWidth;
+    const ar = anchorEl.getBoundingClientRect();
+    const bottomLayout = (ar.bottom - rootR.top) / zoom;
+    fp.style.left = "50%";
+    fp.style.top = `${bottomLayout + 6}px`;
 }
 
 _getKeyframeDir() {
@@ -1189,11 +1416,20 @@ _renderPickerGrid() {
         const nm = document.createElement("div");
         nm.className = "cat-picker-name";
         nm.textContent = file.split(/[\\/]/).pop();
-        item.append(img, nm);
+
+        const zoom = document.createElement("div");
+        zoom.className = "cat-picker-zoom";
+        // zoom.title = "查看大图";
+        zoom.textContent = "🔍";
+        zoom.addEventListener("mouseenter", () => this._showImagePreview(file, zoom));
+        zoom.addEventListener("mouseleave", () => this._hideFramePreview());
+        zoom.addEventListener("click", e => e.stopPropagation());
+
+        item.append(img, nm, zoom);
         item.addEventListener("click", () => {
             if (!this._pickerCtx) return;
             if (this._pickerCtx.mode === "add") {
-                this._addClip(this._pickerCtx.atMs, file);
+                this._addClip(this._pickerCtx.atMs, file, this._pickerCtx.track ?? 0);
             } else {
                 const { clipId, field } = this._pickerCtx;
                 this._updateClip(clipId, { [field]: file });
@@ -1204,9 +1440,29 @@ _renderPickerGrid() {
     }
 }
 
+// Add Image button: insert at playhead, preferring the empty track.
 _showAddClipPicker(atMs = this.playheadMs) {
-    this._pickerCtx = { mode: "add", atMs };
-    this.pickerTitle.textContent = "Add Image";
+    const track = this._pickInsertTrack(atMs);
+    if (track === null) {
+        alert("主轨道与副轨道在该位置都有素材，无法插入");
+        return;
+    }
+    this._openAddPicker(atMs, track);
+}
+
+// Decide which track to insert into at a given time:
+// main empty here → main; else sub empty → overlay; else null (both occupied).
+_pickInsertTrack(atMs) {
+    const mainAt = this.clips.some(c => (c.track ?? 0) !== 1 && atMs >= c.startMs && atMs < c.endMs);
+    const subAt  = this.clips.some(c => (c.track ?? 0) === 1 && atMs >= c.startMs && atMs < c.endMs);
+    if (!mainAt) return 0;
+    if (!subAt)  return 1;
+    return null;
+}
+
+_openAddPicker(atMs, track = 0) {
+    this._pickerCtx = { mode: "add", atMs, track };
+    this.pickerTitle.textContent = track === 1 ? "Add Image · 副轨道" : "Add Image";
     this._renderPickerGrid();
     this.pickerEl.style.display = "flex";
 }
@@ -1262,6 +1518,8 @@ _exportJson() {
             prompt:      c.prompt ?? "",
             use_global_prompt: c.useGlobalPrompt !== false,
             disabled:    c.disabled ?? false,
+            track:       (c.track ?? 0) === 1 ? 1 : 0,
+            z_index:     (c.track ?? 0) === 1 ? 2 : 1,
         })),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -1297,6 +1555,8 @@ _importJson(e) {
             if (data.audio != null) {
                 const audioW = this._w("audio");
                 if (audioW) { audioW.value = data.audio; audioW.callback?.(data.audio); }
+                // Imported config already carries its own start/end time → keep them.
+                this._resetTrimOnLoad = false;
             }
             if (Array.isArray(data.clips)) {
                 this.clips = data.clips.map(c => ({
@@ -1308,6 +1568,7 @@ _importJson(e) {
                     prompt:     c.prompt ?? "",
                     useGlobalPrompt: clipUseGlobalPrompt(c),
                     disabled:   c.disabled ?? false,
+                    track:      Number(c.track) === 1 ? 1 : 0,
                 }));
                 this._saveClips();
             }
@@ -1334,6 +1595,8 @@ _saveClips() {
         prompt: c.prompt ?? "",
         use_global_prompt: c.useGlobalPrompt !== false,
         disabled: c.disabled ?? false,
+        track: (c.track ?? 0) === 1 ? 1 : 0,
+        z_index: (c.track ?? 0) === 1 ? 2 : 1,
     })));
     this.node.setDirtyCanvas(true, true);
 }
@@ -1353,6 +1616,7 @@ _loadFromWidget() {
                 prompt: c.prompt ?? "",
                 useGlobalPrompt: clipUseGlobalPrompt(c),
                 disabled: c.disabled ?? false,
+                track: Number(c.track) === 1 ? 1 : 0,
             }));
         }
     } catch {}
@@ -1408,7 +1672,8 @@ _onKeyDown(e, ignoreFocus = false) {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
     }
     if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "b" && this.selClipId) {
-        this._toggleDisable(this.selClipId);
+        if (this.selClipIds.size > 1) this._toggleDisableSelected();
+        else this._toggleDisable(this.selClipId);
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.();
         return;
     }
@@ -1459,8 +1724,19 @@ _handleMove(e) {
         const c = this.clips.find(c => c.id === clipId);
         if (!c) return;
 
-        if (type === "move") {
-            // Set raw dragged position (for sort order), then pack — no gaps allowed.
+        if ((c.track ?? 0) === 1) {
+            // Overlay track: free positioning within its gap; no overlap, no packing.
+            const { lo, hi } = this._subSlot(clipId, os, oe);
+            if (type === "move") {
+                const clipDur = oe - os;
+                const ns = clamp(os + dMs, lo, Math.max(lo, hi - clipDur));
+                c.startMs = ns;
+                c.endMs   = ns + clipDur;
+            } else {
+                c.endMs = clamp(oe + dMs, c.startMs + this._frameMs(), hi);
+            }
+        } else if (type === "move") {
+            // Main track: set raw dragged position (for sort order), then pack — no gaps allowed.
             const clipDur = oe - os;
             c.startMs = clamp(os + dMs, 0, dur);
             c.endMs   = c.startMs + clipDur;
@@ -1469,7 +1745,7 @@ _handleMove(e) {
             c.endMs = clamp(oe + dMs, c.startMs + this._frameMs(), dur);
             this._packClips();
         }
-        this._renderClips({ layoutOnly: true, animate: type === "move", dragId: clipId });
+        this._renderClips({ layoutOnly: true, animate: type === "move" && (c.track ?? 0) !== 1, dragId: clipId });
         this._renderPlayhead();
     }
 }
@@ -1572,13 +1848,24 @@ async _loadAudio() {
             this.loadEl.style.display = "none";
             const fps = this.getFps();
             const ew = this._w("end_time");
-            if (!String(ew?.value ?? "").trim()) {
-                const tc = formatTimecode(this.durationMs, fps);
-                if (ew) ew.value = tc;
-                this.eIn.value = tc;
-            }
             const sw = this._w("start_time");
-            this.sIn.value = sw?.value || formatTimecode(0, fps);
+            if (this._resetTrimOnLoad) {
+                // New audio selected (possibly different duration): reset trim to full range.
+                this._resetTrimOnLoad = false;
+                const stc = formatTimecode(0, fps);
+                const etc = formatTimecode(this.durationMs, fps);
+                if (sw) sw.value = stc;
+                if (ew) ew.value = etc;
+                this.sIn.value = stc;
+                this.eIn.value = etc;
+            } else {
+                if (!String(ew?.value ?? "").trim()) {
+                    const tc = formatTimecode(this.durationMs, fps);
+                    if (ew) ew.value = tc;
+                    this.eIn.value = tc;
+                }
+                this.sIn.value = sw?.value || formatTimecode(0, fps);
+            }
             this._renderTrim();
             this._renderTimeline();
             this._loadFromWidget();

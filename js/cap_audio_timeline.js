@@ -55,7 +55,7 @@ function onGlobalKeyDown(e) {
 }
 
 const MIN_NODE_WIDTH = 480;
-const MIN_NODE_HEIGHT = 440;
+const MIN_NODE_HEIGHT = 480;
 
 function clampAbsMin(size) {
     return [
@@ -74,10 +74,6 @@ function markNoSerialize(node) {
     for (const w of node.widgets ?? []) {
         if (w.name === "audioUI" || w.name === "cat_ui") {
             w.serialize = false;
-        }
-        // Canvas widgets — hide by type so LiteGraph skips draw + height
-        if (w.name === "start_time" || w.name === "end_time") {
-            w.type = "hidden";
         }
         // DOM widgets (textarea) — hide element + zero out size
         if (w.name === "clips_json") {
