@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { CapAudioTimelineUI } from "./CapAudioTimelineUI.js";
+import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 
 const NODE_CLASS = "CAP_AudioTimeline";
 
@@ -33,7 +34,9 @@ function onGlobalKeyDown(e) {
     // Delete removes the selected clip — use _lastActive as fallback so shortcuts work
     // even when the LiteGraph node isn't selected in the canvas (users often interact
     // with the widget without first clicking the node header).
+    // Ctrl+B / Ctrl+G — skip when fullscreen timeline editor is open (it handles its own shortcuts)
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "b" || e.key === "g")) {
+        if (CapTimelineEditorApp._open?._overlay?.classList.contains("open")) return;
         const ui = nodeUi ?? CapAudioTimelineUI._lastActive;
         if (ui) ui._onKeyDown(e, true);
         return;

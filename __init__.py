@@ -20,6 +20,10 @@ from .cap_seq_to_video import (
     NODE_CLASS_MAPPINGS as _STV_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _STV_NAMES,
 )
+from .cap_timeline_editor import (
+    NODE_CLASS_MAPPINGS as _CTE_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CTE_NAMES,
+)
 from .cap_save_images import (
     NODE_CLASS_MAPPINGS as _CSI_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CSI_NAMES,
@@ -38,6 +42,7 @@ NODE_CLASS_MAPPINGS = {
     **_CAT_CLASS,
     **_CDP_CLASS,
     **_STV_CLASS,
+    **_CTE_CLASS,
     **_CSI_CLASS,
 }
 
@@ -47,6 +52,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CAT_NAMES,
     **_CDP_NAMES,
     **_STV_NAMES,
+    **_CTE_NAMES,
     **_CSI_NAMES,
 }
 
@@ -61,6 +67,12 @@ def _register_routes():
         return
 
     routes = PromptServer.instance.routes
+
+    @routes.get("/audio_keyframe_timeline/input_audio")
+    async def api_list_input_audio(_request: web.Request) -> web.Response:
+        from .cap_timeline_editor import _list_input_audio
+        files = _list_input_audio()
+        return web.json_response({"files": files, "count": len(files)})
 
     @routes.get("/audio_keyframe_timeline/keyframes")
     async def api_list_keyframes(request: web.Request) -> web.Response:

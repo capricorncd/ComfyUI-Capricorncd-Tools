@@ -48,6 +48,34 @@
     }
   },
 
+  "CAP_TimelineEditor": {
+    "display_name": "时间轴编辑",
+    "inputs": {
+      "audio":          { "name": "音频" },
+      "start_time":     { "name": "开始时间" },
+      "end_time":       { "name": "结束时间" },
+      "fps":            { "name": "帧率" },
+      "width":          { "name": "宽度" },
+      "height":         { "name": "高度" },
+      "assets_dir":     { "name": "资源目录" },
+      "global_prompt":  { "name": "全局提示词" },
+      "clips_json":     { "name": "片段数据" },
+      "tracks_json":    { "name": "轨道数据" },
+      "trim_offset":    { "name": "修剪偏移（秒）" }
+    },
+    "outputs": {
+      "fps":               { "name": "帧率" },
+      "width":             { "name": "宽度" },
+      "height":            { "name": "高度" },
+      "global_prompt":     { "name": "全局提示词" },
+      "data_json":         { "name": "配置数据" },
+      "clips_length":      { "name": "片段数量" },
+      "total_frame_count": { "name": "总帧数" },
+      "clips_audio":       { "name": "片段音频" },
+      "frame_seq_dir":     { "name": "帧序列目录" }
+    }
+  },
+
   "CAP_DataJsonClipParser": {
     "display_name": "数据解析（片段）",
     "inputs": {

@@ -48,6 +48,34 @@
     }
   },
 
+  "CAP_TimelineEditor": {
+    "display_name": "Timeline Editor",
+    "inputs": {
+      "audio":          { "name": "Audio" },
+      "start_time":     { "name": "Start Time" },
+      "end_time":       { "name": "End Time" },
+      "fps":            { "name": "FPS" },
+      "width":          { "name": "Width" },
+      "height":         { "name": "Height" },
+      "assets_dir":     { "name": "Assets Dir" },
+      "global_prompt":  { "name": "Global Prompt" },
+      "clips_json":     { "name": "Clips JSON" },
+      "tracks_json":    { "name": "Tracks JSON" },
+      "trim_offset":    { "name": "Trim Offset (s)" }
+    },
+    "outputs": {
+      "fps":               { "name": "FPS" },
+      "width":             { "name": "Width" },
+      "height":            { "name": "Height" },
+      "global_prompt":     { "name": "Global Prompt" },
+      "data_json":         { "name": "Data JSON" },
+      "clips_length":      { "name": "Clips Length" },
+      "total_frame_count": { "name": "Total Frames" },
+      "clips_audio":       { "name": "Clips Audio" },
+      "frame_seq_dir":     { "name": "Frame Seq Dir" }
+    }
+  },
+
   "CAP_DataJsonClipParser": {
     "display_name": "Data Json Clip Parser",
     "inputs": {
