@@ -160,6 +160,16 @@
   color: #c8baff;
 }
 
+.tl-btn-add-package {
+  background: rgba(217, 164, 65, 0.15);
+  border-color: rgba(217, 164, 65, 0.4);
+  color: #e8c483;
+}
+.tl-btn-add-package:hover {
+  background: rgba(217, 164, 65, 0.25);
+  color: #f5d9a8;
+}
+
 /* ── Add-track dropdown menu ──────────────────────────────── */
 
 .tl-add-menu {

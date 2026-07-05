@@ -360,6 +360,30 @@
     filter: saturate(0.35);
 }
 
+/* Package clip: placeholder container (contents TBD) — dashed border +
+   a box icon standing in for a thumbnail. */
+.cat-te-timeline-host .tl-clip.cat-te-clip-package {
+    border-style: dashed;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+.cat-te-timeline-host .tl-clip.cat-te-clip-package .tl-clip-row-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(255,255,255,0.04),
+        rgba(255,255,255,0.04) 6px,
+        transparent 6px,
+        transparent 12px
+    );
+}
+.cat-te-timeline-host .tl-clip.cat-te-clip-package .tl-clip-row-thumb::after {
+    content: "📦";
+    font-size: 20px;
+    opacity: 0.85;
+}
+
 .cat-te-mute-badge {
     position: absolute;
     top: 3px;

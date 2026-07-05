@@ -721,6 +721,39 @@ export class CapTimelineEditorApp {
         this._addVideoAtTime(filename, this._timeline.currentTime, null);
     }
 
+    /**
+     * Package clips are a placeholder container on the image/video tracks —
+     * for now they just occupy a slot at the playhead. What they can hold
+     * (multiple images, other material) is still to be designed.
+     */
+    _insertPackageAtPlayhead() {
+        if (!this._timeline) return;
+        this._insertPackageAtTime(this._timeline.currentTime);
+    }
+
+    _insertPackageAtTime(atSec) {
+        if (!this._timeline) return;
+        const track = this._pickInsertImageTrack(atSec);
+        if (!track) {
+            alert("没有可插入的图片/视频轨道，或该位置已被占用");
+            return;
+        }
+        const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
+        const clip = this._timeline.addClip(track.id, {
+            name: "Package",
+            startTime: atSec,
+            duration: dur,
+            color: "#d9a441",
+        });
+        const ti = this._trackIndex(track);
+        this._meta.set(clip.id, { ...defaultImageMeta(ti), mediaKind: "package", items: [] });
+        this._timeline.selectClip(clip);
+        this._timeline.setCurrentTime(atSec);
+        this._decorateClip(clip);
+        this._autoFitZoom();
+        this._refreshTimelineDuration();
+    }
+
     async _addImageAtTime(filename, atSec, clientY) {
         if (!this._timeline) return;
         let track = clientY != null
@@ -1099,6 +1132,24 @@ export class CapTimelineEditorApp {
             return;
         }
 
+        if (clipType === "package") {
+            const clip = this._timeline.addClip(track.id, {
+                id: uid(),
+                name: c.name || "Package",
+                startTime: startMs / 1000,
+                duration: dur,
+                color: "#d9a441",
+            });
+            this._meta.set(clip.id, {
+                ...defaultImageMeta(trackIdx),
+                mediaKind: "package",
+                items: Array.isArray(c.items) ? c.items : [],
+                disabled: !!c.disabled,
+            });
+            this._decorateClip(clip);
+            return;
+        }
+
         if (clipType === "video") {
             const vf = c.start_image ?? c.src ?? "";
             const fname = vf.split(/[\\/]/).pop() || "视频";
@@ -1193,6 +1244,7 @@ export class CapTimelineEditorApp {
         const disabled = !isAudio && (!!m.disabled || trackHidden);
         clip.el.classList.toggle("cat-te-clip-disabled", disabled);
         clip.el.classList.toggle("cat-te-clip-muted", isAudio && (!!m.muted || trackMuted));
+        clip.el.classList.toggle("cat-te-clip-package", m.mediaKind === "package");
 
         let muteBadge = clip.el.querySelector(".cat-te-mute-badge");
         if (isAudio) {
@@ -1438,6 +1490,14 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!tl) return;
 
+        const packageBtn = document.createElement("button");
+        packageBtn.type = "button";
+        packageBtn.className = "tl-btn tl-btn-add-package";
+        packageBtn.title = "在播放头位置插入一个 Package";
+        packageBtn.textContent = "+ 插入Package";
+        packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
+        tl.toolbarEl.appendChild(packageBtn);
+
         const scroll = tl.scrollEl;
         scroll.addEventListener("dragover", (e) => {
             const types = [...e.dataTransfer.types];
@@ -1648,8 +1708,9 @@ export class CapTimelineEditorApp {
                     });
                 } else {
                     const isVideo = m.mediaKind === "video";
+                    const isPackage = m.mediaKind === "package";
                     const row = {
-                        clip_type: isVideo ? "video" : "image",
+                        clip_type: isPackage ? "package" : (isVideo ? "video" : "image"),
                         track: ti,
                         start_ms: Math.round(clip.startTime * 1000),
                         end_ms: Math.round(clip.endTime * 1000),
@@ -1664,6 +1725,10 @@ export class CapTimelineEditorApp {
                         row.source_duration = Number.isFinite(clip.sourceDuration) ? clip.sourceDuration : clip.duration;
                         row.trim_in = clip.sourceOffset || 0;
                         row.has_audio = !!clip.hasAudio;
+                    }
+                    if (isPackage) {
+                        row.name = clip.name || "Package";
+                        row.items = Array.isArray(m.items) ? m.items : [];
                     }
                     (isMainImage ? main : other).push(row);
                 }
