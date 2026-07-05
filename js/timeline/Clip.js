@@ -11,6 +11,12 @@ export class Clip extends EventEmitter {
     this.name = data.name || 'Clip';
     this.startTime = data.startTime ?? 0;
     this.duration = data.duration ?? 5;
+    // Total length of the underlying source (e.g. an audio file) and how far
+    // into it this clip's visible window currently starts. Trimming either
+    // handle can reveal more of the source but never fabricate content past
+    // sourceDuration or before offset 0.
+    this.sourceDuration = data.sourceDuration ?? Infinity;
+    this.sourceOffset = data.sourceOffset ?? 0;
     this.src = data.src || null;
     this.thumbnail = data.thumbnail || null;
     this.color = data.color || null;
@@ -192,6 +198,7 @@ export class Clip extends EventEmitter {
     const startX = e.clientX;
     const origStart = this.startTime;
     const origDur = this.duration;
+    const origSourceOffset = this.sourceOffset;
     let lastEvent = e;
     let raf = 0;
 
@@ -209,12 +216,25 @@ export class Clip extends EventEmitter {
       const e = lastEvent;
       const dt = (e.clientX - startX) / pps;
       if (side === 'left') {
-        const minStart = prevClip ? prevClip.endTime : 0;
+        // Dragging left reveals earlier source content (offset shrinks);
+        // it can't go past the source's own start (offset 0). Unbounded
+        // clips (e.g. images, sourceDuration = Infinity) have no such limit.
+        const minStart = Math.max(
+          prevClip ? prevClip.endTime : 0,
+          Number.isFinite(this.sourceDuration) ? origStart - origSourceOffset : -Infinity,
+          0,
+        );
         let newStart = this._snap(clamp(origStart + dt, minStart, origStart + origDur - MIN_DURATION));
         this.duration = origDur - (newStart - origStart);
+        this.sourceOffset = origSourceOffset + (newStart - origStart);
         this.startTime = newStart;
       } else {
-        const maxEnd = nextClip ? nextClip.startTime : tl.duration;
+        // Dragging right reveals later source content; it can't go past
+        // however much of the source remains after the current offset.
+        const maxEnd = Math.min(
+          nextClip ? nextClip.startTime : tl.duration,
+          origStart + (this.sourceDuration - origSourceOffset),
+        );
         const newDur = this._snap(clamp(origDur + dt, MIN_DURATION, maxEnd - origStart));
         this.duration = Math.max(MIN_DURATION, newDur);
       }
