@@ -330,22 +330,25 @@
     border-radius: 3px;
     background: transparent;
     color: #8888b0;
-    font-size: 11px;
-    line-height: 1;
     cursor: pointer;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
+.cat-te-track-btn svg { width: 13px; height: 13px; display: block; }
 .cat-te-track-btn:hover { background: rgba(255, 255, 255, 0.08); color: #ddd; }
 .cat-te-track-btn.active { background: rgba(255, 180, 60, 0.2); color: #ffc866; }
 
+/* Blank, non-interactive slot — keeps same-function icons aligned across
+   track rows that don't support that function (e.g. no mute on image tracks). */
+.cat-te-track-btn.placeholder {
+    cursor: default;
+    pointer-events: none;
+}
+
 .cat-te-timeline-host .tl-track-locked {
     opacity: 0.72;
-}
-.cat-te-timeline-host .tl-track-locked .tl-track-header::after {
-    content: "🔒";
-    font-size: 10px;
-    margin-left: 4px;
-    opacity: 0.7;
 }
 
 .cat-te-clip-track.audio {

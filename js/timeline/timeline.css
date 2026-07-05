@@ -16,7 +16,7 @@
   --tl-accent:       #5b4eff;
   --tl-accent-hover: #7060ff;
   --tl-red:          #ff4466;
-  --tl-sidebar-w:    164px;
+  --tl-sidebar-w:    124px;
   --tl-ruler-h:      34px;
   --tl-track-gap:    1px;
   --tl-radius:       6px;
@@ -244,50 +244,30 @@
 .tl-track-header:hover { background: rgba(255,255,255,0.03); }
 
 .tl-track-icon {
-  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  line-height: 1;
-}
-
-.tl-track-name-wrap {
-  flex: 1;
-  overflow: hidden;
-  min-width: 0;
-}
-
-.tl-track-name {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--tl-text);
-}
-
-.tl-track-type {
-  display: block;
-  font-size: 9px;
   color: var(--track-color, var(--tl-text-muted));
-  letter-spacing: 0.08em;
-  margin-top: 1px;
-  opacity: 0.8;
 }
 
-.tl-track-del {
-  background: none;
-  border: none;
-  color: var(--tl-text-dim);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 3px 5px;
-  border-radius: 4px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+.tl-track-icon svg {
+  width: 15px;
+  height: 15px;
+  display: block;
 }
-.tl-track-header:hover .tl-track-del { opacity: 1; }
-.tl-track-del:hover { color: var(--tl-red); background: rgba(255, 68, 102, 0.12); }
+
+.tl-track-spacer { flex: 1; background-color: rgba(255,255,255,0.03); height: 100%; }
+
+/* Function-icon rail: lock / visibility / mute, always a single row that
+   never wraps, so the same slot lines up across every track. */
+.tl-track-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+}
 
 /* ── Main area ────────────────────────────────────────────── */
 
@@ -367,25 +347,7 @@
 .tl-track-header-main {
   background: rgba(91, 78, 255, 0.06) !important;
   border-left-color: var(--tl-accent) !important;
-  border-left-width: 4px !important;
-}
-
-/* MAIN badge */
-.tl-track-main-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  background: rgba(91, 78, 255, 0.22);
-  color: #b0a8ff;
-  border: 1px solid rgba(91, 78, 255, 0.35);
-  border-radius: 3px;
-  padding: 0 5px;
-  height: 14px;
-  margin-left: 5px;
-  vertical-align: middle;
-  flex-shrink: 0;
+  /* border-left-width: 4px !important; */
 }
 
 /* Audio zone: subtle top indicator on first audio track after main */

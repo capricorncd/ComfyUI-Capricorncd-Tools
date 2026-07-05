@@ -1,5 +1,5 @@
 import { api } from "../../scripts/api.js";
-import { Timeline } from "./timeline/index.js";
+import { Timeline, ICONS } from "./timeline/index.js";
 import { parseTimecode, formatTimecode } from "./timecode.js";
 
 const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
@@ -385,53 +385,83 @@ export class CapTimelineEditorApp {
         return max + 1;
     }
 
+    /** Icon-only slot shared by every track row. `null` renders an empty,
+     * non-interactive placeholder so the same-function icon in other rows
+     * (lock/eye/mute) always lines up in the same column. */
+    _makeTrackSlot(track, kind) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cat-te-track-btn";
+        if (kind === null) {
+            btn.classList.add("placeholder");
+            btn.disabled = true;
+            btn.tabIndex = -1;
+            return btn;
+        }
+        if (kind === "lock") {
+            const render = () => {
+                btn.innerHTML = ICONS.lock;
+                btn.classList.toggle("active", track.locked);
+            };
+            btn.title = "锁定轨道";
+            btn.addEventListener("click", e => {
+                e.stopPropagation();
+                track.setLocked(!track.locked);
+                render();
+            });
+            render();
+        } else if (kind === "visible") {
+            const render = () => {
+                btn.innerHTML = track.visible ? ICONS.eye : ICONS.eyeOff;
+                btn.classList.toggle("active", !track.visible);
+            };
+            btn.title = "轨道可见性";
+            btn.addEventListener("click", e => {
+                e.stopPropagation();
+                track.setVisible(!track.visible);
+                render();
+                this._decorateAllClips();
+            });
+            render();
+        } else if (kind === "mute") {
+            const render = () => {
+                btn.innerHTML = track.muted ? ICONS.volumeOff : ICONS.volume;
+                btn.classList.toggle("active", track.muted);
+            };
+            btn.title = "轨道静音";
+            btn.addEventListener("click", e => {
+                e.stopPropagation();
+                track.setMuted(!track.muted);
+                render();
+                this._decorateAllClips();
+            });
+            render();
+        }
+        return btn;
+    }
+
     _setupTrackControls(track) {
         const actions = track.actionsEl;
         if (!actions || actions.dataset.catTeBound) return;
         actions.dataset.catTeBound = "1";
         actions.replaceChildren();
 
-        const lockBtn = document.createElement("button");
-        lockBtn.type = "button";
-        lockBtn.className = "cat-te-track-btn";
-        lockBtn.title = "锁定轨道";
-        lockBtn.textContent = "🔒";
-        lockBtn.addEventListener("click", e => {
-            e.stopPropagation();
-            track.setLocked(!track.locked);
-            lockBtn.classList.toggle("active", track.locked);
-        });
-        lockBtn.classList.toggle("active", track.locked);
+        // Fixed column order for every track type: lock, visibility, mute.
+        // A track that doesn't support a slot gets a blank placeholder
+        // instead of skipping it, so the icons that DO apply still align
+        // vertically with the same column in other rows.
+        actions.appendChild(this._makeTrackSlot(track, "lock"));
+        actions.appendChild(this._makeTrackSlot(track, track.type === "image" ? "visible" : null));
+        actions.appendChild(this._makeTrackSlot(track, track.type === "audio" ? "mute" : null));
+    }
 
-        actions.appendChild(lockBtn);
-
-        if (track.type === "image") {
-            const visBtn = document.createElement("button");
-            visBtn.type = "button";
-            visBtn.className = "cat-te-track-btn";
-            visBtn.title = "轨道可见性";
-            visBtn.textContent = track.visible ? "👁" : "🚫";
-            visBtn.addEventListener("click", e => {
-                e.stopPropagation();
-                track.setVisible(!track.visible);
-                visBtn.textContent = track.visible ? "👁" : "🚫";
-                this._decorateAllClips();
-            });
-            actions.appendChild(visBtn);
-        } else if (track.type === "audio") {
-            const muteBtn = document.createElement("button");
-            muteBtn.type = "button";
-            muteBtn.className = "cat-te-track-btn";
-            muteBtn.title = "轨道静音";
-            muteBtn.textContent = track.muted ? "🔇" : "🔊";
-            muteBtn.addEventListener("click", e => {
-                e.stopPropagation();
-                track.setMuted(!track.muted);
-                muteBtn.textContent = track.muted ? "🔇" : "🔊";
-                this._decorateAllClips();
-            });
-            actions.appendChild(muteBtn);
-        }
+    /** User-added tracks (not the default main/overlay/audio ones) disappear
+     * on their own once emptied — there's no manual delete button. */
+    _pruneEmptyTrack(track) {
+        if (!track) return;
+        if (track === this._mainTrack || track === this._overlayTrack || track === this._audioTrack) return;
+        if (track.clips.length > 0) return;
+        this._timeline?.removeTrack(track.id);
     }
 
     handleDeleteKey(e) {
@@ -1183,8 +1213,6 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!tl) return;
 
-        this._overlayTrack?.headerEl.querySelector(".tl-track-del")?.remove();
-
         const scroll = tl.scrollEl;
         scroll.addEventListener("dragover", (e) => {
             const types = [...e.dataTransfer.types];
@@ -1239,14 +1267,15 @@ export class CapTimelineEditorApp {
             this._selClips = [];
             this._updatePromptPanel();
         });
-        tl.on("clip:remove", ({ clipId }) => {
+        tl.on("clip:remove", ({ clipId, trackId }) => {
             this._meta.delete(clipId);
             if (this._selClip?.id === clipId) this._selClip = null;
             this._selClips = tl.getSelectedClips();
             this._updatePromptPanel();
             this._refreshTimelineDuration();
+            this._pruneEmptyTrack(tl.getTrack(trackId));
         });
-        tl.on("clip:trackchange", ({ clip, to }) => {
+        tl.on("clip:trackchange", ({ clip, from, to }) => {
             const m = this._meta.get(clip.id)
                 ?? (to.type === "audio" ? defaultAudioMeta() : defaultImageMeta());
             m.trackIndex = this._trackIndex(to);
@@ -1254,6 +1283,10 @@ export class CapTimelineEditorApp {
             else m.clipType = "image";
             this._meta.set(clip.id, m);
             this._updateClipInfoPanel(clip);
+            this._pruneEmptyTrack(from);
+        });
+        tl.on("track:remove", ({ trackId }) => {
+            this._trackInfo.delete(trackId);
         });
         tl.on("clip:move", ({ clip }) => {
             if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);

@@ -1,5 +1,5 @@
 import { EventEmitter } from './EventEmitter.js';
-import { generateId, TRACK_TYPES } from './utils.js';
+import { generateId, TRACK_TYPES, ICONS } from './utils.js';
 import { Clip } from './Clip.js';
 
 export class Track extends EventEmitter {
@@ -37,49 +37,24 @@ export class Track extends EventEmitter {
     el.dataset.trackId = this.id;
     el.style.height = `${this.height}px`;
     el.style.setProperty('--track-color', this.color);
+    el.title = this.name;
 
     const icon = document.createElement('span');
     icon.className = 'tl-track-icon';
-    icon.textContent = TRACK_TYPES[this.type]?.icon || '▶';
+    icon.innerHTML = ICONS.trackType[this.type] || ICONS.trackType.video;
 
-    const nameWrap = document.createElement('div');
-    nameWrap.className = 'tl-track-name-wrap';
-
-    const nameEl = document.createElement('span');
-    nameEl.className = 'tl-track-name';
-    nameEl.textContent = this.name;
-    nameEl.title = this.name;
-    nameWrap.appendChild(nameEl);
-
-    // Main/overlay (image) tracks skip the redundant type badge — the icon
-    // and MAIN badge already convey what they are.
-    if (this.type !== 'image') {
-      const typeEl = document.createElement('span');
-      typeEl.className = 'tl-track-type';
-      typeEl.textContent = this.type.toUpperCase();
-      nameWrap.appendChild(typeEl);
-    }
-
-    // MAIN badge (injected after build; also used by _markAsMain)
-    this._mainBadgeEl = document.createElement('span');
-    this._mainBadgeEl.className = 'tl-track-main-badge';
-    this._mainBadgeEl.textContent = 'MAIN';
-    this._mainBadgeEl.style.display = 'none';
-    nameWrap.appendChild(this._mainBadgeEl);
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'tl-track-del';
-    delBtn.title = 'Remove track';
-    delBtn.innerHTML = '✕';
-    delBtn.addEventListener('click', () => this.timeline.removeTrack(this.id));
+    // Icon-only header — no visible name/type text (hover the row for its
+    // name via the title tooltip). This spacer just pushes the action
+    // icons to the right edge.
+    const spacer = document.createElement('div');
+    spacer.className = 'tl-track-spacer';
 
     const actions = document.createElement('div');
     actions.className = 'tl-track-actions';
 
     el.appendChild(icon);
-    el.appendChild(nameWrap);
+    el.appendChild(spacer);
     el.appendChild(actions);
-    el.appendChild(delBtn);
     this._actionsEl = actions;
     return el;
   }
@@ -109,9 +84,7 @@ export class Track extends EventEmitter {
     this.isMain = true;
     this.el.classList.add('tl-track-main');
     this.headerEl.classList.add('tl-track-header-main');
-    this._mainBadgeEl.style.display = '';
-    // Main track cannot be deleted
-    this.headerEl.querySelector('.tl-track-del').style.display = 'none';
+    this.headerEl.title = `${this.name} (MAIN)`;
   }
 
   addClip(data) {
