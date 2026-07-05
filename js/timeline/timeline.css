@@ -439,7 +439,7 @@
   opacity: 0.92;
   z-index: 100;
   box-shadow: 0 8px 28px rgba(91, 78, 255, 0.35), 0 4px 16px rgba(0,0,0,0.6);
-  transform: translateY(-1px) scale(1.008);
+  transform: translateY(-1px);
 }
 
 .tl-clip.no-transition {
