@@ -186,6 +186,18 @@ export class CapTimelineEditorApp {
         if (CapTimelineEditorApp._open === this) CapTimelineEditorApp._open = null;
     }
 
+    /** Settings dialog — language is the first setting; more will land here
+     * later. Selection is only persisted for now, not yet wired to i18n. */
+    _openSettings() {
+        if (!this.settingsModal) return;
+        this.langSelect.value = localStorage.getItem("cat-te-lang") || "zh";
+        this.settingsModal.hidden = false;
+    }
+
+    _closeSettings() {
+        if (this.settingsModal) this.settingsModal.hidden = true;
+    }
+
     destroy() {
         this.close(false);
         document.removeEventListener("click", this._onDocClick);
@@ -205,8 +217,7 @@ export class CapTimelineEditorApp {
           <header class="cat-te-header">
             <span class="cat-te-title">导演台</span>
             <div class="cat-te-header-spacer"></div>
-            <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-save">保存并关闭</button>
-            <button type="button" class="cat-te-btn cat-te-close">关闭</button>
+            <button type="button" class="cat-te-btn cat-te-settings">⚙ 设置</button>
           </header>
           <div class="cat-te-main">
             <aside class="cat-te-media">
@@ -258,7 +269,28 @@ export class CapTimelineEditorApp {
               </div>
             </aside>
           </div>
+          <footer class="cat-te-footer">
+            <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-save">保存并关闭</button>
+            <button type="button" class="cat-te-btn cat-te-close">关闭</button>
+          </footer>
           <div class="cat-te-frame-preview"></div>
+          <div class="cat-te-modal-backdrop cat-te-settings-modal" hidden>
+            <div class="cat-te-modal">
+              <div class="cat-te-modal-header">
+                <span>设置</span>
+                <button type="button" class="cat-te-modal-close" title="关闭">✕</button>
+              </div>
+              <div class="cat-te-modal-body">
+                <label class="cat-te-modal-row">
+                  <span>语言</span>
+                  <select class="cat-te-lang-select">
+                    <option value="zh">简体中文</option>
+                    <option value="en">English</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
         `;
         document.body.appendChild(el);
         this._overlay = el;
@@ -279,6 +311,17 @@ export class CapTimelineEditorApp {
         el.querySelector(".cat-te-save").addEventListener("click", () => this.close(true));
         el.querySelector(".cat-te-close").addEventListener("click", () => this.close(false));
 
+        this.settingsModal = el.querySelector(".cat-te-settings-modal");
+        this.langSelect = el.querySelector(".cat-te-lang-select");
+        el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
+        el.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
+        this.settingsModal.addEventListener("click", (e) => {
+            if (e.target === this.settingsModal) this._closeSettings();
+        });
+        this.langSelect.addEventListener("change", () => {
+            localStorage.setItem("cat-te-lang", this.langSelect.value);
+        });
+
         el.querySelectorAll(".cat-te-tab").forEach(btn => {
             btn.addEventListener("click", () => {
                 el.querySelectorAll(".cat-te-tab").forEach(b => b.classList.remove("active"));
@@ -296,6 +339,7 @@ export class CapTimelineEditorApp {
 
         el.addEventListener("keydown", e => {
             if (e.key === "Escape") {
+                if (!this.settingsModal.hidden) { this._closeSettings(); e.stopPropagation(); return; }
                 if (this._removeCtxMenu()) { e.stopPropagation(); return; }
                 e.stopPropagation();
                 this.close(true);
