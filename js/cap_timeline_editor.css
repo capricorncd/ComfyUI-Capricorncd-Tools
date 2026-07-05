@@ -28,9 +28,21 @@
 }
 
 .cat-te-title {
+    width: min(360px, 35vw);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    outline: none;
+    background: transparent;
     font-size: 15px;
     font-weight: 700;
     color: #a090ff;
+    padding: 4px 6px;
+}
+
+.cat-te-title:hover,
+.cat-te-title:focus {
+    border-color: #3a3a5a;
+    background: #141428;
 }
 
 .cat-te-header-spacer { flex: 1; }
@@ -81,7 +93,7 @@
 .cat-te-footer {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: flex-end;
     gap: 10px;
     height: 48px;
     padding: 0 18px;

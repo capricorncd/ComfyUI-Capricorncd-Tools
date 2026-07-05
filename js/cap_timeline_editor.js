@@ -21,7 +21,7 @@ function markNoSerialize(node) {
             if (w.element) w.element.style.display = "none";
             w.computeSize = () => [0, -4];
         }
-        if (w.name === "clips_json" || w.name === "tracks_json") {
+        if (w.name === "project_json") {
             if (w.element) w.element.style.display = "none";
             w.computeSize = () => [0, -4];
         }

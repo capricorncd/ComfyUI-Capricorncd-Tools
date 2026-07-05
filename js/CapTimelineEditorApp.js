@@ -35,6 +35,7 @@ function defaultImageMeta(trackIndex = 0) {
         endImage: null,
         useGlobalPrompt: true,
         disabled: false,
+        visible: true,
         muted: false,
         trackIndex,
     };
@@ -44,6 +45,7 @@ function defaultAudioMeta(trackIndex = 2) {
     return {
         clipType: "audio",
         muted: false,
+        visible: true,
         sourceDuration: 0,
         trimIn: 0,
         trackIndex,
@@ -144,13 +146,22 @@ export class CapTimelineEditorApp {
 
     async _openEditor() {
         this._historyReady = false;
+        this._openedWidgetValues = Object.fromEntries(
+            ["fps", "width", "height", "global_prompt"].map(name => [name, this._w(name)?.value]),
+        );
         await this._initTimelineFromWidgets();
         this._refreshTimelineDuration();
         requestAnimationFrame(() => this._timeline?._refresh());
         this._undoStack = [];
         this._redoStack = [];
         this._historyReady = true;
+        this._openedProjectJson = JSON.stringify(this._buildProject());
         this._updateHistoryButtons();
+    }
+
+    _hasUnsavedChanges() {
+        if (!this._timeline) return false;
+        return JSON.stringify(this._buildProject()) !== this._openedProjectJson;
     }
 
     /**
@@ -162,7 +173,7 @@ export class CapTimelineEditorApp {
      */
     close(save = true) {
         if (!this._overlay) return;
-        if (!save && this._undoStack.length > 0) {
+        if (!save && this._hasUnsavedChanges()) {
             if (confirm("有未保存的修改，是否保存后再关闭？\n点击“取消”将放弃这些修改。")) {
                 save = true;
             }
@@ -175,6 +186,12 @@ export class CapTimelineEditorApp {
         this._historyReady = false;
         this._stopAudioPlayback();
         if (save) this._saveToWidgets();
+        else if (this._openedWidgetValues) {
+            for (const [name, value] of Object.entries(this._openedWidgetValues)) {
+                const widget = this._w(name);
+                if (widget && value !== undefined) widget.value = value;
+            }
+        }
         this._timeline?.destroy();
         this._timeline = null;
         this._mainTrack = null;
@@ -195,6 +212,62 @@ export class CapTimelineEditorApp {
 
     _closeSettings() {
         if (this.settingsModal) this.settingsModal.hidden = true;
+    }
+
+    _chooseProjectImport() {
+        if (this._hasUnsavedChanges() && !confirm("当前时间轴已有未保存的更改，是否用导入的项目覆盖？")) return;
+        this.importFileInput.value = "";
+        this.importFileInput.click();
+    }
+
+    _exportProject() {
+        const json = JSON.stringify(this._buildProject(), null, 2);
+        const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const projectName = String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目";
+        const safeName = projectName
+            .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+            .replace(/[. ]+$/g, "")
+            .slice(0, 80) || "未命名项目";
+        link.href = url;
+        link.download = `${safeName}-${stamp}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    async _importProject(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        try {
+            const project = JSON.parse(await file.text());
+            if (!project || typeof project !== "object" || Array.isArray(project)) {
+                throw new Error("项目根节点必须是对象");
+            }
+            if (project.schema_version !== 1) {
+                throw new Error(`不支持的 schema_version：${project.schema_version ?? "缺失"}`);
+            }
+            if (!Array.isArray(project.tracks)) {
+                throw new Error("项目缺少 tracks 数组");
+            }
+
+            this._historyReady = false;
+            this._stopAudioPlayback();
+            this._timeline?.destroy();
+            this._timeline = null;
+            await this._initTimelineFromWidgets(project);
+            this._undoStack = [];
+            this._redoStack = [];
+            this._historyReady = true;
+            this._updateHistoryButtons();
+            requestAnimationFrame(() => this._timeline?._refresh());
+        } catch (error) {
+            alert(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     destroy() {
@@ -222,9 +295,12 @@ export class CapTimelineEditorApp {
         el.tabIndex = -1;
         el.innerHTML = `
           <header class="cat-te-header">
-            <span class="cat-te-title">导演台</span>
+            <input class="cat-te-title" type="text" value="未命名项目" aria-label="项目名称" />
             <div class="cat-te-header-spacer"></div>
+            <button type="button" class="cat-te-btn cat-te-import">导入</button>
+            <button type="button" class="cat-te-btn cat-te-export">导出</button>
             <button type="button" class="cat-te-btn cat-te-settings">⚙ 设置</button>
+            <input class="cat-te-import-file" type="file" accept="application/json,.json" hidden />
           </header>
           <div class="cat-te-main">
             <aside class="cat-te-media">
@@ -303,6 +379,7 @@ export class CapTimelineEditorApp {
         `;
         document.body.appendChild(el);
         this._overlay = el;
+        this.projectNameInput = el.querySelector(".cat-te-title");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
         this.tlHost = el.querySelector(".cat-te-timeline-host");
         this.promptInput = el.querySelector(".cat-te-prompt-input");
@@ -323,6 +400,21 @@ export class CapTimelineEditorApp {
 
         this.settingsModal = el.querySelector(".cat-te-settings-modal");
         this.langSelect = el.querySelector(".cat-te-lang-select");
+        this.importFileInput = el.querySelector(".cat-te-import-file");
+        el.querySelector(".cat-te-import").addEventListener("click", () => this._chooseProjectImport());
+        el.querySelector(".cat-te-export").addEventListener("click", () => this._exportProject());
+        this.importFileInput.addEventListener("change", (e) => void this._importProject(e));
+        this.projectNameInput.addEventListener("focus", () => { this._projectNameUndoArmed = false; });
+        this.projectNameInput.addEventListener("beforeinput", () => {
+            if (!this._projectNameUndoArmed) {
+                this._recordUndo();
+                this._projectNameUndoArmed = true;
+            }
+        });
+        this.projectNameInput.addEventListener("blur", () => {
+            this.projectNameInput.value = this.projectNameInput.value.trim() || "未命名项目";
+            this._projectNameUndoArmed = false;
+        });
         el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
         el.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
         this.settingsModal.addEventListener("click", (e) => {
@@ -1189,11 +1281,11 @@ export class CapTimelineEditorApp {
         this._activeAudioSources = [];
     }
 
-    _initTimelineFromWidgets() {
-        return this._initTimelineFromWidgetsAsync();
+    _initTimelineFromWidgets(projectOverride = null) {
+        return this._initTimelineFromWidgetsAsync(projectOverride);
     }
 
-    async _initTimelineFromWidgetsAsync() {
+    async _initTimelineFromWidgetsAsync(projectOverride = null) {
         this._meta.clear();
         this._trackInfo.clear();
         this.tlHost.replaceChildren();
@@ -1207,11 +1299,31 @@ export class CapTimelineEditorApp {
             addTrackTypes: ["image", "audio"],
         });
 
-        let tracksCfg = [];
-        try {
-            tracksCfg = JSON.parse(this._w("tracks_json")?.value || "[]");
-            if (!Array.isArray(tracksCfg)) tracksCfg = [];
-        } catch { tracksCfg = []; }
+        let project = projectOverride;
+        if (!project) {
+            try {
+                project = JSON.parse(this._w("project_json")?.value || "{}");
+                if (!project || typeof project !== "object" || Array.isArray(project)) throw new Error("invalid project");
+            } catch { project = { schema_version: 1, settings: {}, tracks: [] }; }
+        }
+
+        this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
+
+        const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
+        for (const name of ["fps", "width", "height", "global_prompt"]) {
+            if (settings[name] == null) continue;
+            const widget = this._w(name);
+            if (widget) widget.value = settings[name];
+        }
+        this._timeline.fps = this.getFps();
+
+        const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
+        const tracksCfg = projectTracks.map((track, order) => ({
+            ...track,
+            type: track.type === "audio" ? "audio" : "image",
+            trackIndex: order,
+            isMain: track.role === "main",
+        }));
 
         if (!tracksCfg.length) {
             this._createDefaultTracks();
@@ -1219,11 +1331,25 @@ export class CapTimelineEditorApp {
             this._loadTracksFromJson(tracksCfg);
         }
 
-        let clips = [];
-        try {
-            clips = JSON.parse(this._w("clips_json")?.value || "[]");
-            if (!Array.isArray(clips)) clips = [];
-        } catch { clips = []; }
+        const clips = [];
+        projectTracks.forEach((track, trackIndex) => {
+            for (const clip of Array.isArray(track.clips) ? track.clips : []) {
+                const source = clip.source && typeof clip.source === "object" ? clip.source : {};
+                const startMs = Number(clip.start_ms) || 0;
+                const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
+                clips.push({
+                    ...clip,
+                    clip_type: clip.type,
+                    track: trackIndex,
+                    end_ms: startMs + durationMs,
+                    start_image: source.file || null,
+                    audio_file: source.file || null,
+                    source_duration: Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms)) / 1000,
+                    trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
+                    disabled: clip.enabled === false,
+                });
+            }
+        });
 
         await Promise.all(clips.map(c => this._addClipFromJson(c)));
 
@@ -1245,9 +1371,9 @@ export class CapTimelineEditorApp {
         this._audioTrack = tl.addTrack({
             type: "audio", name: "音频", height: TRACK_HEIGHT, color: "#3dd68c",
         });
-        this._trackInfo.set(this._mainTrack.id, { trackIndex: 0 });
-        this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1 });
-        this._trackInfo.set(this._audioTrack.id, { trackIndex: 2 });
+        this._trackInfo.set(this._mainTrack.id, { trackIndex: 0, enabled: true, role: "main" });
+        this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1, enabled: true, role: "overlay" });
+        this._trackInfo.set(this._audioTrack.id, { trackIndex: 2, enabled: true, role: "audio" });
         for (const t of [this._mainTrack, this._overlayTrack, this._audioTrack]) {
             this._setupTrackControls(t);
         }
@@ -1281,7 +1407,11 @@ export class CapTimelineEditorApp {
             track.setLocked(!!row.locked);
             track.setVisible(row.visible !== false);
             track.setMuted(!!row.muted);
-            this._trackInfo.set(track.id, { trackIndex: row.trackIndex ?? this._nextTrackIndex() });
+            this._trackInfo.set(track.id, {
+                trackIndex: row.trackIndex ?? this._nextTrackIndex(),
+                enabled: row.enabled !== false,
+                role: row.role || (row.isMain ? "main" : (row.type === "audio" ? "audio" : "overlay")),
+            });
             if (row.isMain || track.isMain) this._mainTrack = track;
             if (row.trackIndex === 1 && row.type === "image") this._overlayTrack = track;
             if (row.type === "audio" && !this._audioTrack) this._audioTrack = track;
@@ -1324,7 +1454,7 @@ export class CapTimelineEditorApp {
                 } catch { /* placeholder */ }
             }
             const clip = this._timeline.addClip(track.id, {
-                id: uid(),
+                id: c.id || uid(),
                 name: af.split(/[\\/]/).pop() || "音频",
                 startTime: startMs / 1000,
                 duration: dur,
@@ -1338,6 +1468,7 @@ export class CapTimelineEditorApp {
             this._meta.set(clip.id, {
                 ...defaultAudioMeta(trackIdx),
                 muted: !!c.muted,
+                visible: c.visible !== false,
                 sourceDuration: sourceDur,
                 trimIn,
             });
@@ -1347,7 +1478,7 @@ export class CapTimelineEditorApp {
 
         if (clipType === "package") {
             const clip = this._timeline.addClip(track.id, {
-                id: uid(),
+                id: c.id || uid(),
                 name: c.name || "Package",
                 startTime: startMs / 1000,
                 duration: dur,
@@ -1383,7 +1514,7 @@ export class CapTimelineEditorApp {
                 } catch { hasAudio = false; }
             }
             const clip = this._timeline.addClip(track.id, {
-                id: uid(),
+                id: c.id || uid(),
                 name: fname,
                 startTime: startMs / 1000,
                 duration: dur,
@@ -1403,7 +1534,10 @@ export class CapTimelineEditorApp {
                 endImage: c.end_image ?? null,
                 useGlobalPrompt: c.use_global_prompt !== false,
                 disabled: !!c.disabled,
+                visible: c.visible !== false,
                 sourceDuration: sourceDur,
+                muted: !!c.muted,
+                visible: c.visible !== false,
             });
             this._decorateClip(clip);
             return;
@@ -1412,7 +1546,7 @@ export class CapTimelineEditorApp {
         const img = c.start_image ?? "";
         const fname = img.split(/[\\/]/).pop() || "素材";
         const clip = this._timeline.addClip(track.id, {
-            id: uid(),
+            id: c.id || uid(),
             name: fname,
             startTime: startMs / 1000,
             duration: dur,
@@ -1426,6 +1560,7 @@ export class CapTimelineEditorApp {
             endImage: c.end_image ?? null,
             useGlobalPrompt: c.use_global_prompt !== false,
             disabled: !!c.disabled,
+            visible: c.visible !== false,
         });
         this._decorateClip(clip);
     }
@@ -1941,98 +2076,81 @@ export class CapTimelineEditorApp {
         this._meta.set(this._selClip.id, m);
     }
 
-    _packMainClips(clips) {
-        const fps = this.getFps();
-        const frameMs = Math.max(1, Math.round(1000 / fps));
-        clips.sort((a, b) => a.startMs - b.startMs);
-        let cursor = 0;
-        for (const c of clips) {
-            const dur = Math.max(frameMs, c.endMs - c.startMs);
-            c.startMs = cursor;
-            c.endMs = cursor + dur;
-            cursor = c.endMs;
-        }
-        return clips;
-    }
-
-    /**
-     * Build the clips_json rows. With `pack: true` (the saved/exported
-     * shape) main-track clips are re-flowed back-to-back via
-     * `_packMainClips`; with `pack: false` (undo/redo snapshots) exact
-     * current positions/gaps are preserved.
-     */
-    _buildClipsRows(pack = true) {
-        const main = [];
-        const other = [];
-        for (const track of this._timeline?.tracks ?? []) {
+    /** Build the complete, editable and lossless project document. */
+    _buildProject() {
+        const tracks = (this._timeline?.tracks ?? []).map((track, order) => {
             const ti = this._trackIndex(track);
-            const isMainImage = track.type === "image" && track.isMain;
-            for (const clip of track.clips) {
+            const clips = track.clips.map(clip => {
                 const m = this._meta.get(clip.id)
                     ?? (track.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti));
-                if (track.type === "audio" || m.clipType === "audio") {
-                    other.push({
-                        clip_type: "audio",
-                        track: ti,
-                        start_ms: Math.round(clip.startTime * 1000),
-                        end_ms: Math.round(clip.endTime * 1000),
-                        audio_file: clip.src || "",
-                        muted: !!m.muted,
-                        source_duration: Number.isFinite(clip.sourceDuration) ? clip.sourceDuration : (m.sourceDuration || clip.duration),
-                        trim_in: clip.sourceOffset || 0,
-                    });
+                const startMs = Math.round(clip.startTime * 1000);
+                const durationMs = Math.max(1, Math.round(clip.duration * 1000));
+                const sourceInMs = Math.max(0, Math.round((clip.sourceOffset || 0) * 1000));
+                const source = {
+                    kind: track.type === "audio" ? "audio" : (m.mediaKind || "image"),
+                    file: clip.src || "",
+                };
+                if (track.type === "audio" || m.mediaKind === "video") {
+                    source.in_ms = sourceInMs;
+                    source.out_ms = sourceInMs + durationMs;
+                }
+                const row = {
+                    id: clip.id,
+                    type: track.type === "audio" ? "audio" : (m.mediaKind || "image"),
+                    enabled: !m.disabled,
+                    visible: m.visible !== false,
+                    start_ms: startMs,
+                    duration_ms: durationMs,
+                    source,
+                };
+                if (track.type === "audio") {
+                    row.muted = !!m.muted;
                 } else {
-                    const isVideo = m.mediaKind === "video";
-                    const isPackage = m.mediaKind === "package";
-                    const row = {
-                        clip_type: isPackage ? "package" : (isVideo ? "video" : "image"),
-                        track: ti,
-                        start_ms: Math.round(clip.startTime * 1000),
-                        end_ms: Math.round(clip.endTime * 1000),
-                        start_image: clip.src || null,
-                        end_image: m.endImage ?? null,
-                        prompt: m.prompt ?? "",
-                        use_global_prompt: m.useGlobalPrompt !== false,
-                        disabled: !!m.disabled,
-                        z_index: ti === 1 ? 2 : 1,
-                    };
-                    if (isVideo) {
-                        row.source_duration = Number.isFinite(clip.sourceDuration) ? clip.sourceDuration : clip.duration;
-                        row.trim_in = clip.sourceOffset || 0;
+                    row.prompt = m.prompt ?? "";
+                    row.end_image = m.endImage ?? null;
+                    row.use_global_prompt = m.useGlobalPrompt !== false;
+                    if (m.mediaKind === "video") {
                         row.has_audio = !!clip.hasAudio;
+                        row.muted = !!m.muted;
                     }
-                    if (isPackage) {
+                    if (m.mediaKind === "package") {
                         row.name = clip.name || "Package";
                         row.items = Array.isArray(m.items) ? m.items : [];
                     }
-                    (isMainImage ? main : other).push(row);
                 }
-            }
-        }
-        const finalMain = pack ? this._packMainClips(main) : main;
-        return [...finalMain, ...other].sort((a, b) => a.start_ms - b.start_ms);
-    }
-
-    _buildTracksRows() {
-        return (this._timeline?.tracks ?? []).map(track => ({
-            id: track.id,
-            type: track.type,
-            name: track.name,
-            trackIndex: this._trackIndex(track),
-            locked: !!track.locked,
-            visible: track.visible !== false,
-            muted: !!track.muted,
-            isMain: !!track.isMain,
-            color: track.color,
-        }));
+                return row;
+            });
+            const trackInfo = this._trackInfo.get(track.id) || {};
+            return {
+                id: track.id,
+                type: track.type === "audio" ? "audio" : "visual",
+                role: track.isMain ? "main" : (trackInfo.role || (track.type === "audio" ? "audio" : "overlay")),
+                name: track.name,
+                order,
+                enabled: trackInfo.enabled !== false,
+                visible: track.visible !== false,
+                muted: !!track.muted,
+                locked: !!track.locked,
+                color: track.color,
+                clips,
+            };
+        });
+        return {
+            schema_version: 1,
+            name: String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目",
+            settings: {
+                fps: Number(this._w("fps")?.value ?? 24),
+                width: Number(this._w("width")?.value ?? 720),
+                height: Number(this._w("height")?.value ?? 1280),
+                global_prompt: String(this._w("global_prompt")?.value ?? ""),
+            },
+            tracks,
+        };
     }
 
     _saveToWidgets() {
-        const clipsW = this._w("clips_json");
-        if (clipsW) clipsW.value = JSON.stringify(this._buildClipsRows(true));
-
-        const tracksW = this._w("tracks_json");
-        if (tracksW) tracksW.value = JSON.stringify(this._buildTracksRows());
+        const projectW = this._w("project_json");
+        if (projectW) projectW.value = JSON.stringify(this._buildProject());
 
         this.node.setDirtyCanvas(true, true);
     }
@@ -2041,8 +2159,7 @@ export class CapTimelineEditorApp {
 
     _captureSnapshot() {
         return {
-            clips: this._buildClipsRows(false),
-            tracks: this._buildTracksRows(),
+            project: this._buildProject(),
             currentTime: this._timeline?.currentTime ?? 0,
         };
     }
@@ -2094,13 +2211,40 @@ export class CapTimelineEditorApp {
             this._overlayTrack = null;
             this._audioTrack = null;
 
+            const projectTracks = Array.isArray(snapshot.project?.tracks) ? snapshot.project.tracks : [];
+            this.projectNameInput.value = String(snapshot.project?.name || "未命名项目").trim() || "未命名项目";
+            const tracks = projectTracks.map((track, order) => ({
+                ...track,
+                type: track.type === "audio" ? "audio" : "image",
+                trackIndex: order,
+                isMain: track.role === "main",
+            }));
             this._timeline.clearTracks();
-            if (snapshot.tracks.length) {
-                this._loadTracksFromJson(snapshot.tracks);
+            if (tracks.length) {
+                this._loadTracksFromJson(tracks);
             } else {
                 this._createDefaultTracks();
             }
-            await Promise.all(snapshot.clips.map(c => this._addClipFromJson(c)));
+            const clips = [];
+            projectTracks.forEach((track, trackIndex) => {
+                for (const clip of Array.isArray(track.clips) ? track.clips : []) {
+                    const source = clip.source && typeof clip.source === "object" ? clip.source : {};
+                    const startMs = Number(clip.start_ms) || 0;
+                    const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
+                    clips.push({
+                        ...clip,
+                        clip_type: clip.type,
+                        track: trackIndex,
+                        end_ms: startMs + durationMs,
+                        start_image: source.file || null,
+                        audio_file: source.file || null,
+                        source_duration: Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms)) / 1000,
+                        trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
+                        disabled: clip.enabled === false,
+                    });
+                }
+            });
+            await Promise.all(clips.map(c => this._addClipFromJson(c)));
 
             this._timeline.setCurrentTime(snapshot.currentTime || 0);
             this._decorateAllClips();
