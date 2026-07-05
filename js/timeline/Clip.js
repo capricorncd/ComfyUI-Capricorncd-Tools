@@ -198,6 +198,8 @@ export class Clip extends EventEmitter {
     let lastEvent = e;
     let raf = 0;
 
+    tl.emit('clip:movestart', { clip: this, track: origTrack });
+
     this.el.classList.add('dragging', 'no-transition');
 
     const apply = () => {
@@ -238,6 +240,7 @@ export class Clip extends EventEmitter {
         tl.emit('clip:trackchange', { clip: this, from: origTrack, to: liveTrack });
       }
       this._applyPosition();
+      tl.emit('clip:moveend', { clip: this, track: liveTrack, moved: this.startTime !== startTime || liveTrack !== origTrack });
 
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
@@ -258,6 +261,7 @@ export class Clip extends EventEmitter {
     let raf = 0;
 
     this.el.classList.add('resizing', 'no-transition');
+    tl.emit('clip:resizestart', { clip: this, track: this.track });
 
     const others = this.track.clips
       .filter(c => c.id !== this.id)
@@ -306,6 +310,11 @@ export class Clip extends EventEmitter {
       if (raf) cancelAnimationFrame(raf);
       apply();
       this.el.classList.remove('resizing', 'no-transition');
+      tl.emit('clip:resizeend', {
+        clip: this,
+        track: this.track,
+        moved: this.startTime !== origStart || this.duration !== origDur,
+      });
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };

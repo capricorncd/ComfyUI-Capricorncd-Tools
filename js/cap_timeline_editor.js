@@ -6,6 +6,7 @@ const NODE_CLASS = "CAP_TimelineEditor";
 function onTeGlobalKeyDown(e) {
     const te = CapTimelineEditorApp._open;
     if (!te) return;
+    if (te.handleUndoRedoKey(e)) return;
     if (te.handleDeleteKey(e)) return;
     te.handleShortcutKey(e);
 }

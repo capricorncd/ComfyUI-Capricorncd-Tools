@@ -388,6 +388,17 @@ export class Timeline extends EventEmitter {
 
   getTrack(trackId) { return this.tracks.find(t => t.id === trackId); }
 
+  /** Remove every track (including Main) — used to rebuild the timeline
+   * in place from an external snapshot (e.g. undo/redo) without recreating
+   * the whole component and losing zoom/scroll state. */
+  clearTracks() {
+    this.selectClip(null);
+    for (const track of this.tracks) track.destroy();
+    this.tracks.length = 0;
+    this._mainTrackId = null;
+    this._refresh();
+  }
+
   /**
    * Return the track of the given `type` whose DOM element is under clientY,
    * or null if none matches.  Used by Clip to find cross-track drag targets.

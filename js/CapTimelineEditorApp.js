@@ -68,6 +68,10 @@ export class CapTimelineEditorApp {
         this._audioTrack = null;
         this._selClip = null;
         this._selClips = [];
+        this._undoStack = [];
+        this._redoStack = [];
+        this._historyReady = false;
+        this._restoringHistory = false;
         loadEditorCss();
         this._buildLauncher();
     }
@@ -134,14 +138,43 @@ export class CapTimelineEditorApp {
         return true;
     }
 
+    /**
+     * Ctrl+Z / Ctrl+Shift+Z — undo/redo. Propagation is always stopped while
+     * the editor is open so ComfyUI's own Ctrl+Z (graph undo) never also
+     * fires and closes the director's console. When focus is in a text
+     * field the browser's native text-undo is left alone (no
+     * preventDefault); otherwise it drives the timeline's own history.
+     * @returns {boolean} true if the event was handled
+     */
+    handleUndoRedoKey(e) {
+        if (!this._overlay?.classList.contains("open")) return false;
+        if (!e.ctrlKey && !e.metaKey) return false;
+        if (e.key?.toLowerCase() !== "z") return false;
+
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+
+        if (e.target?.closest?.("input, textarea, select")) return true; // native text-field undo/redo
+
+        e.preventDefault();
+        if (e.shiftKey) void this.redo();
+        else void this.undo();
+        return true;
+    }
+
     async _openEditor() {
+        this._historyReady = false;
         await this._initTimelineFromWidgets();
         this._refreshTimelineDuration();
         requestAnimationFrame(() => this._timeline?._refresh());
+        this._undoStack = [];
+        this._redoStack = [];
+        this._historyReady = true;
     }
 
     close(save = true) {
         if (!this._overlay) return;
+        this._historyReady = false;
         if (save) this._saveToWidgets();
         this._timeline?.destroy();
         this._timeline = null;
@@ -256,6 +289,8 @@ export class CapTimelineEditorApp {
         });
         el.querySelector(".cat-te-media-refresh")?.addEventListener("click", () => this._refreshMediaLists());
 
+        this.promptInput.addEventListener("focus", () => { this._promptUndoArmed = true; });
+        this.promptInput.addEventListener("blur", () => { this._promptUndoArmed = false; });
         this.promptInput.addEventListener("input", () => this._onPromptInput());
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
 
@@ -412,6 +447,7 @@ export class CapTimelineEditorApp {
             btn.title = "锁定轨道";
             btn.addEventListener("click", e => {
                 e.stopPropagation();
+                this._recordUndo();
                 track.setLocked(!track.locked);
                 render();
             });
@@ -424,6 +460,7 @@ export class CapTimelineEditorApp {
             btn.title = "轨道可见性";
             btn.addEventListener("click", e => {
                 e.stopPropagation();
+                this._recordUndo();
                 track.setVisible(!track.visible);
                 render();
                 this._decorateAllClips();
@@ -437,6 +474,7 @@ export class CapTimelineEditorApp {
             btn.title = "轨道静音";
             btn.addEventListener("click", e => {
                 e.stopPropagation();
+                this._recordUndo();
                 track.setMuted(!track.muted);
                 render();
                 this._decorateAllClips();
@@ -484,6 +522,7 @@ export class CapTimelineEditorApp {
             ? `确定删除素材「${clips[0].name}」？`
             : `确定删除选中的 ${n} 个素材？`;
         if (!confirm(msg)) return true;
+        this._recordUndo();
         for (const clip of clips) {
             this._meta.delete(clip.id);
             this._timeline.removeClip(clip.track.id, clip.id);
@@ -739,6 +778,7 @@ export class CapTimelineEditorApp {
             return;
         }
         const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: "Package",
             startTime: atSec,
@@ -766,6 +806,7 @@ export class CapTimelineEditorApp {
             return;
         }
         const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -804,6 +845,7 @@ export class CapTimelineEditorApp {
         }
         const dur = Math.max(0.05, sourceDur);
         this._ensureTimelineLength(atSec + dur);
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -858,6 +900,7 @@ export class CapTimelineEditorApp {
         } catch { hasAudio = false; }
 
         this._ensureTimelineLength(atSec + dur);
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -1256,6 +1299,7 @@ export class CapTimelineEditorApp {
                 muteBadge.addEventListener("click", e => {
                     e.stopPropagation();
                     if (track.locked) return;
+                    this._recordUndo();
                     m.muted = !m.muted;
                     this._meta.set(clip.id, m);
                     this._decorateClip(clip);
@@ -1379,6 +1423,7 @@ export class CapTimelineEditorApp {
     }
 
     _toggleDisableClip(clip) {
+        this._recordUndo();
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
         m.disabled = !m.disabled;
         this._meta.set(clip.id, m);
@@ -1394,6 +1439,7 @@ export class CapTimelineEditorApp {
             }
         }
         if (!all.length) return;
+        this._recordUndo();
         const target = all.every(c => (this._meta.get(c.id) ?? defaultImageMeta()).disabled) ? false : true;
         for (const c of all) {
             const m = this._meta.get(c.id) ?? defaultImageMeta();
@@ -1406,6 +1452,7 @@ export class CapTimelineEditorApp {
     }
 
     _replaceClipImage(clip, filename) {
+        this._recordUndo();
         clip.src = filename;
         clip.name = filename.split(/[\\/]/).pop();
         clip.thumbnail = this._imgUrl(filename);
@@ -1415,6 +1462,7 @@ export class CapTimelineEditorApp {
     }
 
     _setEndImage(clip, filename) {
+        this._recordUndo();
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
         m.endImage = filename;
         this._meta.set(clip.id, m);
@@ -1422,6 +1470,7 @@ export class CapTimelineEditorApp {
     }
 
     _clearEndImage(clip) {
+        this._recordUndo();
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
         m.endImage = null;
         this._meta.set(clip.id, m);
@@ -1429,6 +1478,7 @@ export class CapTimelineEditorApp {
     }
 
     _deleteClip(clip) {
+        this._recordUndo();
         this._meta.delete(clip.id);
         this._timeline.removeClip(clip.track.id, clip.id);
         if (this._selClip?.id === clip.id) this._selClip = null;
@@ -1445,6 +1495,7 @@ export class CapTimelineEditorApp {
         const rightDur = clip.endTime - t;
         if (leftDur < frameMin || rightDur < frameMin) return;
 
+        this._recordUndo();
         const metaCopy = { ...(this._meta.get(clip.id) ?? defaultImageMeta()) };
         const clipId = clip.id;
         const clipName = clip.name;
@@ -1497,6 +1548,14 @@ export class CapTimelineEditorApp {
         packageBtn.textContent = "+ 插入Package";
         packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
         tl.toolbarEl.appendChild(packageBtn);
+
+        // The "+ 轨道" dropdown is built and handled entirely inside
+        // Timeline.js, so there's no app-level call site to record an undo
+        // point right before the new track is actually added. Recording it
+        // here (before the menu even opens) is the closest equivalent —
+        // worst case, a cancelled menu leaves one harmless no-op undo step.
+        tl.toolbarEl.querySelector(".tl-btn-add-track")
+            ?.addEventListener("click", () => this._recordUndo());
 
         const scroll = tl.scrollEl;
         scroll.addEventListener("dragover", (e) => {
@@ -1589,6 +1648,13 @@ export class CapTimelineEditorApp {
             if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
             this._refreshTimelineDuration();
         });
+        // A drag (move/trim) fires many per-frame events; only the gesture
+        // as a whole should become one undo step, and only if it actually
+        // changed anything.
+        tl.on("clip:movestart", () => this._beginPendingUndo());
+        tl.on("clip:moveend", ({ moved }) => this._commitPendingUndo(moved));
+        tl.on("clip:resizestart", () => this._beginPendingUndo());
+        tl.on("clip:resizeend", ({ moved }) => this._commitPendingUndo(moved));
         tl.on("track:add", ({ track }) => {
             if (!this._trackInfo.has(track.id)) {
                 this._trackInfo.set(track.id, { trackIndex: this._nextTrackIndex() });
@@ -1660,6 +1726,10 @@ export class CapTimelineEditorApp {
 
     _onPromptInput() {
         if (!this._selClip) return;
+        if (this._promptUndoArmed) {
+            this._recordUndo();
+            this._promptUndoArmed = false; // one undo step per focus session, not per keystroke
+        }
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
         m.prompt = this.promptInput.value;
         this._meta.set(this._selClip.id, m);
@@ -1667,6 +1737,7 @@ export class CapTimelineEditorApp {
 
     _onUseGlobalChange() {
         if (!this._selClip) return;
+        this._recordUndo();
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
         m.useGlobalPrompt = !!this.useGlobalCb.checked;
         this._meta.set(this._selClip.id, m);
@@ -1686,7 +1757,13 @@ export class CapTimelineEditorApp {
         return clips;
     }
 
-    _saveToWidgets() {
+    /**
+     * Build the clips_json rows. With `pack: true` (the saved/exported
+     * shape) main-track clips are re-flowed back-to-back via
+     * `_packMainClips`; with `pack: false` (undo/redo snapshots) exact
+     * current positions/gaps are preserved.
+     */
+    _buildClipsRows(pack = true) {
         const main = [];
         const other = [];
         for (const track of this._timeline?.tracks ?? []) {
@@ -1734,13 +1811,12 @@ export class CapTimelineEditorApp {
                 }
             }
         }
-        const packed = this._packMainClips(main);
-        const all = [...packed, ...other].sort((a, b) => a.start_ms - b.start_ms);
+        const finalMain = pack ? this._packMainClips(main) : main;
+        return [...finalMain, ...other].sort((a, b) => a.start_ms - b.start_ms);
+    }
 
-        const clipsW = this._w("clips_json");
-        if (clipsW) clipsW.value = JSON.stringify(all);
-
-        const tracks = (this._timeline?.tracks ?? []).map(track => ({
+    _buildTracksRows() {
+        return (this._timeline?.tracks ?? []).map(track => ({
             id: track.id,
             type: track.type,
             name: track.name,
@@ -1751,9 +1827,99 @@ export class CapTimelineEditorApp {
             isMain: !!track.isMain,
             color: track.color,
         }));
+    }
+
+    _saveToWidgets() {
+        const clipsW = this._w("clips_json");
+        if (clipsW) clipsW.value = JSON.stringify(this._buildClipsRows(true));
+
         const tracksW = this._w("tracks_json");
-        if (tracksW) tracksW.value = JSON.stringify(tracks);
+        if (tracksW) tracksW.value = JSON.stringify(this._buildTracksRows());
 
         this.node.setDirtyCanvas(true, true);
+    }
+
+    // ─── Undo / redo ─────────────────────────────────────────────────────
+
+    _captureSnapshot() {
+        return {
+            clips: this._buildClipsRows(false),
+            tracks: this._buildTracksRows(),
+            currentTime: this._timeline?.currentTime ?? 0,
+        };
+    }
+
+    /** Call right before a discrete, user-initiated mutation (add/remove/
+     * toggle/etc.) so it becomes exactly one undo step. */
+    _recordUndo() {
+        if (!this._historyReady || this._restoringHistory || !this._timeline) return;
+        this._undoStack.push(this._captureSnapshot());
+        if (this._undoStack.length > 100) this._undoStack.shift();
+        this._redoStack = [];
+    }
+
+    /** Drag gestures (move/trim) span many frames — stash the pre-drag
+     * snapshot at the start and only commit it once, at the end, and only
+     * if the gesture actually changed something. */
+    _beginPendingUndo() {
+        if (!this._historyReady || this._restoringHistory || !this._timeline) return;
+        this._pendingUndoSnapshot = this._captureSnapshot();
+    }
+
+    _commitPendingUndo(moved) {
+        const snapshot = this._pendingUndoSnapshot;
+        this._pendingUndoSnapshot = null;
+        if (!snapshot || !moved || !this._historyReady || this._restoringHistory) return;
+        this._undoStack.push(snapshot);
+        if (this._undoStack.length > 100) this._undoStack.shift();
+        this._redoStack = [];
+    }
+
+    async _restoreSnapshot(snapshot) {
+        if (!snapshot || !this._timeline) return;
+        this._restoringHistory = true;
+        try {
+            this._timeline.selectClip(null);
+            this._selClip = null;
+            this._selClips = [];
+            this._meta.clear();
+            this._trackInfo.clear();
+            this._mainTrack = null;
+            this._overlayTrack = null;
+            this._audioTrack = null;
+
+            this._timeline.clearTracks();
+            if (snapshot.tracks.length) {
+                this._loadTracksFromJson(snapshot.tracks);
+            } else {
+                this._createDefaultTracks();
+            }
+            await Promise.all(snapshot.clips.map(c => this._addClipFromJson(c)));
+
+            this._timeline.setCurrentTime(snapshot.currentTime || 0);
+            this._decorateAllClips();
+            this._autoFitZoom();
+            this._refreshTimelineDuration();
+            this._updatePromptPanel();
+            this._renderMediaGrid();
+        } finally {
+            this._restoringHistory = false;
+        }
+    }
+
+    async undo() {
+        if (!this._undoStack.length || this._restoringHistory) return;
+        const current = this._captureSnapshot();
+        const prev = this._undoStack.pop();
+        this._redoStack.push(current);
+        await this._restoreSnapshot(prev);
+    }
+
+    async redo() {
+        if (!this._redoStack.length || this._restoringHistory) return;
+        const current = this._captureSnapshot();
+        const next = this._redoStack.pop();
+        this._undoStack.push(current);
+        await this._restoreSnapshot(next);
     }
 }
