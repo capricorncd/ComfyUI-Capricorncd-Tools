@@ -12,12 +12,6 @@ from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _str
 from .timecode import resolve_assets_dir
 
 
-def _list_input_audio():
-    input_dir = folder_paths.get_input_directory()
-    files = folder_paths.filter_files_content_types(os.listdir(input_dir), ["audio", "video"])
-    return sorted(files)
-
-
 class CAP_TimelineEditor(CAP_AudioTimeline):
     """Timeline edited in fullscreen NLE UI; audio is optional and placed on audio tracks."""
 

@@ -29,8 +29,10 @@ from .cap_save_images import (
     NODE_DISPLAY_NAME_MAPPINGS as _CSI_NAMES,
 )
 from .timecode import (
+    AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
+    list_audio_files_ordered,
     list_keyframe_files_ordered,
     list_video_files_ordered,
     resolve_assets_dir,
@@ -83,12 +85,6 @@ def _register_routes():
 
     routes = PromptServer.instance.routes
 
-    @routes.get("/audio_keyframe_timeline/input_audio")
-    async def api_list_input_audio(_request: web.Request) -> web.Response:
-        from .cap_timeline_editor import _list_input_audio
-        files = _list_input_audio()
-        return web.json_response({"files": files, "count": len(files)})
-
     @routes.get("/audio_keyframe_timeline/keyframes")
     async def api_list_keyframes(request: web.Request) -> web.Response:
         directory = request.rel_url.query.get("dir", "")
@@ -132,6 +128,30 @@ def _register_routes():
             return web.Response(status=400, text="Invalid filename")
         _, ext = os.path.splitext(path)
         if ext.lower() not in VIDEO_EXTENSIONS:
+            return web.Response(status=400, text="Unsupported file type")
+        if not os.path.isfile(path):
+            return web.Response(status=404, text="Not found")
+        return web.FileResponse(path)
+
+    @routes.get("/audio_keyframe_timeline/audios")
+    async def api_list_audios(request: web.Request) -> web.Response:
+        directory = request.rel_url.query.get("dir", "")
+        resolved = resolve_assets_dir(directory)
+        files = list_audio_files_ordered(directory)
+        return web.json_response({"files": files, "resolved_dir": resolved, "count": len(files)})
+
+    @routes.get("/audio_keyframe_timeline/keyframe_audio")
+    async def api_keyframe_audio(request: web.Request) -> web.Response:
+        directory = request.rel_url.query.get("dir", "")
+        name = request.rel_url.query.get("name", "")
+        resolved = resolve_assets_dir(directory)
+        if not resolved or not name:
+            return web.Response(status=400, text="Missing dir or name")
+        path = _safe_join(resolved, name)
+        if not path:
+            return web.Response(status=400, text="Invalid filename")
+        _, ext = os.path.splitext(path)
+        if ext.lower() not in AUDIO_EXTENSIONS:
             return web.Response(status=400, text="Unsupported file type")
         if not os.path.isfile(path):
             return web.Response(status=404, text="Not found")

@@ -633,16 +633,18 @@ export class CapTimelineEditorApp {
     }
 
     async _loadAudioFileList() {
+        const dir = this._dir();
+        if (!dir) { this._audioFiles = []; if (this._mediaTab === "audio") this._renderMediaGrid(); return; }
         try {
-            const r = await fetch(api.apiURL("/audio_keyframe_timeline/input_audio"));
+            const r = await fetch(api.apiURL(`/audio_keyframe_timeline/audios?dir=${encodeURIComponent(dir)}`));
             const d = await r.json();
             this._audioFiles = Array.isArray(d.files) ? d.files : [];
         } catch { this._audioFiles = []; }
         if (this._mediaTab === "audio") this._renderMediaGrid();
     }
 
-    /** Re-scan the assets directory (and its subfolders) plus the input-audio
-     * list, then redraw whichever tab is currently showing. */
+    /** Re-scan the assets directory (and its subfolders) for all three media
+     * kinds, then redraw whichever tab is currently showing. */
     async _refreshMediaLists() {
         const btn = this._overlay?.querySelector(".cat-te-media-refresh");
         btn?.classList.add("spinning");
@@ -692,10 +694,18 @@ export class CapTimelineEditorApp {
     }
 
     _renderAudioMediaGrid() {
+        const dir = this._dir();
+        if (!dir) {
+            const msg = document.createElement("div");
+            msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
+            msg.textContent = "请先设置资源目录";
+            this.mediaGrid.appendChild(msg);
+            return;
+        }
         if (!this._audioFiles.length) {
             const msg = document.createElement("div");
             msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
-            msg.textContent = "input 目录中无音频";
+            msg.textContent = "目录中无音频";
             this.mediaGrid.appendChild(msg);
             return;
         }
@@ -1091,16 +1101,10 @@ export class CapTimelineEditorApp {
 
     _audioUrl(filename) {
         if (!filename) return null;
-        let name = String(filename).replace(/\s*\[input\]\s*$/i, "").trim();
-        let sub = "";
-        if (name.includes("/") || name.includes("\\")) {
-            const i = Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\"));
-            sub = name.slice(0, i);
-            name = name.slice(i + 1);
-        }
-        const p = new URLSearchParams({ filename: name, type: "input" });
-        if (sub) p.set("subfolder", sub);
-        return api.apiURL(`/view?${p}`);
+        const dir = this._dir();
+        return api.apiURL(
+            `/audio_keyframe_timeline/keyframe_audio?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(filename)}`
+        );
     }
 
     // ─── Audio playback ─────────────────────────────────────────────────
