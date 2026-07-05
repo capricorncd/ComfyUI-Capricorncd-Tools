@@ -5,6 +5,8 @@ import { parseTimecode, formatTimecode } from "./timecode.js";
 const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
 /** Right-side empty margin as a fraction of the timeline viewport width. */
 const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
+/** All tracks (main/overlay/audio) share one row height. */
+const TRACK_HEIGHT = 78;
 
 function loadEditorCss() {
     if (document.getElementById("cat-te-styles")) return;
@@ -781,13 +783,13 @@ export class CapTimelineEditorApp {
     _createDefaultTracks() {
         const tl = this._timeline;
         this._mainTrack = tl.addTrack({
-            type: "image", name: "主轨道", isMain: true, height: 88, color: "#3d6ec4",
+            type: "image", name: "主轨道", isMain: true, height: TRACK_HEIGHT, color: "#3d6ec4",
         });
         this._overlayTrack = tl.addTrack({
-            type: "image", name: "副轨道", height: 44, color: "#8b4ec8",
+            type: "image", name: "副轨道", height: TRACK_HEIGHT, color: "#8b4ec8",
         });
         this._audioTrack = tl.addTrack({
-            type: "audio", name: "音频", height: 56, color: "#3dd68c",
+            type: "audio", name: "音频", height: TRACK_HEIGHT, color: "#3dd68c",
         });
         this._trackInfo.set(this._mainTrack.id, { trackIndex: 0 });
         this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1 });
@@ -816,7 +818,7 @@ export class CapTimelineEditorApp {
                 type: row.type || "image",
                 name: row.name || (row.type === "audio" ? "音频" : "轨道"),
                 isMain: !!row.isMain,
-                height: row.type === "audio" ? 56 : (row.isMain ? 88 : 44),
+                height: TRACK_HEIGHT,
                 color: row.color,
                 locked: !!row.locked,
                 visible: row.visible !== false,
@@ -980,12 +982,12 @@ export class CapTimelineEditorApp {
         if (!clip?.el) return;
         const label = clip.el.querySelector(".tl-clip-label");
         if (label) label.textContent = clip.name || "素材";
-        const body = clip.el.querySelector(".tl-clip-body");
-        if (body) {
-            if (clip.thumbnail) {
-                body.style.backgroundImage = `url(${clip.thumbnail})`;
-            } else {
-                body.style.backgroundImage = "";
+        if (clip._thumbRow) {
+            clip._applyThumbnail();
+        } else {
+            const body = clip.el.querySelector(".tl-clip-body");
+            if (body) {
+                body.style.backgroundImage = clip.thumbnail ? `url(${clip.thumbnail})` : "";
             }
         }
         this._decorateClip(clip);
@@ -1265,6 +1267,9 @@ export class CapTimelineEditorApp {
             if (!this._trackInfo.has(track.id)) {
                 this._trackInfo.set(track.id, { trackIndex: this._nextTrackIndex() });
             }
+            track.height = TRACK_HEIGHT;
+            track.el.style.height = `${TRACK_HEIGHT}px`;
+            track.headerEl.style.height = `${TRACK_HEIGHT}px`;
             this._setupTrackControls(track);
         });
         tl.on("zoomchange", () => this._refreshTimelineDuration());

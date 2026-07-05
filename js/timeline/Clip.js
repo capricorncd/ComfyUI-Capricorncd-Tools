@@ -21,6 +21,9 @@ export class Clip extends EventEmitter {
     this.thumbnail = data.thumbnail || null;
     this.color = data.color || null;
     this.selected = false;
+    // Only image/video clips with an embedded audio track show the
+    // waveform row; plain images never do.
+    this.hasAudio = !!data.hasAudio;
     this._waveform = data.waveformPeaks?.length
       ? data.waveformPeaks
       : generateWaveform(this.id.charCodeAt(5) || 42);
@@ -51,34 +54,24 @@ export class Clip extends EventEmitter {
     const body = document.createElement('div');
     body.className = 'tl-clip-body';
 
-    if (this.thumbnail) {
-      body.style.backgroundImage = `url(${this.thumbnail})`;
-      if (this.track.type === 'image') {
-        body.classList.add('tl-clip-image');
-        body.style.backgroundSize = 'auto 100%';
-        body.style.backgroundRepeat = 'repeat-x';
-        body.style.backgroundPosition = 'left center';
-      } else {
+    if (this.track.type === 'image' || this.track.type === 'video') {
+      this._buildRows(body);
+    } else {
+      if (this.thumbnail) {
+        body.style.backgroundImage = `url(${this.thumbnail})`;
         body.style.backgroundSize = 'cover';
         body.style.backgroundPosition = 'center';
       }
-    }
 
-    const label = document.createElement('div');
-    label.className = 'tl-clip-label';
-    label.textContent = this.name;
-    body.appendChild(label);
+      const label = document.createElement('div');
+      label.className = 'tl-clip-label';
+      label.textContent = this.name;
+      body.appendChild(label);
 
-    // Waveform for audio tracks
-    if (this.track.type === 'audio') {
-      body.appendChild(this._buildWaveform());
-    }
-
-    // Film strip overlay for video tracks
-    if (this.track.type === 'video') {
-      const film = document.createElement('div');
-      film.className = 'tl-clip-filmstrip';
-      body.appendChild(film);
+      // Waveform for audio tracks
+      if (this.track.type === 'audio') {
+        body.appendChild(this._buildWaveform());
+      }
     }
 
     el.appendChild(lh);
@@ -87,6 +80,68 @@ export class Clip extends EventEmitter {
 
     this._setupDrag(el, body, lh, rh);
     return el;
+  }
+
+  /**
+   * Image/video clip body split into 3 stacked rows: name + duration,
+   * thumbnail, and (when applicable) the embedded audio waveform.
+   */
+  _buildRows(body) {
+    body.classList.add('tl-clip-rows');
+
+    const infoRow = document.createElement('div');
+    infoRow.className = 'tl-clip-row tl-clip-row-info';
+
+    const label = document.createElement('div');
+    label.className = 'tl-clip-label';
+    label.textContent = this.name;
+    infoRow.appendChild(label);
+
+    this._durEl = document.createElement('div');
+    this._durEl.className = 'tl-clip-row-duration';
+    this._durEl.textContent = this.track.timeline.formatTime(this.duration);
+    infoRow.appendChild(this._durEl);
+
+    this._thumbRow = document.createElement('div');
+    this._thumbRow.className = 'tl-clip-row tl-clip-row-thumb';
+    this._applyThumbnail();
+
+    this._waveRow = document.createElement('div');
+    this._waveRow.className = 'tl-clip-row tl-clip-row-wave';
+    this._refreshWaveRow();
+
+    body.appendChild(infoRow);
+    body.appendChild(this._thumbRow);
+    body.appendChild(this._waveRow);
+  }
+
+  /** Re-apply the thumbnail background onto the thumbnail row (row 2). */
+  _applyThumbnail() {
+    if (!this._thumbRow) return;
+    if (this.thumbnail) {
+      this._thumbRow.style.backgroundImage = `url(${this.thumbnail})`;
+      if (this.track.type === 'image') {
+        this._thumbRow.style.backgroundSize = 'auto 100%';
+        this._thumbRow.style.backgroundRepeat = 'repeat-x';
+        this._thumbRow.style.backgroundPosition = 'left center';
+      } else {
+        this._thumbRow.style.backgroundSize = 'cover';
+        this._thumbRow.style.backgroundRepeat = 'no-repeat';
+        this._thumbRow.style.backgroundPosition = 'center';
+      }
+    } else {
+      this._thumbRow.style.backgroundImage = '';
+    }
+  }
+
+  /** Row 3 stays blank unless this clip actually has an embedded audio track. */
+  _refreshWaveRow() {
+    if (!this._waveRow) return;
+    this._waveRow.replaceChildren();
+    this._waveRow.classList.toggle('has-audio', this.hasAudio);
+    if (this.hasAudio) {
+      this._waveRow.appendChild(this._buildWaveform());
+    }
   }
 
   _buildWaveform() {
@@ -263,6 +318,7 @@ export class Clip extends EventEmitter {
     const pps = this.track.timeline.pixelsPerSecond;
     const color = this.color || this.track.color;
     this.el.style.cssText = `left:${this.startTime * pps}px;width:${this.duration * pps}px;--clip-color:${color}`;
+    if (this._durEl) this._durEl.textContent = this.track.timeline.formatTime(this.duration);
   }
 
   setSelected(sel) {

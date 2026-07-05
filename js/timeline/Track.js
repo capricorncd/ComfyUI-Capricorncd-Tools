@@ -51,10 +51,14 @@ export class Track extends EventEmitter {
     nameEl.title = this.name;
     nameWrap.appendChild(nameEl);
 
-    const typeEl = document.createElement('span');
-    typeEl.className = 'tl-track-type';
-    typeEl.textContent = this.type.toUpperCase();
-    nameWrap.appendChild(typeEl);
+    // Main/overlay (image) tracks skip the redundant type badge — the icon
+    // and MAIN badge already convey what they are.
+    if (this.type !== 'image') {
+      const typeEl = document.createElement('span');
+      typeEl.className = 'tl-track-type';
+      typeEl.textContent = this.type.toUpperCase();
+      nameWrap.appendChild(typeEl);
+    }
 
     // MAIN badge (injected after build; also used by _markAsMain)
     this._mainBadgeEl = document.createElement('span');

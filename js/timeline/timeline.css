@@ -521,21 +521,58 @@
   pointer-events: none;
 }
 
-/* Film strip overlay (video clips) */
-.tl-clip-filmstrip {
-  position: absolute;
-  inset: 0;
-  background-image:
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 18px,
-      rgba(0,0,0,0.25) 18px,
-      rgba(0,0,0,0.25) 20px
-    );
-  pointer-events: none;
-  opacity: 0.4;
+/* ── Image/video clip: 3 stacked rows ─────────────────────── */
+/* Row 1: name + duration · Row 2: thumbnail · Row 3: waveform
+   (blank unless the clip has an embedded audio track) */
+
+.tl-clip-body.tl-clip-rows {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0;
 }
+
+.tl-clip-row { position: relative; min-width: 0; }
+
+.tl-clip-row-info {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 17px;
+  padding: 0 6px;
+  background: rgba(0,0,0,0.35);
+}
+
+.tl-clip-row-info .tl-clip-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.tl-clip-row-duration {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: "SF Mono", "Fira Mono", Consolas, monospace;
+  color: rgba(255,255,255,0.75);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+  pointer-events: none;
+}
+
+.tl-clip-row-thumb {
+  flex: 1;
+  min-height: 0;
+  background-color: rgba(0,0,0,0.15);
+  background-repeat: no-repeat;
+}
+
+.tl-clip-row-wave {
+  flex: 0 0 auto;
+  height: 18px;
+  background: rgba(0,0,0,0.22);
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.tl-clip-row-wave .tl-clip-waveform { opacity: 0.7; }
 
 /* ── Clip color themes by track type ─────────────────────── */
 
@@ -543,20 +580,6 @@
 .tl-track-audio   .tl-clip { background-color: #1d7a50; }
 .tl-track-image   .tl-clip { background-color: #6a2da3; }
 
-.tl-clip-image .tl-clip-body::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(0,0,0,0.15) 0%, transparent 30%, transparent 70%, rgba(0,0,0,0.15) 100%);
-  pointer-events: none;
-}
-
-.tl-clip-image .tl-clip-label {
-  background: rgba(0,0,0,0.45);
-  padding: 1px 5px;
-  border-radius: 3px;
-  backdrop-filter: blur(4px);
-}
 .tl-track-text    .tl-clip { background-color: #8a4a10; }
 
 /* Allow per-clip color override via --clip-color */
