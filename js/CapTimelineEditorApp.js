@@ -76,7 +76,7 @@ export class CapTimelineEditorApp {
         const root = document.createElement("div");
         root.className = "cat-te-launcher";
         root.innerHTML = `
-          <button type="button" class="cat-te-open-btn">⛶ 时间轴编辑</button>
+          <button type="button" class="cat-te-open-btn">⛶ 导演台</button>
           <div class="cat-te-launcher-hint">全屏编辑 · 拖入素材 · Ctrl+B/G · Alt+滚轮平移</div>
         `;
         root.querySelector(".cat-te-open-btn").addEventListener("click", () => this.open());
@@ -165,7 +165,7 @@ export class CapTimelineEditorApp {
         el.tabIndex = -1;
         el.innerHTML = `
           <header class="cat-te-header">
-            <span class="cat-te-title">时间轴编辑</span>
+            <span class="cat-te-title">导演台</span>
             <div class="cat-te-header-spacer"></div>
             <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-save">保存并关闭</button>
             <button type="button" class="cat-te-btn cat-te-close">关闭</button>
@@ -654,12 +654,14 @@ export class CapTimelineEditorApp {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
             duration: dur,
+            sourceDuration: sourceDur,
+            sourceOffset: 0,
             src: filename,
             waveformPeaks: peaks,
             color: track.color,
         });
         const ti = this._trackIndex(track);
-        this._meta.set(clip.id, { ...defaultAudioMeta(ti), sourceDuration: sourceDur });
+        this._meta.set(clip.id, { ...defaultAudioMeta(ti), sourceDuration: sourceDur, trimIn: 0 });
         this._timeline.selectClip(clip);
         this._timeline.setCurrentTime(atSec);
         this._decorateClip(clip);
@@ -854,6 +856,8 @@ export class CapTimelineEditorApp {
 
         if (clipType === "audio") {
             const af = c.audio_file ?? c.src ?? "";
+            const sourceDur = Number(c.source_duration) || dur;
+            const trimIn = Math.max(0, Number(c.trim_in) || 0);
             let peaks = null;
             if (af) {
                 try {
@@ -866,6 +870,8 @@ export class CapTimelineEditorApp {
                 name: af.split(/[\\/]/).pop() || "音频",
                 startTime: startMs / 1000,
                 duration: dur,
+                sourceDuration: sourceDur,
+                sourceOffset: trimIn,
                 src: af,
                 waveformPeaks: peaks,
                 color: track.color,
@@ -873,7 +879,8 @@ export class CapTimelineEditorApp {
             this._meta.set(clip.id, {
                 ...defaultAudioMeta(trackIdx),
                 muted: !!c.muted,
-                sourceDuration: Number(c.source_duration) || dur,
+                sourceDuration: sourceDur,
+                trimIn,
             });
             this._decorateClip(clip);
             return;
@@ -1365,7 +1372,8 @@ export class CapTimelineEditorApp {
                         end_ms: Math.round(clip.endTime * 1000),
                         audio_file: clip.src || "",
                         muted: !!m.muted,
-                        source_duration: m.sourceDuration || clip.duration,
+                        source_duration: Number.isFinite(clip.sourceDuration) ? clip.sourceDuration : (m.sourceDuration || clip.duration),
+                        trim_in: clip.sourceOffset || 0,
                     });
                 } else {
                     const row = {
