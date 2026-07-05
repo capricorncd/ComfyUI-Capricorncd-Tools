@@ -161,6 +161,36 @@
     color: #ccc;
 }
 
+.cat-te-media-preview-dialog {
+    width: min(960px, 88vw);
+    max-width: none;
+}
+
+.cat-te-media-preview-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 180px;
+    max-height: 78vh;
+    padding: 16px;
+    overflow: auto;
+    background: #07070d;
+}
+
+.cat-te-media-preview-content {
+    display: block;
+    max-width: 100%;
+    max-height: calc(78vh - 32px);
+}
+
+.cat-te-media-preview-video {
+    width: 100%;
+}
+
+.cat-te-media-preview-audio {
+    width: min(680px, 100%);
+}
+
 .cat-te-lang-select {
     background: #1e1e32;
     border: 1px solid #3a3a5a;

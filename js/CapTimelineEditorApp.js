@@ -185,6 +185,7 @@ export class CapTimelineEditorApp {
         if (!this._overlay) return;
         this._historyReady = false;
         this._stopAudioPlayback();
+        this._closeMediaPreview();
         if (save) this._saveToWidgets();
         else if (this._openedWidgetValues) {
             for (const [name, value] of Object.entries(this._openedWidgetValues)) {
@@ -359,6 +360,15 @@ export class CapTimelineEditorApp {
             <button type="button" class="cat-te-btn cat-te-close">关闭</button>
           </footer>
           <div class="cat-te-frame-preview"></div>
+          <div class="cat-te-modal-backdrop cat-te-media-preview-modal" hidden>
+            <div class="cat-te-modal cat-te-media-preview-dialog">
+              <div class="cat-te-modal-header">
+                <span class="cat-te-media-preview-title">素材预览</span>
+                <button type="button" class="cat-te-modal-close cat-te-media-preview-close" title="关闭">×</button>
+              </div>
+              <div class="cat-te-media-preview-body"></div>
+            </div>
+          </div>
           <div class="cat-te-modal-backdrop cat-te-settings-modal" hidden>
             <div class="cat-te-modal">
               <div class="cat-te-modal-header">
@@ -394,6 +404,9 @@ export class CapTimelineEditorApp {
         this.clipEndEl = el.querySelector(".cat-te-clip-end");
         this.clipDurEl = el.querySelector(".cat-te-clip-dur");
         this.framePreview = el.querySelector(".cat-te-frame-preview");
+        this.mediaPreviewModal = el.querySelector(".cat-te-media-preview-modal");
+        this.mediaPreviewTitle = el.querySelector(".cat-te-media-preview-title");
+        this.mediaPreviewBody = el.querySelector(".cat-te-media-preview-body");
 
         el.querySelector(".cat-te-save").addEventListener("click", () => this.close(true));
         el.querySelector(".cat-te-close").addEventListener("click", () => this.close(false));
@@ -404,6 +417,10 @@ export class CapTimelineEditorApp {
         el.querySelector(".cat-te-import").addEventListener("click", () => this._chooseProjectImport());
         el.querySelector(".cat-te-export").addEventListener("click", () => this._exportProject());
         this.importFileInput.addEventListener("change", (e) => void this._importProject(e));
+        el.querySelector(".cat-te-media-preview-close").addEventListener("click", () => this._closeMediaPreview());
+        this.mediaPreviewModal.addEventListener("click", (e) => {
+            if (e.target === this.mediaPreviewModal) this._closeMediaPreview();
+        });
         this.projectNameInput.addEventListener("focus", () => { this._projectNameUndoArmed = false; });
         this.projectNameInput.addEventListener("beforeinput", () => {
             if (!this._projectNameUndoArmed) {
@@ -441,6 +458,7 @@ export class CapTimelineEditorApp {
 
         el.addEventListener("keydown", e => {
             if (e.key === "Escape") {
+                if (!this.mediaPreviewModal.hidden) { this._closeMediaPreview(); e.stopPropagation(); return; }
                 if (!this.settingsModal.hidden) { this._closeSettings(); e.stopPropagation(); return; }
                 if (this._removeCtxMenu()) { e.stopPropagation(); return; }
                 e.stopPropagation();
@@ -838,7 +856,7 @@ export class CapTimelineEditorApp {
     _makeMediaItem(file, kind) {
         const item = document.createElement("div");
         item.className = `cat-te-media-item cat-te-media-${kind}`;
-        item.title = `${file}\n拖到时间轴或点击插入`;
+        item.title = `${file}\n点击预览；右键插入时间轴；也可拖到时间轴`;
         item.draggable = true;
         if (this._isMediaOnTimeline(file, kind)) {
             const addedTag = document.createElement("div");
@@ -878,10 +896,18 @@ export class CapTimelineEditorApp {
         dragHint.className = "cat-te-media-drag-hint";
         dragHint.textContent = "⋮⋮";
         item.append(nm, dragHint);
-        item.addEventListener("click", () => {
-            if (kind === "audio") this._addAudioAtPlayhead(file);
-            else if (kind === "video") this._addVideoAtPlayhead(file);
-            else this._addMediaAtPlayhead(file);
+        item.addEventListener("click", () => this._openMediaPreview(file, kind));
+        item.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this._buildCtxMenu([{
+                label: "插入时间轴",
+                fn: () => {
+                    if (kind === "audio") void this._addAudioAtPlayhead(file);
+                    else if (kind === "video") void this._addVideoAtPlayhead(file);
+                    else void this._addMediaAtPlayhead(file);
+                },
+            }], e.clientX, e.clientY);
         });
         item.addEventListener("dragstart", (e) => {
             const dragType = kind === "audio" ? "application/x-cat-te-audio"
@@ -1666,6 +1692,44 @@ export class CapTimelineEditorApp {
 
     _hideImagePreview() {
         if (this.framePreview) this.framePreview.style.display = "none";
+    }
+
+    _openMediaPreview(file, kind) {
+        if (!this.mediaPreviewModal || !this.mediaPreviewBody) return;
+        this._closeMediaPreview();
+        this.mediaPreviewTitle.textContent = file.split(/[\\/]/).pop() || "素材预览";
+
+        let media;
+        if (kind === "image") {
+            media = document.createElement("img");
+            media.src = this._imgUrl(file);
+            media.alt = this.mediaPreviewTitle.textContent;
+            media.draggable = false;
+        } else if (kind === "video") {
+            media = document.createElement("video");
+            media.src = this._videoUrl(file);
+            media.controls = true;
+            media.preload = "metadata";
+        } else {
+            media = document.createElement("audio");
+            media.src = this._audioUrl(file);
+            media.controls = true;
+            media.preload = "metadata";
+        }
+        media.className = `cat-te-media-preview-content cat-te-media-preview-${kind}`;
+        this.mediaPreviewBody.appendChild(media);
+        this.mediaPreviewModal.hidden = false;
+    }
+
+    _closeMediaPreview() {
+        if (!this.mediaPreviewModal || !this.mediaPreviewBody) return;
+        for (const media of this.mediaPreviewBody.querySelectorAll("audio, video")) {
+            media.pause();
+            media.removeAttribute("src");
+            media.load();
+        }
+        this.mediaPreviewBody.replaceChildren();
+        this.mediaPreviewModal.hidden = true;
     }
 
     _removeCtxMenu() {

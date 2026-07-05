@@ -447,14 +447,25 @@
 
 /* Resize handles */
 .tl-clip-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
   width: 9px;
-  flex-shrink: 0;
   cursor: col-resize;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2;
   background: rgba(0,0,0,0.18);
+}
+
+.tl-clip-handle-l {
+  left: 0;
+  z-index: 3;
+}
+
+.tl-clip-handle-r {
+  right: 0;
+  z-index: 4;
 }
 
 .tl-clip-handle span {
