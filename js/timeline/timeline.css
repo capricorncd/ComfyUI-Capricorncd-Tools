@@ -170,6 +170,17 @@
   color: #f5d9a8;
 }
 
+.tl-btn-history:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+}
+.tl-btn-history:disabled:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+}
+
 /* ── Add-track dropdown menu ──────────────────────────────── */
 
 .tl-add-menu {

@@ -141,30 +141,6 @@ export class CapTimelineEditorApp {
         return true;
     }
 
-    /**
-     * Ctrl+Z / Ctrl+Shift+Z — undo/redo. Propagation is always stopped while
-     * the editor is open so ComfyUI's own Ctrl+Z (graph undo) never also
-     * fires and closes the director's console. When focus is in a text
-     * field the browser's native text-undo is left alone (no
-     * preventDefault); otherwise it drives the timeline's own history.
-     * @returns {boolean} true if the event was handled
-     */
-    handleUndoRedoKey(e) {
-        if (!this._overlay?.classList.contains("open")) return false;
-        if (!e.ctrlKey && !e.metaKey) return false;
-        if (e.key?.toLowerCase() !== "z") return false;
-
-        e.stopPropagation();
-        e.stopImmediatePropagation?.();
-
-        if (e.target?.closest?.("input, textarea, select")) return true; // native text-field undo/redo
-
-        e.preventDefault();
-        if (e.shiftKey) void this.redo();
-        else void this.undo();
-        return true;
-    }
-
     async _openEditor() {
         this._historyReady = false;
         await this._initTimelineFromWidgets();
@@ -173,9 +149,27 @@ export class CapTimelineEditorApp {
         this._undoStack = [];
         this._redoStack = [];
         this._historyReady = true;
+        this._updateHistoryButtons();
     }
 
+    /**
+     * Closing "discard" (save=false) with pending edits asks first — a
+     * last-resort safety net for whenever something outside our control
+     * (e.g. Ctrl+Z leaking through to ComfyUI's own graph undo) causes the
+     * editor to close: better a confirm prompt than silently losing work.
+     * Skipped entirely if there's nothing to lose.
+     */
     close(save = true) {
+        if (!this._overlay) return;
+        if (!save && this._undoStack.length > 0) {
+            if (confirm("有未保存的修改，是否保存后再关闭？\n点击“取消”将放弃这些修改。")) {
+                save = true;
+            }
+        }
+        this._closeInternal(save);
+    }
+
+    _closeInternal(save) {
         if (!this._overlay) return;
         this._historyReady = false;
         this._stopAudioPlayback();
@@ -203,7 +197,11 @@ export class CapTimelineEditorApp {
     }
 
     destroy() {
-        this.close(false);
+        // Bypasses the unsaved-changes confirm in close() — by the time
+        // onRemoved fires the node is already gone from the graph, so
+        // there's nothing left to meaningfully save, and blocking node
+        // teardown on a dialog would be surprising.
+        this._closeInternal(false);
         document.removeEventListener("click", this._onDocClick);
         if (this._onWinResize) {
             window.removeEventListener("resize", this._onWinResize);
@@ -1701,6 +1699,29 @@ export class CapTimelineEditorApp {
         packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
         tl.toolbarEl.appendChild(packageBtn);
 
+        // Undo/redo is buttons-only, not a keyboard shortcut — Ctrl+Z can't
+        // be reliably intercepted here (ComfyUI's own graph-undo shortcut
+        // may be registered ahead of anything this extension attaches, so
+        // stopPropagation can't guarantee it loses the race) and was
+        // closing the fullscreen editor instead of undoing within it.
+        this.undoBtn = document.createElement("button");
+        this.undoBtn.type = "button";
+        this.undoBtn.className = "tl-btn tl-btn-history";
+        this.undoBtn.title = "还原";
+        this.undoBtn.textContent = "↶ 还原";
+        this.undoBtn.addEventListener("click", () => this.undo());
+        tl.toolbarEl.appendChild(this.undoBtn);
+
+        this.redoBtn = document.createElement("button");
+        this.redoBtn.type = "button";
+        this.redoBtn.className = "tl-btn tl-btn-history";
+        this.redoBtn.title = "重做";
+        this.redoBtn.textContent = "↷ 重做";
+        this.redoBtn.addEventListener("click", () => this.redo());
+        tl.toolbarEl.appendChild(this.redoBtn);
+
+        this._updateHistoryButtons();
+
         // The "+ 轨道" dropdown is built and handled entirely inside
         // Timeline.js, so there's no app-level call site to record an undo
         // point right before the new track is actually added. Recording it
@@ -2003,6 +2024,12 @@ export class CapTimelineEditorApp {
         };
     }
 
+    /** Reflect stack state on the toolbar's 还原/重做 buttons. */
+    _updateHistoryButtons() {
+        if (this.undoBtn) this.undoBtn.disabled = this._undoStack.length === 0;
+        if (this.redoBtn) this.redoBtn.disabled = this._redoStack.length === 0;
+    }
+
     /** Call right before a discrete, user-initiated mutation (add/remove/
      * toggle/etc.) so it becomes exactly one undo step. */
     _recordUndo() {
@@ -2010,6 +2037,7 @@ export class CapTimelineEditorApp {
         this._undoStack.push(this._captureSnapshot());
         if (this._undoStack.length > 100) this._undoStack.shift();
         this._redoStack = [];
+        this._updateHistoryButtons();
     }
 
     /** Drag gestures (move/trim) span many frames — stash the pre-drag
@@ -2027,6 +2055,7 @@ export class CapTimelineEditorApp {
         this._undoStack.push(snapshot);
         if (this._undoStack.length > 100) this._undoStack.shift();
         this._redoStack = [];
+        this._updateHistoryButtons();
     }
 
     async _restoreSnapshot(snapshot) {
@@ -2067,6 +2096,7 @@ export class CapTimelineEditorApp {
         const prev = this._undoStack.pop();
         this._redoStack.push(current);
         await this._restoreSnapshot(prev);
+        this._updateHistoryButtons();
     }
 
     async redo() {
@@ -2075,5 +2105,6 @@ export class CapTimelineEditorApp {
         const next = this._redoStack.pop();
         this._undoStack.push(current);
         await this._restoreSnapshot(next);
+        this._updateHistoryButtons();
     }
 }

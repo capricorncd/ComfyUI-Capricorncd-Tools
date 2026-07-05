@@ -6,7 +6,6 @@ const NODE_CLASS = "CAP_TimelineEditor";
 function onTeGlobalKeyDown(e) {
     const te = CapTimelineEditorApp._open;
     if (!te) return;
-    if (te.handleUndoRedoKey(e)) return;
     if (te.handleDeleteKey(e)) return;
     te.handleShortcutKey(e);
 }
@@ -33,7 +32,12 @@ app.registerExtension({
     name: "Capricorncd.TimelineEditor",
 
     async setup() {
-        document.addEventListener("keydown", onTeGlobalKeyDown, true);
+        // Capture on `window`, not `document`: capture-phase listeners fire
+        // in ancestor order (window before document before canvas/body),
+        // so this runs before ComfyUI's own Ctrl+Z (graph undo) handler no
+        // matter which DOM node or registration order that uses — otherwise
+        // its undo can fire first and e.g. close the director's console.
+        window.addEventListener("keydown", onTeGlobalKeyDown, true);
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
