@@ -73,6 +73,8 @@ export class CapTimelineEditorApp {
         this._redoStack = [];
         this._historyReady = false;
         this._restoringHistory = false;
+        this._playbackCtx = null;
+        this._activeAudioSources = [];
         loadEditorCss();
         this._buildLauncher();
     }
@@ -176,6 +178,7 @@ export class CapTimelineEditorApp {
     close(save = true) {
         if (!this._overlay) return;
         this._historyReady = false;
+        this._stopAudioPlayback();
         if (save) this._saveToWidgets();
         this._timeline?.destroy();
         this._timeline = null;
@@ -205,6 +208,10 @@ export class CapTimelineEditorApp {
         if (this._onWinResize) {
             window.removeEventListener("resize", this._onWinResize);
             this._onWinResize = null;
+        }
+        if (this._playbackCtx) {
+            this._playbackCtx.close().catch(() => {});
+            this._playbackCtx = null;
         }
         this._overlay?.remove();
     }
@@ -882,10 +889,12 @@ export class CapTimelineEditorApp {
         const url = this._audioUrl(filename);
         let peaks = null;
         let sourceDur = 30;
+        let buffer = null;
         try {
             const r = await this._fetchPeaks(url);
             peaks = r.peaks[0];
             sourceDur = r.duration;
+            buffer = r.buffer;
         } catch {
             try {
                 sourceDur = await this._probeAudioDuration(url);
@@ -904,6 +913,7 @@ export class CapTimelineEditorApp {
             waveformPeaks: peaks,
             color: track.color,
         });
+        clip._audioBuffer = buffer;
         const ti = this._trackIndex(track);
         this._meta.set(clip.id, { ...defaultAudioMeta(ti), sourceDuration: sourceDur, trimIn: 0 });
         this._timeline.selectClip(clip);
@@ -941,10 +951,12 @@ export class CapTimelineEditorApp {
 
         let peaks = null;
         let hasAudio = false;
+        let buffer = null;
         try {
             const r = await this._fetchPeaks(url);
             peaks = r.peaks[0];
             hasAudio = true;
+            buffer = r.buffer;
         } catch { hasAudio = false; }
 
         this._ensureTimelineLength(atSec + dur);
@@ -961,6 +973,7 @@ export class CapTimelineEditorApp {
             hasAudio,
             color: track.color,
         });
+        clip._audioBuffer = buffer;
         const ti = this._trackIndex(track);
         this._meta.set(clip.id, { ...defaultImageMeta(ti), mediaKind: "video", sourceDuration: dur });
         this._timeline.selectClip(clip);
@@ -1050,7 +1063,10 @@ export class CapTimelineEditorApp {
         const ctx = new AudioContext();
         try {
             const buf = await ctx.decodeAudioData(ab.slice(0));
-            return { peaks: this._audioBufferToPeaks(buf), duration: buf.duration };
+            // `buf` stays valid after this context closes — AudioBuffers aren't
+            // tied to the context that decoded them, so it's cached on the
+            // clip for playback instead of being re-fetched/re-decoded later.
+            return { peaks: this._audioBufferToPeaks(buf), duration: buf.duration, buffer: buf };
         } finally {
             await ctx.close();
         }
@@ -1068,6 +1084,88 @@ export class CapTimelineEditorApp {
         const p = new URLSearchParams({ filename: name, type: "input" });
         if (sub) p.set("subfolder", sub);
         return api.apiURL(`/view?${p}`);
+    }
+
+    // ─── Audio playback ─────────────────────────────────────────────────
+    //
+    // At any seek position there can be several simultaneous audio-bearing
+    // sources: one clip per audio track (a track can't have overlapping
+    // clips, but there can be several audio tracks), plus a video-with-audio
+    // clip on the main track and/or the overlay track. Rather than mixing
+    // these down into one buffer ourselves, each audible clip gets its own
+    // AudioBufferSourceNode connected to the same AudioContext destination —
+    // the Web Audio API mixes any number of simultaneous sources for free.
+
+    _ensurePlaybackContext() {
+        if (!this._playbackCtx) {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            this._playbackCtx = new Ctx();
+        }
+        if (this._playbackCtx.state === "suspended") this._playbackCtx.resume();
+        return this._playbackCtx;
+    }
+
+    /** Clips that should actually be heard: not muted, not hidden, not
+     * disabled — mirrors what `_decorateClip` already treats as "excluded
+     * from the render" for image/video tracks. */
+    _collectAudibleClips() {
+        const out = [];
+        for (const track of this._timeline?.tracks ?? []) {
+            for (const clip of track.clips) {
+                if (!clip._audioBuffer) continue;
+                const m = this._meta.get(clip.id);
+                if (track.type === "audio") {
+                    if (track.muted || m?.muted) continue;
+                } else {
+                    if (!clip.hasAudio) continue;
+                    if (track.visible === false || m?.disabled) continue;
+                }
+                out.push(clip);
+            }
+        }
+        return out;
+    }
+
+    _startAudioPlayback() {
+        this._stopAudioPlayback();
+        const tl = this._timeline;
+        if (!tl) return;
+        const ctx = this._ensurePlaybackContext();
+        const startCtxTime = ctx.currentTime + 0.03; // small lead-in so scheduling never lands in the past
+        const startPlayhead = tl.currentTime;
+        const sources = [];
+
+        for (const clip of this._collectAudibleClips()) {
+            if (clip.endTime <= startPlayhead) continue; // already fully played past
+
+            const src = ctx.createBufferSource();
+            src.buffer = clip._audioBuffer;
+            src.connect(ctx.destination);
+
+            let when, offset, dur;
+            if (clip.startTime <= startPlayhead) {
+                when = startCtxTime;
+                offset = clip.sourceOffset + (startPlayhead - clip.startTime);
+                dur = clip.endTime - startPlayhead;
+            } else {
+                when = startCtxTime + (clip.startTime - startPlayhead);
+                offset = clip.sourceOffset;
+                dur = clip.duration;
+            }
+            try {
+                src.start(when, Math.max(0, offset), Math.max(0.001, dur));
+                sources.push(src);
+            } catch { /* clip's buffer/offset out of range — skip it */ }
+        }
+        this._activeAudioSources = sources;
+    }
+
+    _stopAudioPlayback() {
+        for (const src of this._activeAudioSources) {
+            try { src.stop(); } catch { /* already stopped */ }
+            try { src.disconnect(); } catch { /* already disconnected */ }
+        }
+        this._activeAudioSources = [];
     }
 
     _initTimelineFromWidgets() {
@@ -1196,10 +1294,12 @@ export class CapTimelineEditorApp {
             const sourceDur = Number(c.source_duration) || dur;
             const trimIn = Math.max(0, Number(c.trim_in) || 0);
             let peaks = null;
+            let buffer = null;
             if (af) {
                 try {
                     const r = await this._fetchPeaks(this._audioUrl(af));
                     peaks = r.peaks[0];
+                    buffer = r.buffer;
                 } catch { /* placeholder */ }
             }
             const clip = this._timeline.addClip(track.id, {
@@ -1213,6 +1313,7 @@ export class CapTimelineEditorApp {
                 waveformPeaks: peaks,
                 color: track.color,
             });
+            clip._audioBuffer = buffer;
             this._meta.set(clip.id, {
                 ...defaultAudioMeta(trackIdx),
                 muted: !!c.muted,
@@ -1250,12 +1351,14 @@ export class CapTimelineEditorApp {
             let thumbnail = null;
             let peaks = null;
             let hasAudio = false;
+            let buffer = null;
             if (url) {
                 try { thumbnail = await this._grabVideoThumbnail(url); } catch { /* no preview */ }
                 try {
                     const r = await this._fetchPeaks(url);
                     peaks = r.peaks[0];
                     hasAudio = true;
+                    buffer = r.buffer;
                 } catch { hasAudio = false; }
             }
             const clip = this._timeline.addClip(track.id, {
@@ -1271,6 +1374,7 @@ export class CapTimelineEditorApp {
                 hasAudio,
                 color: track.color,
             });
+            clip._audioBuffer = buffer;
             this._meta.set(clip.id, {
                 ...defaultImageMeta(trackIdx),
                 mediaKind: "video",
@@ -1713,6 +1817,8 @@ export class CapTimelineEditorApp {
             this._setupTrackControls(track);
         });
         tl.on("zoomchange", () => this._refreshTimelineDuration());
+        tl.on("play", () => this._startAudioPlayback());
+        tl.on("pause", () => this._stopAudioPlayback());
         if (!this._onWinResize) {
             this._onWinResize = () => {
                 if (this._overlay?.classList.contains("open") && this._timeline) {
