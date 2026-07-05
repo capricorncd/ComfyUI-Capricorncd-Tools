@@ -705,10 +705,15 @@
     letter-spacing: 0.05em;
 }
 
-.cat-te-prompt-input {
+.cat-te-prompt-input-wrap {
     flex: 1;
     min-height: 80px;
+    position: relative;
+}
+
+.cat-te-prompt-input {
     width: 100%;
+    height: 100%;
     box-sizing: border-box;
     background: #111827;
     border: 1px solid #2d3748;
@@ -717,6 +722,7 @@
     padding: 6px 8px;
     font-size: 11px;
     font-family: monospace;
+    line-height: 1.5;
     resize: none;
 }
 .cat-te-prompt-input:disabled { opacity: 0.4; }

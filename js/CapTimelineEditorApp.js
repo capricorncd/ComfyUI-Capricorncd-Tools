@@ -1,6 +1,7 @@
 import { api } from "../../scripts/api.js";
 import { Timeline, ICONS } from "./timeline/index.js";
 import { parseTimecode, formatTimecode } from "./timecode.js";
+import { attachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 
 const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
 /** Right-side empty margin as a fraction of the timeline viewport width. */
@@ -256,7 +257,9 @@ export class CapTimelineEditorApp {
               </div>
               <div class="cat-te-prompt-wrap">
                 <div class="cat-te-prompt-label">Keyframe Prompt</div>
-                <textarea class="cat-te-prompt-input" placeholder="选中素材后编辑提示词…" disabled></textarea>
+                <div class="cat-te-prompt-input-wrap">
+                  <textarea class="cat-te-prompt-input" placeholder="选中素材后编辑提示词…" disabled></textarea>
+                </div>
                 <label class="cat-te-use-global">
                   <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
                   <span>Use Global</span>
@@ -297,6 +300,7 @@ export class CapTimelineEditorApp {
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
         this.tlHost = el.querySelector(".cat-te-timeline-host");
         this.promptInput = el.querySelector(".cat-te-prompt-input");
+        attachRichPromptHandler(this.promptInput, { mode: "widget" });
         this.useGlobalCb = el.querySelector(".cat-te-use-global-cb");
         this.clipInfoEmpty = el.querySelector(".cat-te-clip-info-empty");
         this.clipInfoDetail = el.querySelector(".cat-te-clip-info-detail");
@@ -1757,13 +1761,13 @@ export class CapTimelineEditorApp {
         if (clip && m && !isAudio) {
             this.promptInput.disabled = false;
             this.useGlobalCb.disabled = false;
-            this.promptInput.value = m.prompt ?? "";
+            setRichPromptValue(this.promptInput, m.prompt ?? "");
             this.useGlobalCb.checked = m.useGlobalPrompt !== false;
             label.textContent = "Keyframe Prompt";
         } else {
             this.promptInput.disabled = true;
             this.useGlobalCb.disabled = true;
-            this.promptInput.value = "";
+            setRichPromptValue(this.promptInput, "");
             label.textContent = isAudio ? "音频素材（无提示词）" : "Keyframe Prompt";
         }
     }
