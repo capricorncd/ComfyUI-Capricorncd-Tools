@@ -85,6 +85,7 @@ def resolve_assets_dir(path: str) -> str:
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 
 
 def _natural_sort_key(name: str):
@@ -93,8 +94,9 @@ def _natural_sort_key(name: str):
     return [int(p) if p.isdigit() else p for p in parts]
 
 
-def list_keyframe_files_ordered(directory: str) -> list[str]:
-    """List image files in directory, ordered for use as keyframe sequence (index 0, 1, 2…)."""
+def _list_files_ordered(directory: str, extensions: set[str]) -> list[str]:
+    """Recursively list files matching extensions; entries in subfolders are
+    returned as relative paths (forward-slashed) below `directory`."""
     import os
 
     directory = resolve_assets_dir(directory)
@@ -102,14 +104,26 @@ def list_keyframe_files_ordered(directory: str) -> list[str]:
         return []
 
     files: list[str] = []
-    for name in os.listdir(directory):
-        _, ext = os.path.splitext(name)
-        if ext.lower() not in IMAGE_EXTENSIONS:
-            continue
-        files.append(name)
+    for root, _dirs, names in os.walk(directory):
+        for name in names:
+            _, ext = os.path.splitext(name)
+            if ext.lower() not in extensions:
+                continue
+            rel = os.path.relpath(os.path.join(root, name), directory)
+            files.append(rel.replace(os.sep, "/"))
 
     files.sort(key=_natural_sort_key)
     return files
+
+
+def list_keyframe_files_ordered(directory: str) -> list[str]:
+    """List image files in directory, ordered for use as keyframe sequence (index 0, 1, 2…)."""
+    return _list_files_ordered(directory, IMAGE_EXTENSIONS)
+
+
+def list_video_files_ordered(directory: str) -> list[str]:
+    """List video files in the same assets directory used for keyframe images."""
+    return _list_files_ordered(directory, VIDEO_EXTENSIONS)
 
 
 # Backward-compatible alias

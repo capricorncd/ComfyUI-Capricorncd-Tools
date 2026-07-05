@@ -30,7 +30,9 @@ from .cap_save_images import (
 )
 from .timecode import (
     IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
     list_keyframe_files_ordered,
+    list_video_files_ordered,
     resolve_assets_dir,
 )
 
@@ -57,6 +59,19 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
+
+def _safe_join(base: str, rel: str) -> str | None:
+    """Resolve `rel` under `base`, allowing subfolders but rejecting anything
+    (via `..`, an absolute path, or a symlink) that would escape `base`."""
+    rel = (rel or "").strip().replace("\\", "/")
+    if not rel or rel.startswith("/") or ".." in rel.split("/"):
+        return None
+    base_real = os.path.realpath(base)
+    candidate_real = os.path.realpath(os.path.join(base_real, rel))
+    if candidate_real != base_real and not candidate_real.startswith(base_real + os.sep):
+        return None
+    return candidate_real
 
 
 def _register_routes():
@@ -88,13 +103,36 @@ def _register_routes():
         resolved = resolve_assets_dir(directory)
         if not resolved or not name:
             return web.Response(status=400, text="Missing dir or name")
-        safe_name = os.path.basename(name)
-        if safe_name != name:
+        path = _safe_join(resolved, name)
+        if not path:
             return web.Response(status=400, text="Invalid filename")
-        _, ext = os.path.splitext(safe_name)
+        _, ext = os.path.splitext(path)
         if ext.lower() not in IMAGE_EXTENSIONS:
             return web.Response(status=400, text="Unsupported file type")
-        path = os.path.join(resolved, safe_name)
+        if not os.path.isfile(path):
+            return web.Response(status=404, text="Not found")
+        return web.FileResponse(path)
+
+    @routes.get("/audio_keyframe_timeline/videos")
+    async def api_list_videos(request: web.Request) -> web.Response:
+        directory = request.rel_url.query.get("dir", "")
+        resolved = resolve_assets_dir(directory)
+        files = list_video_files_ordered(directory)
+        return web.json_response({"files": files, "resolved_dir": resolved, "count": len(files)})
+
+    @routes.get("/audio_keyframe_timeline/keyframe_video")
+    async def api_keyframe_video(request: web.Request) -> web.Response:
+        directory = request.rel_url.query.get("dir", "")
+        name = request.rel_url.query.get("name", "")
+        resolved = resolve_assets_dir(directory)
+        if not resolved or not name:
+            return web.Response(status=400, text="Missing dir or name")
+        path = _safe_join(resolved, name)
+        if not path:
+            return web.Response(status=400, text="Invalid filename")
+        _, ext = os.path.splitext(path)
+        if ext.lower() not in VIDEO_EXTENSIONS:
+            return web.Response(status=400, text="Unsupported file type")
         if not os.path.isfile(path):
             return web.Response(status=404, text="Not found")
         return web.FileResponse(path)

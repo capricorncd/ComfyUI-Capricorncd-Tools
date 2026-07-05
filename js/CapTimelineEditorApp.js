@@ -29,6 +29,7 @@ function uid() {
 function defaultImageMeta(trackIndex = 0) {
     return {
         clipType: "image",
+        mediaKind: "image",
         prompt: "",
         endImage: null,
         useGlobalPrompt: true,
@@ -57,6 +58,7 @@ export class CapTimelineEditorApp {
         this._meta = new Map();
         this._trackInfo = new Map();
         this._imgFiles = [];
+        this._videoFiles = [];
         this._audioFiles = [];
         this._mediaTab = "image";
         this._overlay = null;
@@ -100,6 +102,7 @@ export class CapTimelineEditorApp {
         CapTimelineEditorApp._open = this;
         this._overlay.focus();
         this._loadMediaList();
+        this._loadVideoFileList();
         this._loadAudioFileList();
         void this._openEditor();
     }
@@ -176,7 +179,9 @@ export class CapTimelineEditorApp {
             <aside class="cat-te-media">
               <div class="cat-te-media-tabs">
                 <button type="button" class="cat-te-tab active" data-tab="image">图片</button>
+                <button type="button" class="cat-te-tab" data-tab="video">视频</button>
                 <button type="button" class="cat-te-tab" data-tab="audio">音频</button>
+                <button type="button" class="cat-te-media-refresh" title="刷新素材列表">⟳</button>
               </div>
               <div class="cat-te-media-grid"></div>
             </aside>
@@ -249,6 +254,7 @@ export class CapTimelineEditorApp {
                 this._renderMediaGrid();
             });
         });
+        el.querySelector(".cat-te-media-refresh")?.addEventListener("click", () => this._refreshMediaLists());
 
         this.promptInput.addEventListener("input", () => this._onPromptInput());
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
@@ -515,6 +521,24 @@ export class CapTimelineEditorApp {
         );
     }
 
+    async _loadVideoFileList() {
+        const dir = this._dir();
+        if (!dir) { this._videoFiles = []; if (this._mediaTab === "video") this._renderMediaGrid(); return; }
+        try {
+            const r = await fetch(api.apiURL(`/audio_keyframe_timeline/videos?dir=${encodeURIComponent(dir)}`));
+            const d = await r.json();
+            this._videoFiles = Array.isArray(d.files) ? d.files : [];
+        } catch { this._videoFiles = []; }
+        if (this._mediaTab === "video") this._renderMediaGrid();
+    }
+
+    _videoUrl(file) {
+        const dir = this._dir();
+        return api.apiURL(
+            `/audio_keyframe_timeline/keyframe_video?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(file)}`
+        );
+    }
+
     async _loadAudioFileList() {
         try {
             const r = await fetch(api.apiURL("/audio_keyframe_timeline/input_audio"));
@@ -524,10 +548,29 @@ export class CapTimelineEditorApp {
         if (this._mediaTab === "audio") this._renderMediaGrid();
     }
 
+    /** Re-scan the assets directory (and its subfolders) plus the input-audio
+     * list, then redraw whichever tab is currently showing. */
+    async _refreshMediaLists() {
+        const btn = this._overlay?.querySelector(".cat-te-media-refresh");
+        btn?.classList.add("spinning");
+        try {
+            await Promise.all([
+                this._loadMediaList(),
+                this._loadVideoFileList(),
+                this._loadAudioFileList(),
+            ]);
+            this._renderMediaGrid();
+        } finally {
+            btn?.classList.remove("spinning");
+        }
+    }
+
     _renderMediaGrid() {
         this.mediaGrid.replaceChildren();
         if (this._mediaTab === "audio") {
             this._renderAudioMediaGrid();
+        } else if (this._mediaTab === "video") {
+            this._renderVideoMediaGrid();
         } else {
             this._renderImageMediaGrid();
         }
@@ -567,17 +610,57 @@ export class CapTimelineEditorApp {
         }
     }
 
+    _renderVideoMediaGrid() {
+        const dir = this._dir();
+        if (!dir) {
+            const msg = document.createElement("div");
+            msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
+            msg.textContent = "请先设置资源目录";
+            this.mediaGrid.appendChild(msg);
+            return;
+        }
+        if (!this._videoFiles.length) {
+            const msg = document.createElement("div");
+            msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
+            msg.textContent = "目录中无视频";
+            this.mediaGrid.appendChild(msg);
+            return;
+        }
+        for (const file of this._videoFiles) {
+            this.mediaGrid.appendChild(this._makeMediaItem(file, "video"));
+        }
+    }
+
+    /** Whether `file` is already used by a clip on the timeline (image/video
+     * clips live on image tracks; audio clips on audio tracks). */
+    _isMediaOnTimeline(file, kind) {
+        if (!this._timeline) return false;
+        const tracks = kind === "audio" ? this._allAudioTracks() : this._allImageTracks();
+        return tracks.some(t => t.clips.some(c => c.src === file));
+    }
+
     _makeMediaItem(file, kind) {
         const item = document.createElement("div");
         item.className = `cat-te-media-item cat-te-media-${kind}`;
         item.title = `${file}\n拖到时间轴或点击插入`;
         item.draggable = true;
+        if (this._isMediaOnTimeline(file, kind)) {
+            const addedTag = document.createElement("div");
+            addedTag.className = "cat-te-media-added-tag";
+            addedTag.textContent = "已添加";
+            item.appendChild(addedTag);
+        }
         if (kind === "image") {
             const img = document.createElement("img");
             img.src = this._imgUrl(file);
             img.alt = "";
             img.draggable = false;
             item.appendChild(img);
+        } else if (kind === "video") {
+            const icon = document.createElement("div");
+            icon.className = "cat-te-video-icon";
+            icon.textContent = "▶";
+            item.appendChild(icon);
         } else {
             const icon = document.createElement("div");
             icon.className = "cat-te-audio-icon";
@@ -593,13 +676,14 @@ export class CapTimelineEditorApp {
         item.append(nm, dragHint);
         item.addEventListener("click", () => {
             if (kind === "audio") this._addAudioAtPlayhead(file);
+            else if (kind === "video") this._addVideoAtPlayhead(file);
             else this._addMediaAtPlayhead(file);
         });
         item.addEventListener("dragstart", (e) => {
-            e.dataTransfer.setData(
-                kind === "audio" ? "application/x-cat-te-audio" : "application/x-cat-te-media",
-                file
-            );
+            const dragType = kind === "audio" ? "application/x-cat-te-audio"
+                : kind === "video" ? "application/x-cat-te-video"
+                : "application/x-cat-te-media";
+            e.dataTransfer.setData(dragType, file);
             e.dataTransfer.effectAllowed = "copy";
             item.classList.add("dragging");
         });
@@ -630,6 +714,11 @@ export class CapTimelineEditorApp {
     _addAudioAtPlayhead(filename) {
         if (!this._timeline) return;
         this._addAudioAtTime(filename, this._timeline.currentTime, null);
+    }
+
+    _addVideoAtPlayhead(filename) {
+        if (!this._timeline) return;
+        this._addVideoAtTime(filename, this._timeline.currentTime, null);
     }
 
     async _addImageAtTime(filename, atSec, clientY) {
@@ -699,6 +788,98 @@ export class CapTimelineEditorApp {
         this._decorateClip(clip);
         this._autoFitZoom();
         this._refreshTimelineDuration();
+    }
+
+    /** Video clips go on image tracks, trimmed to the source's own length
+     * just like audio; row 3 of the clip shows a waveform only if the
+     * file actually has an audio stream. */
+    async _addVideoAtTime(filename, atSec, clientY) {
+        if (!this._timeline) return;
+        let track = clientY != null
+            ? this._timeline._findTrackAtY(clientY, "image")
+            : null;
+        if (track?.locked || track?.visible === false) track = null;
+        if (!track) track = this._pickInsertImageTrack(atSec);
+        if (!track) {
+            alert("没有可插入的图片轨道，或该位置已被占用");
+            return;
+        }
+        const url = this._videoUrl(filename);
+        let videoDur = 2;
+        try {
+            videoDur = await this._probeVideoDuration(url);
+        } catch { /* keep default */ }
+        const dur = Math.max(0.05, videoDur);
+
+        let thumbnail = null;
+        try {
+            thumbnail = await this._grabVideoThumbnail(url);
+        } catch { /* no preview available */ }
+
+        let peaks = null;
+        let hasAudio = false;
+        try {
+            const r = await this._fetchPeaks(url);
+            peaks = r.peaks[0];
+            hasAudio = true;
+        } catch { hasAudio = false; }
+
+        this._ensureTimelineLength(atSec + dur);
+        const clip = this._timeline.addClip(track.id, {
+            name: filename.split(/[\\/]/).pop(),
+            startTime: atSec,
+            duration: dur,
+            sourceDuration: dur,
+            sourceOffset: 0,
+            thumbnail,
+            src: filename,
+            waveformPeaks: peaks,
+            hasAudio,
+            color: track.color,
+        });
+        const ti = this._trackIndex(track);
+        this._meta.set(clip.id, { ...defaultImageMeta(ti), mediaKind: "video", sourceDuration: dur });
+        this._timeline.selectClip(clip);
+        this._timeline.setCurrentTime(atSec);
+        this._decorateClip(clip);
+        this._autoFitZoom();
+        this._refreshTimelineDuration();
+    }
+
+    async _probeVideoDuration(url) {
+        return new Promise((resolve, reject) => {
+            const v = document.createElement("video");
+            v.preload = "metadata";
+            v.muted = true;
+            v.addEventListener("loadedmetadata", () => {
+                if (Number.isFinite(v.duration) && v.duration > 0) resolve(v.duration);
+                else reject(new Error("invalid duration"));
+            });
+            v.addEventListener("error", () => reject(new Error("load failed")));
+            v.src = url;
+        });
+    }
+
+    async _grabVideoThumbnail(url, atSec = 0.15) {
+        return new Promise((resolve, reject) => {
+            const v = document.createElement("video");
+            v.preload = "auto";
+            v.muted = true;
+            v.addEventListener("loadedmetadata", () => {
+                v.currentTime = Math.min(Math.max(0, atSec), Math.max(0, v.duration - 0.05));
+            });
+            v.addEventListener("seeked", () => {
+                try {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = v.videoWidth || 320;
+                    canvas.height = v.videoHeight || 180;
+                    canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
+                    resolve(canvas.toDataURL("image/jpeg", 0.72));
+                } catch (err) { reject(err); }
+            });
+            v.addEventListener("error", () => reject(new Error("load failed")));
+            v.src = url;
+        });
     }
 
     _audioBufferToPeaks(buf, max = 8000) {
@@ -913,6 +1094,49 @@ export class CapTimelineEditorApp {
                 muted: !!c.muted,
                 sourceDuration: sourceDur,
                 trimIn,
+            });
+            this._decorateClip(clip);
+            return;
+        }
+
+        if (clipType === "video") {
+            const vf = c.start_image ?? c.src ?? "";
+            const fname = vf.split(/[\\/]/).pop() || "视频";
+            const sourceDur = Number(c.source_duration) || dur;
+            const trimIn = Math.max(0, Number(c.trim_in) || 0);
+            const url = vf ? this._videoUrl(vf) : null;
+            let thumbnail = null;
+            let peaks = null;
+            let hasAudio = false;
+            if (url) {
+                try { thumbnail = await this._grabVideoThumbnail(url); } catch { /* no preview */ }
+                try {
+                    const r = await this._fetchPeaks(url);
+                    peaks = r.peaks[0];
+                    hasAudio = true;
+                } catch { hasAudio = false; }
+            }
+            const clip = this._timeline.addClip(track.id, {
+                id: uid(),
+                name: fname,
+                startTime: startMs / 1000,
+                duration: dur,
+                sourceDuration: sourceDur,
+                sourceOffset: trimIn,
+                src: vf,
+                thumbnail,
+                waveformPeaks: peaks,
+                hasAudio,
+                color: track.color,
+            });
+            this._meta.set(clip.id, {
+                ...defaultImageMeta(trackIdx),
+                mediaKind: "video",
+                prompt: c.prompt ?? "",
+                endImage: c.end_image ?? null,
+                useGlobalPrompt: c.use_global_prompt !== false,
+                disabled: !!c.disabled,
+                sourceDuration: sourceDur,
             });
             this._decorateClip(clip);
             return;
@@ -1135,6 +1359,7 @@ export class CapTimelineEditorApp {
         clip.thumbnail = this._imgUrl(filename);
         this._refreshClipAppearance(clip);
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
+        this._renderMediaGrid();
     }
 
     _setEndImage(clip, filename) {
@@ -1217,7 +1442,8 @@ export class CapTimelineEditorApp {
         scroll.addEventListener("dragover", (e) => {
             const types = [...e.dataTransfer.types];
             const hasMedia = types.includes("application/x-cat-te-media")
-                || types.includes("application/x-cat-te-audio");
+                || types.includes("application/x-cat-te-audio")
+                || types.includes("application/x-cat-te-video");
             if (!hasMedia) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
@@ -1229,8 +1455,9 @@ export class CapTimelineEditorApp {
         scroll.addEventListener("drop", (e) => {
             const audioFile = e.dataTransfer.getData("application/x-cat-te-audio");
             const imageFile = e.dataTransfer.getData("application/x-cat-te-media");
+            const videoFile = e.dataTransfer.getData("application/x-cat-te-video");
             scroll.classList.remove("cat-te-drop-active");
-            if (!audioFile && !imageFile) return;
+            if (!audioFile && !imageFile && !videoFile) return;
             e.preventDefault();
             const targetClip = this._findClipAt(e.clientX, e.clientY);
             if (targetClip && imageFile && targetClip.track.type === "image") {
@@ -1240,6 +1467,8 @@ export class CapTimelineEditorApp {
             const t = tl.clientXToTime(e.clientX);
             if (audioFile) {
                 void this._addAudioAtTime(audioFile, t, e.clientY);
+            } else if (videoFile) {
+                void this._addVideoAtTime(videoFile, t, e.clientY);
             } else {
                 void this._addImageAtTime(imageFile, t, e.clientY);
             }
@@ -1261,7 +1490,10 @@ export class CapTimelineEditorApp {
             this._updatePromptPanel();
             this._overlay?.focus();
         });
-        tl.on("clip:add", ({ clip }) => this._decorateClip(clip));
+        tl.on("clip:add", ({ clip }) => {
+            this._decorateClip(clip);
+            this._renderMediaGrid();
+        });
         tl.on("clip:deselect", () => {
             this._selClip = null;
             this._selClips = [];
@@ -1274,6 +1506,7 @@ export class CapTimelineEditorApp {
             this._updatePromptPanel();
             this._refreshTimelineDuration();
             this._pruneEmptyTrack(tl.getTrack(trackId));
+            this._renderMediaGrid();
         });
         tl.on("clip:trackchange", ({ clip, from, to }) => {
             const m = this._meta.get(clip.id)
@@ -1414,8 +1647,9 @@ export class CapTimelineEditorApp {
                         trim_in: clip.sourceOffset || 0,
                     });
                 } else {
+                    const isVideo = m.mediaKind === "video";
                     const row = {
-                        clip_type: "image",
+                        clip_type: isVideo ? "video" : "image",
                         track: ti,
                         start_ms: Math.round(clip.startTime * 1000),
                         end_ms: Math.round(clip.endTime * 1000),
@@ -1426,6 +1660,11 @@ export class CapTimelineEditorApp {
                         disabled: !!m.disabled,
                         z_index: ti === 1 ? 2 : 1,
                     };
+                    if (isVideo) {
+                        row.source_duration = Number.isFinite(clip.sourceDuration) ? clip.sourceDuration : clip.duration;
+                        row.trim_in = clip.sourceOffset || 0;
+                        row.has_audio = !!clip.hasAudio;
+                    }
                     (isMainImage ? main : other).push(row);
                 }
             }
