@@ -270,6 +270,60 @@ export class CapTimelineEditorApp {
         return (vw * TIMELINE_RIGHT_VIEWPORT_FRAC) / Math.max(1e-6, tl.pixelsPerSecond);
     }
 
+    /**
+     * Zoom level (relative to the current one) at which the furthest clip
+     * end exactly fills 70% of the viewport width, leaving 30% blank margin
+     * visible with no scrolling. Returns null when there's no content or the
+     * viewport hasn't been laid out yet.
+     */
+    _computeFitZoom() {
+        const tl = this._timeline;
+        if (!tl?.scrollEl) return null;
+        const vw = tl.scrollEl.clientWidth || 0;
+        if (vw <= 0) return null;
+
+        let maxEnd = 0;
+        for (const track of tl.tracks) {
+            for (const clip of track.clips) {
+                maxEnd = Math.max(maxEnd, clip.endTime);
+            }
+        }
+        if (maxEnd <= 0) return null;
+
+        const pps = tl.pixelsPerSecond;
+        const desiredPps = (vw * (1 - TIMELINE_RIGHT_VIEWPORT_FRAC)) / maxEnd;
+        return tl._zoom * (desiredPps / pps);
+    }
+
+    /**
+     * Zoom out (never in) just enough that the furthest clip end still fits
+     * within 70% of the viewport width, leaving the reserved 30% margin
+     * actually visible on screen instead of requiring a scroll.
+     */
+    _autoFitZoom() {
+        const tl = this._timeline;
+        const fitZoom = this._computeFitZoom();
+        if (fitZoom == null || fitZoom >= tl._zoom) return; // content already fits within the 70% zone
+
+        tl.setZoom(fitZoom);
+        tl.scrollEl.scrollLeft = 0;
+    }
+
+    /**
+     * Pin the "zoomed all the way out" floor to the same 70/30 fit point, so
+     * manually zooming out (Ctrl+wheel, slider, − button) can't go past a
+     * state that still requires scrolling to see the reserved margin.
+     */
+    _syncMinZoom() {
+        const tl = this._timeline;
+        if (!tl) return;
+        const fitZoom = this._computeFitZoom();
+        const absoluteFloor = 0.02;
+        tl.minZoom = fitZoom != null
+            ? Math.min(Math.max(fitZoom, absoluteFloor), tl.maxZoom)
+            : absoluteFloor;
+    }
+
     _computeTimelineDuration() {
         let maxEnd = 0;
         for (const track of this._timeline?.tracks ?? []) {
@@ -302,6 +356,7 @@ export class CapTimelineEditorApp {
         if (!this._timeline) return;
         const dur = this._computeTimelineDuration();
         this._timeline.duration = dur;
+        this._syncMinZoom();
         if (this._timeline._durEl) {
             this._timeline._durEl.textContent = `/ ${this._timeline.formatTime(dur)}`;
         }
@@ -570,6 +625,7 @@ export class CapTimelineEditorApp {
         this._timeline.selectClip(clip);
         this._timeline.setCurrentTime(atSec);
         this._decorateClip(clip);
+        this._autoFitZoom();
         this._refreshTimelineDuration();
     }
 
@@ -607,6 +663,7 @@ export class CapTimelineEditorApp {
         this._timeline.selectClip(clip);
         this._timeline.setCurrentTime(atSec);
         this._decorateClip(clip);
+        this._autoFitZoom();
         this._refreshTimelineDuration();
     }
 
@@ -712,6 +769,7 @@ export class CapTimelineEditorApp {
 
         await Promise.all(clips.map(c => this._addClipFromJson(c)));
 
+        this._autoFitZoom();
         this._refreshTimelineDuration();
         this._decorateAllClips();
         this._bindTimelineEvents();
