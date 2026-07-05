@@ -1,6 +1,7 @@
 import { api } from "../../scripts/api.js";
 import { Timeline, ICONS } from "./timeline/index.js";
 import { parseTimecode, formatTimecode } from "./timecode.js";
+import { attachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 
 const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
 /** Right-side empty margin as a fraction of the timeline viewport width. */
@@ -34,6 +35,7 @@ function defaultImageMeta(trackIndex = 0) {
         endImage: null,
         useGlobalPrompt: true,
         disabled: false,
+        visible: true,
         muted: false,
         trackIndex,
     };
@@ -43,6 +45,7 @@ function defaultAudioMeta(trackIndex = 2) {
     return {
         clipType: "audio",
         muted: false,
+        visible: true,
         sourceDuration: 0,
         trimIn: 0,
         trackIndex,
@@ -60,6 +63,7 @@ export class CapTimelineEditorApp {
         this._imgFiles = [];
         this._videoFiles = [];
         this._audioFiles = [];
+        this._videoThumbCache = new Map();
         this._mediaTab = "image";
         this._overlay = null;
         this._timeline = null;
@@ -68,6 +72,12 @@ export class CapTimelineEditorApp {
         this._audioTrack = null;
         this._selClip = null;
         this._selClips = [];
+        this._undoStack = [];
+        this._redoStack = [];
+        this._historyReady = false;
+        this._restoringHistory = false;
+        this._playbackCtx = null;
+        this._activeAudioSources = [];
         loadEditorCss();
         this._buildLauncher();
     }
@@ -135,14 +145,54 @@ export class CapTimelineEditorApp {
     }
 
     async _openEditor() {
+        this._historyReady = false;
+        this._openedWidgetValues = Object.fromEntries(
+            ["fps", "width", "height", "global_prompt"].map(name => [name, this._w(name)?.value]),
+        );
         await this._initTimelineFromWidgets();
         this._refreshTimelineDuration();
         requestAnimationFrame(() => this._timeline?._refresh());
+        this._undoStack = [];
+        this._redoStack = [];
+        this._historyReady = true;
+        this._openedProjectJson = JSON.stringify(this._buildProject());
+        this._updateHistoryButtons();
     }
 
+    _hasUnsavedChanges() {
+        if (!this._timeline) return false;
+        return JSON.stringify(this._buildProject()) !== this._openedProjectJson;
+    }
+
+    /**
+     * Closing "discard" (save=false) with pending edits asks first — a
+     * last-resort safety net for whenever something outside our control
+     * (e.g. Ctrl+Z leaking through to ComfyUI's own graph undo) causes the
+     * editor to close: better a confirm prompt than silently losing work.
+     * Skipped entirely if there's nothing to lose.
+     */
     close(save = true) {
         if (!this._overlay) return;
+        if (!save && this._hasUnsavedChanges()) {
+            if (confirm("有未保存的修改，是否保存后再关闭？\n点击“取消”将放弃这些修改。")) {
+                save = true;
+            }
+        }
+        this._closeInternal(save);
+    }
+
+    _closeInternal(save) {
+        if (!this._overlay) return;
+        this._historyReady = false;
+        this._stopAudioPlayback();
+        this._closeMediaPreview();
         if (save) this._saveToWidgets();
+        else if (this._openedWidgetValues) {
+            for (const [name, value] of Object.entries(this._openedWidgetValues)) {
+                const widget = this._w(name);
+                if (widget && value !== undefined) widget.value = value;
+            }
+        }
         this._timeline?.destroy();
         this._timeline = null;
         this._mainTrack = null;
@@ -153,12 +203,88 @@ export class CapTimelineEditorApp {
         if (CapTimelineEditorApp._open === this) CapTimelineEditorApp._open = null;
     }
 
+    /** Settings dialog — language is the first setting; more will land here
+     * later. Selection is only persisted for now, not yet wired to i18n. */
+    _openSettings() {
+        if (!this.settingsModal) return;
+        this.langSelect.value = localStorage.getItem("cat-te-lang") || "zh";
+        this.settingsModal.hidden = false;
+    }
+
+    _closeSettings() {
+        if (this.settingsModal) this.settingsModal.hidden = true;
+    }
+
+    _chooseProjectImport() {
+        if (this._hasUnsavedChanges() && !confirm("当前时间轴已有未保存的更改，是否用导入的项目覆盖？")) return;
+        this.importFileInput.value = "";
+        this.importFileInput.click();
+    }
+
+    _exportProject() {
+        const json = JSON.stringify(this._buildProject(), null, 2);
+        const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const projectName = String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目";
+        const safeName = projectName
+            .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+            .replace(/[. ]+$/g, "")
+            .slice(0, 80) || "未命名项目";
+        link.href = url;
+        link.download = `${safeName}-${stamp}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    async _importProject(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        try {
+            const project = JSON.parse(await file.text());
+            if (!project || typeof project !== "object" || Array.isArray(project)) {
+                throw new Error("项目根节点必须是对象");
+            }
+            if (project.schema_version !== 1) {
+                throw new Error(`不支持的 schema_version：${project.schema_version ?? "缺失"}`);
+            }
+            if (!Array.isArray(project.tracks)) {
+                throw new Error("项目缺少 tracks 数组");
+            }
+
+            this._historyReady = false;
+            this._stopAudioPlayback();
+            this._timeline?.destroy();
+            this._timeline = null;
+            await this._initTimelineFromWidgets(project);
+            this._undoStack = [];
+            this._redoStack = [];
+            this._historyReady = true;
+            this._updateHistoryButtons();
+            requestAnimationFrame(() => this._timeline?._refresh());
+        } catch (error) {
+            alert(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     destroy() {
-        this.close(false);
+        // Bypasses the unsaved-changes confirm in close() — by the time
+        // onRemoved fires the node is already gone from the graph, so
+        // there's nothing left to meaningfully save, and blocking node
+        // teardown on a dialog would be surprising.
+        this._closeInternal(false);
         document.removeEventListener("click", this._onDocClick);
         if (this._onWinResize) {
             window.removeEventListener("resize", this._onWinResize);
             this._onWinResize = null;
+        }
+        if (this._playbackCtx) {
+            this._playbackCtx.close().catch(() => {});
+            this._playbackCtx = null;
         }
         this._overlay?.remove();
     }
@@ -170,10 +296,12 @@ export class CapTimelineEditorApp {
         el.tabIndex = -1;
         el.innerHTML = `
           <header class="cat-te-header">
-            <span class="cat-te-title">导演台</span>
+            <input class="cat-te-title" type="text" value="未命名项目" aria-label="项目名称" />
             <div class="cat-te-header-spacer"></div>
-            <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-save">保存并关闭</button>
-            <button type="button" class="cat-te-btn cat-te-close">关闭</button>
+            <button type="button" class="cat-te-btn cat-te-import">导入</button>
+            <button type="button" class="cat-te-btn cat-te-export">导出</button>
+            <button type="button" class="cat-te-btn cat-te-settings">⚙ 设置</button>
+            <input class="cat-te-import-file" type="file" accept="application/json,.json" hidden />
           </header>
           <div class="cat-te-main">
             <aside class="cat-te-media">
@@ -212,7 +340,9 @@ export class CapTimelineEditorApp {
               </div>
               <div class="cat-te-prompt-wrap">
                 <div class="cat-te-prompt-label">Keyframe Prompt</div>
-                <textarea class="cat-te-prompt-input" placeholder="选中素材后编辑提示词…" disabled></textarea>
+                <div class="cat-te-prompt-input-wrap">
+                  <textarea class="cat-te-prompt-input" placeholder="选中素材后编辑提示词…" disabled></textarea>
+                </div>
                 <label class="cat-te-use-global">
                   <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
                   <span>Use Global</span>
@@ -225,13 +355,45 @@ export class CapTimelineEditorApp {
               </div>
             </aside>
           </div>
+          <footer class="cat-te-footer">
+            <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-save">保存并关闭</button>
+            <button type="button" class="cat-te-btn cat-te-close">关闭</button>
+          </footer>
           <div class="cat-te-frame-preview"></div>
+          <div class="cat-te-modal-backdrop cat-te-media-preview-modal" hidden>
+            <div class="cat-te-modal cat-te-media-preview-dialog">
+              <div class="cat-te-modal-header">
+                <span class="cat-te-media-preview-title">素材预览</span>
+                <button type="button" class="cat-te-modal-close cat-te-media-preview-close" title="关闭">×</button>
+              </div>
+              <div class="cat-te-media-preview-body"></div>
+            </div>
+          </div>
+          <div class="cat-te-modal-backdrop cat-te-settings-modal" hidden>
+            <div class="cat-te-modal">
+              <div class="cat-te-modal-header">
+                <span>设置</span>
+                <button type="button" class="cat-te-modal-close" title="关闭">✕</button>
+              </div>
+              <div class="cat-te-modal-body">
+                <label class="cat-te-modal-row">
+                  <span>语言</span>
+                  <select class="cat-te-lang-select">
+                    <option value="zh">简体中文</option>
+                    <option value="en">English</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
         `;
         document.body.appendChild(el);
         this._overlay = el;
+        this.projectNameInput = el.querySelector(".cat-te-title");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
         this.tlHost = el.querySelector(".cat-te-timeline-host");
         this.promptInput = el.querySelector(".cat-te-prompt-input");
+        attachRichPromptHandler(this.promptInput, { mode: "widget" });
         this.useGlobalCb = el.querySelector(".cat-te-use-global-cb");
         this.clipInfoEmpty = el.querySelector(".cat-te-clip-info-empty");
         this.clipInfoDetail = el.querySelector(".cat-te-clip-info-detail");
@@ -242,9 +404,42 @@ export class CapTimelineEditorApp {
         this.clipEndEl = el.querySelector(".cat-te-clip-end");
         this.clipDurEl = el.querySelector(".cat-te-clip-dur");
         this.framePreview = el.querySelector(".cat-te-frame-preview");
+        this.mediaPreviewModal = el.querySelector(".cat-te-media-preview-modal");
+        this.mediaPreviewTitle = el.querySelector(".cat-te-media-preview-title");
+        this.mediaPreviewBody = el.querySelector(".cat-te-media-preview-body");
 
         el.querySelector(".cat-te-save").addEventListener("click", () => this.close(true));
         el.querySelector(".cat-te-close").addEventListener("click", () => this.close(false));
+
+        this.settingsModal = el.querySelector(".cat-te-settings-modal");
+        this.langSelect = el.querySelector(".cat-te-lang-select");
+        this.importFileInput = el.querySelector(".cat-te-import-file");
+        el.querySelector(".cat-te-import").addEventListener("click", () => this._chooseProjectImport());
+        el.querySelector(".cat-te-export").addEventListener("click", () => this._exportProject());
+        this.importFileInput.addEventListener("change", (e) => void this._importProject(e));
+        el.querySelector(".cat-te-media-preview-close").addEventListener("click", () => this._closeMediaPreview());
+        this.mediaPreviewModal.addEventListener("click", (e) => {
+            if (e.target === this.mediaPreviewModal) this._closeMediaPreview();
+        });
+        this.projectNameInput.addEventListener("focus", () => { this._projectNameUndoArmed = false; });
+        this.projectNameInput.addEventListener("beforeinput", () => {
+            if (!this._projectNameUndoArmed) {
+                this._recordUndo();
+                this._projectNameUndoArmed = true;
+            }
+        });
+        this.projectNameInput.addEventListener("blur", () => {
+            this.projectNameInput.value = this.projectNameInput.value.trim() || "未命名项目";
+            this._projectNameUndoArmed = false;
+        });
+        el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
+        el.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
+        this.settingsModal.addEventListener("click", (e) => {
+            if (e.target === this.settingsModal) this._closeSettings();
+        });
+        this.langSelect.addEventListener("change", () => {
+            localStorage.setItem("cat-te-lang", this.langSelect.value);
+        });
 
         el.querySelectorAll(".cat-te-tab").forEach(btn => {
             btn.addEventListener("click", () => {
@@ -256,11 +451,15 @@ export class CapTimelineEditorApp {
         });
         el.querySelector(".cat-te-media-refresh")?.addEventListener("click", () => this._refreshMediaLists());
 
+        this.promptInput.addEventListener("focus", () => { this._promptUndoArmed = true; });
+        this.promptInput.addEventListener("blur", () => { this._promptUndoArmed = false; });
         this.promptInput.addEventListener("input", () => this._onPromptInput());
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
 
         el.addEventListener("keydown", e => {
             if (e.key === "Escape") {
+                if (!this.mediaPreviewModal.hidden) { this._closeMediaPreview(); e.stopPropagation(); return; }
+                if (!this.settingsModal.hidden) { this._closeSettings(); e.stopPropagation(); return; }
                 if (this._removeCtxMenu()) { e.stopPropagation(); return; }
                 e.stopPropagation();
                 this.close(true);
@@ -412,6 +611,7 @@ export class CapTimelineEditorApp {
             btn.title = "锁定轨道";
             btn.addEventListener("click", e => {
                 e.stopPropagation();
+                this._recordUndo();
                 track.setLocked(!track.locked);
                 render();
             });
@@ -424,6 +624,7 @@ export class CapTimelineEditorApp {
             btn.title = "轨道可见性";
             btn.addEventListener("click", e => {
                 e.stopPropagation();
+                this._recordUndo();
                 track.setVisible(!track.visible);
                 render();
                 this._decorateAllClips();
@@ -437,6 +638,7 @@ export class CapTimelineEditorApp {
             btn.title = "轨道静音";
             btn.addEventListener("click", e => {
                 e.stopPropagation();
+                this._recordUndo();
                 track.setMuted(!track.muted);
                 render();
                 this._decorateAllClips();
@@ -484,6 +686,7 @@ export class CapTimelineEditorApp {
             ? `确定删除素材「${clips[0].name}」？`
             : `确定删除选中的 ${n} 个素材？`;
         if (!confirm(msg)) return true;
+        this._recordUndo();
         for (const clip of clips) {
             this._meta.delete(clip.id);
             this._timeline.removeClip(clip.track.id, clip.id);
@@ -540,19 +743,22 @@ export class CapTimelineEditorApp {
     }
 
     async _loadAudioFileList() {
+        const dir = this._dir();
+        if (!dir) { this._audioFiles = []; if (this._mediaTab === "audio") this._renderMediaGrid(); return; }
         try {
-            const r = await fetch(api.apiURL("/audio_keyframe_timeline/input_audio"));
+            const r = await fetch(api.apiURL(`/audio_keyframe_timeline/audios?dir=${encodeURIComponent(dir)}`));
             const d = await r.json();
             this._audioFiles = Array.isArray(d.files) ? d.files : [];
         } catch { this._audioFiles = []; }
         if (this._mediaTab === "audio") this._renderMediaGrid();
     }
 
-    /** Re-scan the assets directory (and its subfolders) plus the input-audio
-     * list, then redraw whichever tab is currently showing. */
+    /** Re-scan the assets directory (and its subfolders) for all three media
+     * kinds, then redraw whichever tab is currently showing. */
     async _refreshMediaLists() {
         const btn = this._overlay?.querySelector(".cat-te-media-refresh");
         btn?.classList.add("spinning");
+        this._videoThumbCache.clear();
         try {
             await Promise.all([
                 this._loadMediaList(),
@@ -598,10 +804,18 @@ export class CapTimelineEditorApp {
     }
 
     _renderAudioMediaGrid() {
+        const dir = this._dir();
+        if (!dir) {
+            const msg = document.createElement("div");
+            msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
+            msg.textContent = "请先设置资源目录";
+            this.mediaGrid.appendChild(msg);
+            return;
+        }
         if (!this._audioFiles.length) {
             const msg = document.createElement("div");
             msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
-            msg.textContent = "input 目录中无音频";
+            msg.textContent = "目录中无音频";
             this.mediaGrid.appendChild(msg);
             return;
         }
@@ -642,7 +856,7 @@ export class CapTimelineEditorApp {
     _makeMediaItem(file, kind) {
         const item = document.createElement("div");
         item.className = `cat-te-media-item cat-te-media-${kind}`;
-        item.title = `${file}\n拖到时间轴或点击插入`;
+        item.title = `${file}\n点击预览；右键插入时间轴；也可拖到时间轴`;
         item.draggable = true;
         if (this._isMediaOnTimeline(file, kind)) {
             const addedTag = document.createElement("div");
@@ -661,6 +875,14 @@ export class CapTimelineEditorApp {
             icon.className = "cat-te-video-icon";
             icon.textContent = "▶";
             item.appendChild(icon);
+            this._getVideoThumbnail(file).then(dataUrl => {
+                if (!dataUrl || !item.isConnected) return;
+                const img = document.createElement("img");
+                img.src = dataUrl;
+                img.alt = "";
+                img.draggable = false;
+                icon.replaceWith(img);
+            }).catch(() => { /* keep the icon placeholder */ });
         } else {
             const icon = document.createElement("div");
             icon.className = "cat-te-audio-icon";
@@ -674,10 +896,18 @@ export class CapTimelineEditorApp {
         dragHint.className = "cat-te-media-drag-hint";
         dragHint.textContent = "⋮⋮";
         item.append(nm, dragHint);
-        item.addEventListener("click", () => {
-            if (kind === "audio") this._addAudioAtPlayhead(file);
-            else if (kind === "video") this._addVideoAtPlayhead(file);
-            else this._addMediaAtPlayhead(file);
+        item.addEventListener("click", () => this._openMediaPreview(file, kind));
+        item.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this._buildCtxMenu([{
+                label: "插入时间轴",
+                fn: () => {
+                    if (kind === "audio") void this._addAudioAtPlayhead(file);
+                    else if (kind === "video") void this._addVideoAtPlayhead(file);
+                    else void this._addMediaAtPlayhead(file);
+                },
+            }], e.clientX, e.clientY);
         });
         item.addEventListener("dragstart", (e) => {
             const dragType = kind === "audio" ? "application/x-cat-te-audio"
@@ -739,6 +969,7 @@ export class CapTimelineEditorApp {
             return;
         }
         const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: "Package",
             startTime: atSec,
@@ -766,6 +997,7 @@ export class CapTimelineEditorApp {
             return;
         }
         const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -793,10 +1025,12 @@ export class CapTimelineEditorApp {
         const url = this._audioUrl(filename);
         let peaks = null;
         let sourceDur = 30;
+        let buffer = null;
         try {
             const r = await this._fetchPeaks(url);
             peaks = r.peaks[0];
             sourceDur = r.duration;
+            buffer = r.buffer;
         } catch {
             try {
                 sourceDur = await this._probeAudioDuration(url);
@@ -804,6 +1038,7 @@ export class CapTimelineEditorApp {
         }
         const dur = Math.max(0.05, sourceDur);
         this._ensureTimelineLength(atSec + dur);
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -814,6 +1049,7 @@ export class CapTimelineEditorApp {
             waveformPeaks: peaks,
             color: track.color,
         });
+        clip._audioBuffer = buffer;
         const ti = this._trackIndex(track);
         this._meta.set(clip.id, { ...defaultAudioMeta(ti), sourceDuration: sourceDur, trimIn: 0 });
         this._timeline.selectClip(clip);
@@ -851,13 +1087,16 @@ export class CapTimelineEditorApp {
 
         let peaks = null;
         let hasAudio = false;
+        let buffer = null;
         try {
             const r = await this._fetchPeaks(url);
             peaks = r.peaks[0];
             hasAudio = true;
+            buffer = r.buffer;
         } catch { hasAudio = false; }
 
         this._ensureTimelineLength(atSec + dur);
+        this._recordUndo();
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -870,6 +1109,7 @@ export class CapTimelineEditorApp {
             hasAudio,
             color: track.color,
         });
+        clip._audioBuffer = buffer;
         const ti = this._trackIndex(track);
         this._meta.set(clip.id, { ...defaultImageMeta(ti), mediaKind: "video", sourceDuration: dur });
         this._timeline.selectClip(clip);
@@ -913,6 +1153,15 @@ export class CapTimelineEditorApp {
             v.addEventListener("error", () => reject(new Error("load failed")));
             v.src = url;
         });
+    }
+
+    /** Cached (and de-duped) thumbnail lookup for the video media grid —
+     * each file is only decoded/seeked once per editor session. */
+    _getVideoThumbnail(file) {
+        if (this._videoThumbCache.has(file)) return this._videoThumbCache.get(file);
+        const p = this._grabVideoThumbnail(this._videoUrl(file)).catch(() => null);
+        this._videoThumbCache.set(file, p);
+        return p;
     }
 
     _audioBufferToPeaks(buf, max = 8000) {
@@ -959,7 +1208,10 @@ export class CapTimelineEditorApp {
         const ctx = new AudioContext();
         try {
             const buf = await ctx.decodeAudioData(ab.slice(0));
-            return { peaks: this._audioBufferToPeaks(buf), duration: buf.duration };
+            // `buf` stays valid after this context closes — AudioBuffers aren't
+            // tied to the context that decoded them, so it's cached on the
+            // clip for playback instead of being re-fetched/re-decoded later.
+            return { peaks: this._audioBufferToPeaks(buf), duration: buf.duration, buffer: buf };
         } finally {
             await ctx.close();
         }
@@ -967,23 +1219,99 @@ export class CapTimelineEditorApp {
 
     _audioUrl(filename) {
         if (!filename) return null;
-        let name = String(filename).replace(/\s*\[input\]\s*$/i, "").trim();
-        let sub = "";
-        if (name.includes("/") || name.includes("\\")) {
-            const i = Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\"));
-            sub = name.slice(0, i);
-            name = name.slice(i + 1);
+        const dir = this._dir();
+        return api.apiURL(
+            `/audio_keyframe_timeline/keyframe_audio?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(filename)}`
+        );
+    }
+
+    // ─── Audio playback ─────────────────────────────────────────────────
+    //
+    // At any seek position there can be several simultaneous audio-bearing
+    // sources: one clip per audio track (a track can't have overlapping
+    // clips, but there can be several audio tracks), plus a video-with-audio
+    // clip on the main track and/or the overlay track. Rather than mixing
+    // these down into one buffer ourselves, each audible clip gets its own
+    // AudioBufferSourceNode connected to the same AudioContext destination —
+    // the Web Audio API mixes any number of simultaneous sources for free.
+
+    _ensurePlaybackContext() {
+        if (!this._playbackCtx) {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            this._playbackCtx = new Ctx();
         }
-        const p = new URLSearchParams({ filename: name, type: "input" });
-        if (sub) p.set("subfolder", sub);
-        return api.apiURL(`/view?${p}`);
+        if (this._playbackCtx.state === "suspended") this._playbackCtx.resume();
+        return this._playbackCtx;
     }
 
-    _initTimelineFromWidgets() {
-        return this._initTimelineFromWidgetsAsync();
+    /** Clips that should actually be heard: not muted, not hidden, not
+     * disabled — mirrors what `_decorateClip` already treats as "excluded
+     * from the render" for image/video tracks. */
+    _collectAudibleClips() {
+        const out = [];
+        for (const track of this._timeline?.tracks ?? []) {
+            for (const clip of track.clips) {
+                if (!clip._audioBuffer) continue;
+                const m = this._meta.get(clip.id);
+                if (track.type === "audio") {
+                    if (track.muted || m?.muted) continue;
+                } else {
+                    if (!clip.hasAudio) continue;
+                    if (track.visible === false || m?.disabled) continue;
+                }
+                out.push(clip);
+            }
+        }
+        return out;
     }
 
-    async _initTimelineFromWidgetsAsync() {
+    _startAudioPlayback() {
+        this._stopAudioPlayback();
+        const tl = this._timeline;
+        if (!tl) return;
+        const ctx = this._ensurePlaybackContext();
+        const startCtxTime = ctx.currentTime + 0.03; // small lead-in so scheduling never lands in the past
+        const startPlayhead = tl.currentTime;
+        const sources = [];
+
+        for (const clip of this._collectAudibleClips()) {
+            if (clip.endTime <= startPlayhead) continue; // already fully played past
+
+            const src = ctx.createBufferSource();
+            src.buffer = clip._audioBuffer;
+            src.connect(ctx.destination);
+
+            let when, offset, dur;
+            if (clip.startTime <= startPlayhead) {
+                when = startCtxTime;
+                offset = clip.sourceOffset + (startPlayhead - clip.startTime);
+                dur = clip.endTime - startPlayhead;
+            } else {
+                when = startCtxTime + (clip.startTime - startPlayhead);
+                offset = clip.sourceOffset;
+                dur = clip.duration;
+            }
+            try {
+                src.start(when, Math.max(0, offset), Math.max(0.001, dur));
+                sources.push(src);
+            } catch { /* clip's buffer/offset out of range — skip it */ }
+        }
+        this._activeAudioSources = sources;
+    }
+
+    _stopAudioPlayback() {
+        for (const src of this._activeAudioSources) {
+            try { src.stop(); } catch { /* already stopped */ }
+            try { src.disconnect(); } catch { /* already disconnected */ }
+        }
+        this._activeAudioSources = [];
+    }
+
+    _initTimelineFromWidgets(projectOverride = null) {
+        return this._initTimelineFromWidgetsAsync(projectOverride);
+    }
+
+    async _initTimelineFromWidgetsAsync(projectOverride = null) {
         this._meta.clear();
         this._trackInfo.clear();
         this.tlHost.replaceChildren();
@@ -997,11 +1325,31 @@ export class CapTimelineEditorApp {
             addTrackTypes: ["image", "audio"],
         });
 
-        let tracksCfg = [];
-        try {
-            tracksCfg = JSON.parse(this._w("tracks_json")?.value || "[]");
-            if (!Array.isArray(tracksCfg)) tracksCfg = [];
-        } catch { tracksCfg = []; }
+        let project = projectOverride;
+        if (!project) {
+            try {
+                project = JSON.parse(this._w("project_json")?.value || "{}");
+                if (!project || typeof project !== "object" || Array.isArray(project)) throw new Error("invalid project");
+            } catch { project = { schema_version: 1, settings: {}, tracks: [] }; }
+        }
+
+        this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
+
+        const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
+        for (const name of ["fps", "width", "height", "global_prompt"]) {
+            if (settings[name] == null) continue;
+            const widget = this._w(name);
+            if (widget) widget.value = settings[name];
+        }
+        this._timeline.fps = this.getFps();
+
+        const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
+        const tracksCfg = projectTracks.map((track, order) => ({
+            ...track,
+            type: track.type === "audio" ? "audio" : "image",
+            trackIndex: order,
+            isMain: track.role === "main",
+        }));
 
         if (!tracksCfg.length) {
             this._createDefaultTracks();
@@ -1009,11 +1357,25 @@ export class CapTimelineEditorApp {
             this._loadTracksFromJson(tracksCfg);
         }
 
-        let clips = [];
-        try {
-            clips = JSON.parse(this._w("clips_json")?.value || "[]");
-            if (!Array.isArray(clips)) clips = [];
-        } catch { clips = []; }
+        const clips = [];
+        projectTracks.forEach((track, trackIndex) => {
+            for (const clip of Array.isArray(track.clips) ? track.clips : []) {
+                const source = clip.source && typeof clip.source === "object" ? clip.source : {};
+                const startMs = Number(clip.start_ms) || 0;
+                const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
+                clips.push({
+                    ...clip,
+                    clip_type: clip.type,
+                    track: trackIndex,
+                    end_ms: startMs + durationMs,
+                    start_image: source.file || null,
+                    audio_file: source.file || null,
+                    source_duration: Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms)) / 1000,
+                    trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
+                    disabled: clip.enabled === false,
+                });
+            }
+        });
 
         await Promise.all(clips.map(c => this._addClipFromJson(c)));
 
@@ -1035,9 +1397,9 @@ export class CapTimelineEditorApp {
         this._audioTrack = tl.addTrack({
             type: "audio", name: "音频", height: TRACK_HEIGHT, color: "#3dd68c",
         });
-        this._trackInfo.set(this._mainTrack.id, { trackIndex: 0 });
-        this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1 });
-        this._trackInfo.set(this._audioTrack.id, { trackIndex: 2 });
+        this._trackInfo.set(this._mainTrack.id, { trackIndex: 0, enabled: true, role: "main" });
+        this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1, enabled: true, role: "overlay" });
+        this._trackInfo.set(this._audioTrack.id, { trackIndex: 2, enabled: true, role: "audio" });
         for (const t of [this._mainTrack, this._overlayTrack, this._audioTrack]) {
             this._setupTrackControls(t);
         }
@@ -1071,7 +1433,11 @@ export class CapTimelineEditorApp {
             track.setLocked(!!row.locked);
             track.setVisible(row.visible !== false);
             track.setMuted(!!row.muted);
-            this._trackInfo.set(track.id, { trackIndex: row.trackIndex ?? this._nextTrackIndex() });
+            this._trackInfo.set(track.id, {
+                trackIndex: row.trackIndex ?? this._nextTrackIndex(),
+                enabled: row.enabled !== false,
+                role: row.role || (row.isMain ? "main" : (row.type === "audio" ? "audio" : "overlay")),
+            });
             if (row.isMain || track.isMain) this._mainTrack = track;
             if (row.trackIndex === 1 && row.type === "image") this._overlayTrack = track;
             if (row.type === "audio" && !this._audioTrack) this._audioTrack = track;
@@ -1105,14 +1471,16 @@ export class CapTimelineEditorApp {
             const sourceDur = Number(c.source_duration) || dur;
             const trimIn = Math.max(0, Number(c.trim_in) || 0);
             let peaks = null;
+            let buffer = null;
             if (af) {
                 try {
                     const r = await this._fetchPeaks(this._audioUrl(af));
                     peaks = r.peaks[0];
+                    buffer = r.buffer;
                 } catch { /* placeholder */ }
             }
             const clip = this._timeline.addClip(track.id, {
-                id: uid(),
+                id: c.id || uid(),
                 name: af.split(/[\\/]/).pop() || "音频",
                 startTime: startMs / 1000,
                 duration: dur,
@@ -1122,9 +1490,11 @@ export class CapTimelineEditorApp {
                 waveformPeaks: peaks,
                 color: track.color,
             });
+            clip._audioBuffer = buffer;
             this._meta.set(clip.id, {
                 ...defaultAudioMeta(trackIdx),
                 muted: !!c.muted,
+                visible: c.visible !== false,
                 sourceDuration: sourceDur,
                 trimIn,
             });
@@ -1134,7 +1504,7 @@ export class CapTimelineEditorApp {
 
         if (clipType === "package") {
             const clip = this._timeline.addClip(track.id, {
-                id: uid(),
+                id: c.id || uid(),
                 name: c.name || "Package",
                 startTime: startMs / 1000,
                 duration: dur,
@@ -1159,16 +1529,18 @@ export class CapTimelineEditorApp {
             let thumbnail = null;
             let peaks = null;
             let hasAudio = false;
+            let buffer = null;
             if (url) {
                 try { thumbnail = await this._grabVideoThumbnail(url); } catch { /* no preview */ }
                 try {
                     const r = await this._fetchPeaks(url);
                     peaks = r.peaks[0];
                     hasAudio = true;
+                    buffer = r.buffer;
                 } catch { hasAudio = false; }
             }
             const clip = this._timeline.addClip(track.id, {
-                id: uid(),
+                id: c.id || uid(),
                 name: fname,
                 startTime: startMs / 1000,
                 duration: dur,
@@ -1180,6 +1552,7 @@ export class CapTimelineEditorApp {
                 hasAudio,
                 color: track.color,
             });
+            clip._audioBuffer = buffer;
             this._meta.set(clip.id, {
                 ...defaultImageMeta(trackIdx),
                 mediaKind: "video",
@@ -1187,7 +1560,10 @@ export class CapTimelineEditorApp {
                 endImage: c.end_image ?? null,
                 useGlobalPrompt: c.use_global_prompt !== false,
                 disabled: !!c.disabled,
+                visible: c.visible !== false,
                 sourceDuration: sourceDur,
+                muted: !!c.muted,
+                visible: c.visible !== false,
             });
             this._decorateClip(clip);
             return;
@@ -1196,7 +1572,7 @@ export class CapTimelineEditorApp {
         const img = c.start_image ?? "";
         const fname = img.split(/[\\/]/).pop() || "素材";
         const clip = this._timeline.addClip(track.id, {
-            id: uid(),
+            id: c.id || uid(),
             name: fname,
             startTime: startMs / 1000,
             duration: dur,
@@ -1210,6 +1586,7 @@ export class CapTimelineEditorApp {
             endImage: c.end_image ?? null,
             useGlobalPrompt: c.use_global_prompt !== false,
             disabled: !!c.disabled,
+            visible: c.visible !== false,
         });
         this._decorateClip(clip);
     }
@@ -1256,6 +1633,7 @@ export class CapTimelineEditorApp {
                 muteBadge.addEventListener("click", e => {
                     e.stopPropagation();
                     if (track.locked) return;
+                    this._recordUndo();
                     m.muted = !m.muted;
                     this._meta.set(clip.id, m);
                     this._decorateClip(clip);
@@ -1314,6 +1692,44 @@ export class CapTimelineEditorApp {
 
     _hideImagePreview() {
         if (this.framePreview) this.framePreview.style.display = "none";
+    }
+
+    _openMediaPreview(file, kind) {
+        if (!this.mediaPreviewModal || !this.mediaPreviewBody) return;
+        this._closeMediaPreview();
+        this.mediaPreviewTitle.textContent = file.split(/[\\/]/).pop() || "素材预览";
+
+        let media;
+        if (kind === "image") {
+            media = document.createElement("img");
+            media.src = this._imgUrl(file);
+            media.alt = this.mediaPreviewTitle.textContent;
+            media.draggable = false;
+        } else if (kind === "video") {
+            media = document.createElement("video");
+            media.src = this._videoUrl(file);
+            media.controls = true;
+            media.preload = "metadata";
+        } else {
+            media = document.createElement("audio");
+            media.src = this._audioUrl(file);
+            media.controls = true;
+            media.preload = "metadata";
+        }
+        media.className = `cat-te-media-preview-content cat-te-media-preview-${kind}`;
+        this.mediaPreviewBody.appendChild(media);
+        this.mediaPreviewModal.hidden = false;
+    }
+
+    _closeMediaPreview() {
+        if (!this.mediaPreviewModal || !this.mediaPreviewBody) return;
+        for (const media of this.mediaPreviewBody.querySelectorAll("audio, video")) {
+            media.pause();
+            media.removeAttribute("src");
+            media.load();
+        }
+        this.mediaPreviewBody.replaceChildren();
+        this.mediaPreviewModal.hidden = true;
     }
 
     _removeCtxMenu() {
@@ -1379,6 +1795,7 @@ export class CapTimelineEditorApp {
     }
 
     _toggleDisableClip(clip) {
+        this._recordUndo();
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
         m.disabled = !m.disabled;
         this._meta.set(clip.id, m);
@@ -1394,6 +1811,7 @@ export class CapTimelineEditorApp {
             }
         }
         if (!all.length) return;
+        this._recordUndo();
         const target = all.every(c => (this._meta.get(c.id) ?? defaultImageMeta()).disabled) ? false : true;
         for (const c of all) {
             const m = this._meta.get(c.id) ?? defaultImageMeta();
@@ -1406,6 +1824,7 @@ export class CapTimelineEditorApp {
     }
 
     _replaceClipImage(clip, filename) {
+        this._recordUndo();
         clip.src = filename;
         clip.name = filename.split(/[\\/]/).pop();
         clip.thumbnail = this._imgUrl(filename);
@@ -1415,6 +1834,7 @@ export class CapTimelineEditorApp {
     }
 
     _setEndImage(clip, filename) {
+        this._recordUndo();
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
         m.endImage = filename;
         this._meta.set(clip.id, m);
@@ -1422,6 +1842,7 @@ export class CapTimelineEditorApp {
     }
 
     _clearEndImage(clip) {
+        this._recordUndo();
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
         m.endImage = null;
         this._meta.set(clip.id, m);
@@ -1429,6 +1850,7 @@ export class CapTimelineEditorApp {
     }
 
     _deleteClip(clip) {
+        this._recordUndo();
         this._meta.delete(clip.id);
         this._timeline.removeClip(clip.track.id, clip.id);
         if (this._selClip?.id === clip.id) this._selClip = null;
@@ -1445,6 +1867,7 @@ export class CapTimelineEditorApp {
         const rightDur = clip.endTime - t;
         if (leftDur < frameMin || rightDur < frameMin) return;
 
+        this._recordUndo();
         const metaCopy = { ...(this._meta.get(clip.id) ?? defaultImageMeta()) };
         const clipId = clip.id;
         const clipName = clip.name;
@@ -1497,6 +1920,37 @@ export class CapTimelineEditorApp {
         packageBtn.textContent = "+ 插入Package";
         packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
         tl.toolbarEl.appendChild(packageBtn);
+
+        // Undo/redo is buttons-only, not a keyboard shortcut — Ctrl+Z can't
+        // be reliably intercepted here (ComfyUI's own graph-undo shortcut
+        // may be registered ahead of anything this extension attaches, so
+        // stopPropagation can't guarantee it loses the race) and was
+        // closing the fullscreen editor instead of undoing within it.
+        this.undoBtn = document.createElement("button");
+        this.undoBtn.type = "button";
+        this.undoBtn.className = "tl-btn tl-btn-history";
+        this.undoBtn.title = "还原";
+        this.undoBtn.textContent = "↶ 还原";
+        this.undoBtn.addEventListener("click", () => this.undo());
+        tl.toolbarEl.appendChild(this.undoBtn);
+
+        this.redoBtn = document.createElement("button");
+        this.redoBtn.type = "button";
+        this.redoBtn.className = "tl-btn tl-btn-history";
+        this.redoBtn.title = "重做";
+        this.redoBtn.textContent = "↷ 重做";
+        this.redoBtn.addEventListener("click", () => this.redo());
+        tl.toolbarEl.appendChild(this.redoBtn);
+
+        this._updateHistoryButtons();
+
+        // The "+ 轨道" dropdown is built and handled entirely inside
+        // Timeline.js, so there's no app-level call site to record an undo
+        // point right before the new track is actually added. Recording it
+        // here (before the menu even opens) is the closest equivalent —
+        // worst case, a cancelled menu leaves one harmless no-op undo step.
+        tl.toolbarEl.querySelector(".tl-btn-add-track")
+            ?.addEventListener("click", () => this._recordUndo());
 
         const scroll = tl.scrollEl;
         scroll.addEventListener("dragover", (e) => {
@@ -1589,6 +2043,13 @@ export class CapTimelineEditorApp {
             if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
             this._refreshTimelineDuration();
         });
+        // A drag (move/trim) fires many per-frame events; only the gesture
+        // as a whole should become one undo step, and only if it actually
+        // changed anything.
+        tl.on("clip:movestart", () => this._beginPendingUndo());
+        tl.on("clip:moveend", ({ moved }) => this._commitPendingUndo(moved));
+        tl.on("clip:resizestart", () => this._beginPendingUndo());
+        tl.on("clip:resizeend", ({ moved }) => this._commitPendingUndo(moved));
         tl.on("track:add", ({ track }) => {
             if (!this._trackInfo.has(track.id)) {
                 this._trackInfo.set(track.id, { trackIndex: this._nextTrackIndex() });
@@ -1599,6 +2060,8 @@ export class CapTimelineEditorApp {
             this._setupTrackControls(track);
         });
         tl.on("zoomchange", () => this._refreshTimelineDuration());
+        tl.on("play", () => this._startAudioPlayback());
+        tl.on("pause", () => this._stopAudioPlayback());
         if (!this._onWinResize) {
             this._onWinResize = () => {
                 if (this._overlay?.classList.contains("open") && this._timeline) {
@@ -1647,19 +2110,23 @@ export class CapTimelineEditorApp {
         if (clip && m && !isAudio) {
             this.promptInput.disabled = false;
             this.useGlobalCb.disabled = false;
-            this.promptInput.value = m.prompt ?? "";
+            setRichPromptValue(this.promptInput, m.prompt ?? "");
             this.useGlobalCb.checked = m.useGlobalPrompt !== false;
             label.textContent = "Keyframe Prompt";
         } else {
             this.promptInput.disabled = true;
             this.useGlobalCb.disabled = true;
-            this.promptInput.value = "";
+            setRichPromptValue(this.promptInput, "");
             label.textContent = isAudio ? "音频素材（无提示词）" : "Keyframe Prompt";
         }
     }
 
     _onPromptInput() {
         if (!this._selClip) return;
+        if (this._promptUndoArmed) {
+            this._recordUndo();
+            this._promptUndoArmed = false; // one undo step per focus session, not per keystroke
+        }
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
         m.prompt = this.promptInput.value;
         this._meta.set(this._selClip.id, m);
@@ -1667,93 +2134,208 @@ export class CapTimelineEditorApp {
 
     _onUseGlobalChange() {
         if (!this._selClip) return;
+        this._recordUndo();
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
         m.useGlobalPrompt = !!this.useGlobalCb.checked;
         this._meta.set(this._selClip.id, m);
     }
 
-    _packMainClips(clips) {
-        const fps = this.getFps();
-        const frameMs = Math.max(1, Math.round(1000 / fps));
-        clips.sort((a, b) => a.startMs - b.startMs);
-        let cursor = 0;
-        for (const c of clips) {
-            const dur = Math.max(frameMs, c.endMs - c.startMs);
-            c.startMs = cursor;
-            c.endMs = cursor + dur;
-            cursor = c.endMs;
-        }
-        return clips;
-    }
-
-    _saveToWidgets() {
-        const main = [];
-        const other = [];
-        for (const track of this._timeline?.tracks ?? []) {
+    /** Build the complete, editable and lossless project document. */
+    _buildProject() {
+        const tracks = (this._timeline?.tracks ?? []).map((track, order) => {
             const ti = this._trackIndex(track);
-            const isMainImage = track.type === "image" && track.isMain;
-            for (const clip of track.clips) {
+            const clips = track.clips.map(clip => {
                 const m = this._meta.get(clip.id)
                     ?? (track.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti));
-                if (track.type === "audio" || m.clipType === "audio") {
-                    other.push({
-                        clip_type: "audio",
-                        track: ti,
-                        start_ms: Math.round(clip.startTime * 1000),
-                        end_ms: Math.round(clip.endTime * 1000),
-                        audio_file: clip.src || "",
-                        muted: !!m.muted,
-                        source_duration: Number.isFinite(clip.sourceDuration) ? clip.sourceDuration : (m.sourceDuration || clip.duration),
-                        trim_in: clip.sourceOffset || 0,
-                    });
+                const startMs = Math.round(clip.startTime * 1000);
+                const durationMs = Math.max(1, Math.round(clip.duration * 1000));
+                const sourceInMs = Math.max(0, Math.round((clip.sourceOffset || 0) * 1000));
+                const source = {
+                    kind: track.type === "audio" ? "audio" : (m.mediaKind || "image"),
+                    file: clip.src || "",
+                };
+                if (track.type === "audio" || m.mediaKind === "video") {
+                    source.in_ms = sourceInMs;
+                    source.out_ms = sourceInMs + durationMs;
+                }
+                const row = {
+                    id: clip.id,
+                    type: track.type === "audio" ? "audio" : (m.mediaKind || "image"),
+                    enabled: !m.disabled,
+                    visible: m.visible !== false,
+                    start_ms: startMs,
+                    duration_ms: durationMs,
+                    source,
+                };
+                if (track.type === "audio") {
+                    row.muted = !!m.muted;
                 } else {
-                    const isVideo = m.mediaKind === "video";
-                    const isPackage = m.mediaKind === "package";
-                    const row = {
-                        clip_type: isPackage ? "package" : (isVideo ? "video" : "image"),
-                        track: ti,
-                        start_ms: Math.round(clip.startTime * 1000),
-                        end_ms: Math.round(clip.endTime * 1000),
-                        start_image: clip.src || null,
-                        end_image: m.endImage ?? null,
-                        prompt: m.prompt ?? "",
-                        use_global_prompt: m.useGlobalPrompt !== false,
-                        disabled: !!m.disabled,
-                        z_index: ti === 1 ? 2 : 1,
-                    };
-                    if (isVideo) {
-                        row.source_duration = Number.isFinite(clip.sourceDuration) ? clip.sourceDuration : clip.duration;
-                        row.trim_in = clip.sourceOffset || 0;
+                    row.prompt = m.prompt ?? "";
+                    row.end_image = m.endImage ?? null;
+                    row.use_global_prompt = m.useGlobalPrompt !== false;
+                    if (m.mediaKind === "video") {
                         row.has_audio = !!clip.hasAudio;
+                        row.muted = !!m.muted;
                     }
-                    if (isPackage) {
+                    if (m.mediaKind === "package") {
                         row.name = clip.name || "Package";
                         row.items = Array.isArray(m.items) ? m.items : [];
                     }
-                    (isMainImage ? main : other).push(row);
                 }
-            }
-        }
-        const packed = this._packMainClips(main);
-        const all = [...packed, ...other].sort((a, b) => a.start_ms - b.start_ms);
+                return row;
+            });
+            const trackInfo = this._trackInfo.get(track.id) || {};
+            return {
+                id: track.id,
+                type: track.type === "audio" ? "audio" : "visual",
+                role: track.isMain ? "main" : (trackInfo.role || (track.type === "audio" ? "audio" : "overlay")),
+                name: track.name,
+                order,
+                enabled: trackInfo.enabled !== false,
+                visible: track.visible !== false,
+                muted: !!track.muted,
+                locked: !!track.locked,
+                color: track.color,
+                clips,
+            };
+        });
+        return {
+            schema_version: 1,
+            name: String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目",
+            settings: {
+                fps: Number(this._w("fps")?.value ?? 24),
+                width: Number(this._w("width")?.value ?? 720),
+                height: Number(this._w("height")?.value ?? 1280),
+                global_prompt: String(this._w("global_prompt")?.value ?? ""),
+            },
+            tracks,
+        };
+    }
 
-        const clipsW = this._w("clips_json");
-        if (clipsW) clipsW.value = JSON.stringify(all);
-
-        const tracks = (this._timeline?.tracks ?? []).map(track => ({
-            id: track.id,
-            type: track.type,
-            name: track.name,
-            trackIndex: this._trackIndex(track),
-            locked: !!track.locked,
-            visible: track.visible !== false,
-            muted: !!track.muted,
-            isMain: !!track.isMain,
-            color: track.color,
-        }));
-        const tracksW = this._w("tracks_json");
-        if (tracksW) tracksW.value = JSON.stringify(tracks);
+    _saveToWidgets() {
+        const projectW = this._w("project_json");
+        if (projectW) projectW.value = JSON.stringify(this._buildProject());
 
         this.node.setDirtyCanvas(true, true);
+    }
+
+    // ─── Undo / redo ─────────────────────────────────────────────────────
+
+    _captureSnapshot() {
+        return {
+            project: this._buildProject(),
+            currentTime: this._timeline?.currentTime ?? 0,
+        };
+    }
+
+    /** Reflect stack state on the toolbar's 还原/重做 buttons. */
+    _updateHistoryButtons() {
+        if (this.undoBtn) this.undoBtn.disabled = this._undoStack.length === 0;
+        if (this.redoBtn) this.redoBtn.disabled = this._redoStack.length === 0;
+    }
+
+    /** Call right before a discrete, user-initiated mutation (add/remove/
+     * toggle/etc.) so it becomes exactly one undo step. */
+    _recordUndo() {
+        if (!this._historyReady || this._restoringHistory || !this._timeline) return;
+        this._undoStack.push(this._captureSnapshot());
+        if (this._undoStack.length > 100) this._undoStack.shift();
+        this._redoStack = [];
+        this._updateHistoryButtons();
+    }
+
+    /** Drag gestures (move/trim) span many frames — stash the pre-drag
+     * snapshot at the start and only commit it once, at the end, and only
+     * if the gesture actually changed something. */
+    _beginPendingUndo() {
+        if (!this._historyReady || this._restoringHistory || !this._timeline) return;
+        this._pendingUndoSnapshot = this._captureSnapshot();
+    }
+
+    _commitPendingUndo(moved) {
+        const snapshot = this._pendingUndoSnapshot;
+        this._pendingUndoSnapshot = null;
+        if (!snapshot || !moved || !this._historyReady || this._restoringHistory) return;
+        this._undoStack.push(snapshot);
+        if (this._undoStack.length > 100) this._undoStack.shift();
+        this._redoStack = [];
+        this._updateHistoryButtons();
+    }
+
+    async _restoreSnapshot(snapshot) {
+        if (!snapshot || !this._timeline) return;
+        this._restoringHistory = true;
+        try {
+            this._timeline.selectClip(null);
+            this._selClip = null;
+            this._selClips = [];
+            this._meta.clear();
+            this._trackInfo.clear();
+            this._mainTrack = null;
+            this._overlayTrack = null;
+            this._audioTrack = null;
+
+            const projectTracks = Array.isArray(snapshot.project?.tracks) ? snapshot.project.tracks : [];
+            this.projectNameInput.value = String(snapshot.project?.name || "未命名项目").trim() || "未命名项目";
+            const tracks = projectTracks.map((track, order) => ({
+                ...track,
+                type: track.type === "audio" ? "audio" : "image",
+                trackIndex: order,
+                isMain: track.role === "main",
+            }));
+            this._timeline.clearTracks();
+            if (tracks.length) {
+                this._loadTracksFromJson(tracks);
+            } else {
+                this._createDefaultTracks();
+            }
+            const clips = [];
+            projectTracks.forEach((track, trackIndex) => {
+                for (const clip of Array.isArray(track.clips) ? track.clips : []) {
+                    const source = clip.source && typeof clip.source === "object" ? clip.source : {};
+                    const startMs = Number(clip.start_ms) || 0;
+                    const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
+                    clips.push({
+                        ...clip,
+                        clip_type: clip.type,
+                        track: trackIndex,
+                        end_ms: startMs + durationMs,
+                        start_image: source.file || null,
+                        audio_file: source.file || null,
+                        source_duration: Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms)) / 1000,
+                        trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
+                        disabled: clip.enabled === false,
+                    });
+                }
+            });
+            await Promise.all(clips.map(c => this._addClipFromJson(c)));
+
+            this._timeline.setCurrentTime(snapshot.currentTime || 0);
+            this._decorateAllClips();
+            this._autoFitZoom();
+            this._refreshTimelineDuration();
+            this._updatePromptPanel();
+            this._renderMediaGrid();
+        } finally {
+            this._restoringHistory = false;
+        }
+    }
+
+    async undo() {
+        if (!this._undoStack.length || this._restoringHistory) return;
+        const current = this._captureSnapshot();
+        const prev = this._undoStack.pop();
+        this._redoStack.push(current);
+        await this._restoreSnapshot(prev);
+        this._updateHistoryButtons();
+    }
+
+    async redo() {
+        if (!this._redoStack.length || this._restoringHistory) return;
+        const current = this._captureSnapshot();
+        const next = this._redoStack.pop();
+        this._undoStack.push(current);
+        await this._restoreSnapshot(next);
+        this._updateHistoryButtons();
     }
 }

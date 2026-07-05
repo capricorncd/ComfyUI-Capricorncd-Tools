@@ -86,6 +86,7 @@ def resolve_assets_dir(path: str) -> str:
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
 
 
 def _natural_sort_key(name: str):
@@ -124,6 +125,11 @@ def list_keyframe_files_ordered(directory: str) -> list[str]:
 def list_video_files_ordered(directory: str) -> list[str]:
     """List video files in the same assets directory used for keyframe images."""
     return _list_files_ordered(directory, VIDEO_EXTENSIONS)
+
+
+def list_audio_files_ordered(directory: str) -> list[str]:
+    """List audio files in the same assets directory used for keyframe images."""
+    return _list_files_ordered(directory, AUDIO_EXTENSIONS)
 
 
 # Backward-compatible alias

@@ -1,42 +1,28 @@
-"""Fullscreen timeline editor — no node-level audio; audio lives on timeline tracks."""
+"""Fullscreen timeline editor backed by a track-nested project document."""
 
 from __future__ import annotations
 
 import json
 import os
 
-import folder_paths
 import torch
 
 from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines, _subtract_intervals
 from .timecode import resolve_assets_dir
 
 
-def _list_input_audio():
-    input_dir = folder_paths.get_input_directory()
-    files = folder_paths.filter_files_content_types(os.listdir(input_dir), ["audio", "video"])
-    return sorted(files)
-
-
 class CAP_TimelineEditor(CAP_AudioTimeline):
-    """Timeline edited in fullscreen NLE UI; audio is optional and placed on audio tracks."""
+    """Edit a project document and derive a compact downstream runtime document."""
 
     DESCRIPTION = (
-        "Fullscreen timeline editor. Audio is added on audio tracks inside the editor — "
-        "no audio widget on the node. Use 「时间轴编辑」 to open."
+        "Fullscreen timeline editor. The editor stores one track-nested project_json; "
+        "data_json contains only enabled runtime clips and their intersecting audio slices."
     )
 
     RETURN_TYPES = ("FLOAT", "INT", "INT", "STRING", "STRING", "INT", "INT", "AUDIO", "STRING")
     RETURN_NAMES = (
-        "fps",
-        "width",
-        "height",
-        "global_prompt",
-        "data_json",
-        "clips_length",
-        "total_frame_count",
-        "clips_audio",
-        "frame_seq_dir",
+        "fps", "width", "height", "global_prompt", "data_json",
+        "clips_length", "total_frame_count", "clips_audio", "frame_seq_dir",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -49,51 +35,22 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "width": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
                 "height": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
                 "assets_dir": ("STRING", {"default": "", "multiline": False}),
-                "global_prompt": (
+                "global_prompt": ("STRING", {"default": "", "multiline": True}),
+                "project_json": (
                     "STRING",
                     {
-                        "default": "",
+                        "default": '{"schema_version":1,"name":"未命名项目","settings":{},"tracks":[]}',
                         "multiline": True,
-                        "tooltip": "Default prompt applied to all image clips unless overridden.",
+                        "tooltip": "Track-nested editable timeline project (schema version 1).",
                     },
                 ),
-                "clips_json": (
-                    "STRING",
-                    {
-                        "default": "[]",
-                        "multiline": True,
-                        "tooltip": (
-                            "JSON clips: image + audio. Fields include clip_type, track, "
-                            "start_ms, end_ms, start_image, audio_file, muted, disabled, …"
-                        ),
-                    },
-                ),
-                "tracks_json": (
-                    "STRING",
-                    {
-                        "default": "[]",
-                        "multiline": True,
-                        "tooltip": "JSON track layout: type, locked, visible, muted, trackIndex, …",
-                    },
-                ),
-                "trim_offset": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 0,
-                        "max": 60,
-                        "step": 1,
-                        "tooltip": "Reserved; trimmed_audio output removed from this node.",
-                    },
-                ),
+                "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1}),
             },
         }
 
     @classmethod
-    def IS_CHANGED(cls, fps, width, height, assets_dir, global_prompt,
-                   clips_json, tracks_json, trim_offset, **_):
-        return (fps, width, height, assets_dir, global_prompt,
-                clips_json, tracks_json, trim_offset)
+    def IS_CHANGED(cls, fps, width, height, assets_dir, global_prompt, project_json, trim_offset, **_):
+        return fps, width, height, assets_dir, global_prompt, project_json, trim_offset
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -101,188 +58,162 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     def _silent_audio(self, sample_rate: int = 44100, duration_ms: int = 1000):
         n = max(1, int(round(duration_ms / 1000 * sample_rate)))
-        wf = torch.zeros(1, 1, n)
-        return {"waveform": wf, "sample_rate": sample_rate}
+        return {"waveform": torch.zeros(1, 1, n), "sample_rate": sample_rate}
 
-    def _timeline_duration_ms(self, clips: list[dict]) -> int:
-        if not clips:
-            return 1000
-        return max(1, max(int(c.get("end_ms", 0) or 0) for c in clips))
-
-    def _pick_master_audio(self, clips: list[dict]) -> str | None:
-        audio_clips = [
-            c for c in clips
-            if str(c.get("clip_type", "")).lower() == "audio" and c.get("audio_file")
-        ]
-        if not audio_clips:
-            return None
-        audio_clips.sort(key=lambda c: int(c.get("start_ms", 0)))
-        return str(audio_clips[0]["audio_file"])
-
-    def _track_hidden_or_muted(self, tracks_cfg: list[dict], track_index: int, clip_type: str) -> bool:
-        for t in tracks_cfg:
-            if int(t.get("trackIndex", -1)) != track_index:
-                continue
-            if t.get("locked"):
-                pass
-            if clip_type == "image" and t.get("visible") is False:
-                return True
-            if clip_type == "audio" and t.get("muted"):
-                return True
-        return False
-
-    def execute(
-        self,
-        fps,
-        width,
-        height,
-        assets_dir,
-        global_prompt,
-        clips_json,
-        tracks_json="[]",
-        trim_offset=1,
-    ):
-        fps = max(1.0, float(fps))
-        width = max(1, int(width))
-        height = max(1, int(height))
-        global_prompt = _strip_comment_lines(global_prompt)
-
+    @staticmethod
+    def _project(raw: str) -> dict:
         try:
-            clips = json.loads(clips_json or "[]")
-            if not isinstance(clips, list):
-                clips = []
-        except json.JSONDecodeError:
-            clips = []
+            value = json.loads(raw or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return {"schema_version": 1, "settings": {}, "tracks": []}
+        if not isinstance(value, dict):
+            return {"schema_version": 1, "settings": {}, "tracks": []}
+        value.setdefault("settings", {})
+        value.setdefault("tracks", [])
+        value.setdefault("name", "未命名项目")
+        if not isinstance(value["settings"], dict):
+            value["settings"] = {}
+        if not isinstance(value["tracks"], list):
+            value["tracks"] = []
+        return value
 
-        try:
-            tracks_cfg = json.loads(tracks_json or "[]")
-            if not isinstance(tracks_cfg, list):
-                tracks_cfg = []
-        except json.JSONDecodeError:
-            tracks_cfg = []
-
-        image_clips = [c for c in clips if str(c.get("clip_type", "image")).lower() != "audio"]
-        dur_ms = self._timeline_duration_ms(clips)
-        start_ms = 0
-        end_ms = dur_ms
-
-        master_audio = self._pick_master_audio(clips)
-        if master_audio and folder_paths.exists_annotated_filepath(master_audio):
-            audio_path = folder_paths.get_annotated_filepath(master_audio)
-            waveform, sample_rate = self._load_audio(master_audio)
+    @staticmethod
+    def _clip_range(clip: dict) -> tuple[int, int]:
+        start = max(0, int(clip.get("start_ms", 0) or 0))
+        if "duration_ms" in clip:
+            end = start + max(0, int(clip.get("duration_ms", 0) or 0))
         else:
-            audio_path = ""
-            sample_rate = 44100
-            waveform = self._silent_audio(sample_rate, dur_ms)["waveform"]
+            end = max(start, int(clip.get("end_ms", start) or start))
+        return start, end
+
+    @staticmethod
+    def _source(clip: dict) -> dict:
+        source = clip.get("source")
+        return source if isinstance(source, dict) else {}
+
+    @staticmethod
+    def _track_active(track: dict) -> bool:
+        return track.get("enabled", True) is not False and track.get("visible", True) is not False
+
+    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict]) -> list[dict]:
+        result = []
+        for audio in audio_clips:
+            audio_start, audio_end = self._clip_range(audio)
+            overlap_start = max(start_ms, audio_start)
+            overlap_end = min(end_ms, audio_end)
+            if overlap_end <= overlap_start:
+                continue
+            source = self._source(audio)
+            source_in = max(0, int(source.get("in_ms", 0) or 0))
+            row = {
+                "source_clip_id": str(audio.get("id", "")),
+                "source_kind": str(source.get("kind") or "audio"),
+                "file": str(source.get("file") or ""),
+                "source_start_ms": source_in + overlap_start - audio_start,
+                "source_end_ms": source_in + overlap_end - audio_start,
+                "clip_offset_ms": overlap_start - start_ms,
+            }
+            if row["file"]:
+                result.append(row)
+        return result
+
+    def execute(self, fps, width, height, assets_dir, global_prompt, project_json, trim_offset=1):
+        project = self._project(project_json)
+        settings = project["settings"]
+        fps = max(1.0, float(settings.get("fps", fps) or fps))
+        width = max(1, int(settings.get("width", width) or width))
+        height = max(1, int(settings.get("height", height) or height))
+        global_prompt = _strip_comment_lines(settings.get("global_prompt", global_prompt) or "")
+
+        visual_clips: list[tuple[dict, dict, int]] = []
+        audio_clips: list[dict] = []
+        tracks = sorted(
+            (t for t in project["tracks"] if isinstance(t, dict)),
+            key=lambda t: int(t.get("order", 0) or 0),
+        )
+        for z_index, track in enumerate(tracks, start=1):
+            if not self._track_active(track):
+                continue
+            track_type = str(track.get("type") or "visual").lower()
+            for clip in track.get("clips", []):
+                if (
+                    not isinstance(clip, dict)
+                    or clip.get("enabled", True) is False
+                    or clip.get("visible", True) is False
+                ):
+                    continue
+                clip_type = str(clip.get("type") or ("audio" if track_type == "audio" else "image")).lower()
+                if clip_type == "audio" or track_type == "audio":
+                    if track.get("muted", False) or clip.get("muted", False):
+                        continue
+                    audio_clips.append(clip)
+                else:
+                    visual_clips.append((track, clip, z_index))
+                    if clip_type == "video" and clip.get("has_audio", False) and not clip.get("muted", False):
+                        embedded = dict(clip)
+                        embedded["source"] = dict(self._source(clip), kind="video")
+                        audio_clips.append(embedded)
+
+        main = [(t, c, z) for t, c, z in visual_clips if str(t.get("role", "")).lower() == "main"]
+        overlays = [(t, c, z) for t, c, z in visual_clips if str(t.get("role", "")).lower() != "main"]
+        if not main and visual_clips:
+            main, overlays = [visual_clips[0]], visual_clips[1:]
+
+        overlay_cuts = [self._clip_range(c) for _, c, _ in overlays]
+        segments: list[tuple[dict, int, int, int]] = []
+        for _, clip, z_index in overlays:
+            start, end = self._clip_range(clip)
+            if end > start:
+                segments.append((clip, start, end, z_index))
+        for _, clip, z_index in main:
+            start, end = self._clip_range(clip)
+            for part_start, part_end in _subtract_intervals(start, end, overlay_cuts):
+                if part_end > part_start:
+                    segments.append((clip, part_start, part_end, z_index))
+        segments.sort(key=lambda row: (row[1], row[3]))
 
         img_dir = resolve_assets_dir(assets_dir) if assets_dir else ""
+        def resolve_media(name: str) -> str:
+            return os.path.join(img_dir, name) if name and img_dir else name
 
-        def resolve_img(name: str) -> str:
-            if not name:
-                return ""
-            if img_dir:
-                return os.path.join(img_dir, name)
-            return name
-
-        def base_clip(c: dict, z_index: int) -> dict:
-            return {
-                "start_image": resolve_img(c.get("start_image") or ""),
-                "end_image": resolve_img(c.get("end_image") or ""),
-                "prompt": _strip_comment_lines(c.get("prompt") or ""),
-                "use_global_prompt": _clip_use_global_prompt(c),
+        runtime_clips = []
+        for index, (clip, start, end, z_index) in enumerate(segments, start=1):
+            source = self._source(clip)
+            start_image = str(source.get("file") or clip.get("start_image") or "")
+            runtime_clips.append({
+                "id": f"runtime_{index:04d}",
+                "source_clip_id": str(clip.get("id", "")),
+                "clip_type": str(clip.get("type") or "image"),
+                "start_ms": start,
+                "end_ms": end,
+                "start_image": resolve_media(start_image),
+                "end_image": resolve_media(str(clip.get("end_image") or "")),
+                "prompt": _strip_comment_lines(clip.get("prompt") or ""),
+                "use_global_prompt": _clip_use_global_prompt(clip),
                 "z_index": z_index,
-            }
+                "audios": self._audio_slices(start, end, audio_clips),
+            })
 
-        main_clips = [
-            c for c in image_clips
-            if int(c.get("track", 0) or 0) != 1
-            and not c.get("disabled")
-            and not self._track_hidden_or_muted(tracks_cfg, int(c.get("track", 0) or 0), "image")
-        ]
-        overlay_clips = [
-            c for c in image_clips
-            if int(c.get("track", 0) or 0) == 1
-            and not c.get("disabled")
-            and not self._track_hidden_or_muted(tracks_cfg, 1, "image")
-        ]
-
-        enabled_overlays = list(overlay_clips)
-        overlay_cuts = [(int(c.get("start_ms", 0)), int(c.get("end_ms", 0))) for c in enabled_overlays]
-
-        segments = []
-        for c in enabled_overlays:
-            seg = base_clip(c, 2)
-            seg["start_ms"] = int(c.get("start_ms", 0))
-            seg["end_ms"] = int(c.get("end_ms", 0))
-            segments.append(seg)
-
-        for c in main_clips:
-            s = int(c.get("start_ms", 0))
-            e = int(c.get("end_ms", 0))
-            for ps, pe in _subtract_intervals(s, e, overlay_cuts):
-                if pe <= ps:
-                    continue
-                seg = base_clip(c, 1)
-                seg["start_ms"] = ps
-                seg["end_ms"] = pe
-                segments.append(seg)
-
-        segments.sort(key=lambda r: (r["start_ms"], r["z_index"]))
-
-        clips_for_json = []
-        for r in segments:
-            end_image = r.get("end_image") or ""
-            clips_for_json.append(
-                {
-                    "start_ms": r["start_ms"],
-                    "end_ms": r["end_ms"],
-                    "start_image": r["start_image"],
-                    "end_image": end_image,
-                    "prompt": r["prompt"],
-                    "use_global_prompt": bool(r.get("use_global_prompt", True)),
-                    "z_index": r["z_index"],
-                }
-            )
-
-        clips_length = len(clips_for_json)
-        total_frame_count = max(
-            1,
-            sum(int(round((r["end_ms"] - r["start_ms"]) * fps / 1000)) for r in segments) if segments else 1,
-        )
-
-        clips_audio_out = (
-            self._concat_clips_audio(waveform, sample_rate, start_ms, segments)
-            if segments
-            else self._trim(waveform, sample_rate, start_ms, start_ms + 1)
-        )
-
+        total_frame_count = max(1, sum(
+            int(round((clip["end_ms"] - clip["start_ms"]) * fps / 1000))
+            for clip in runtime_clips
+        ))
+        duration_ms = max((c["end_ms"] for c in runtime_clips), default=1)
+        clips_audio_out = self._silent_audio(44100, duration_ms)
         frame_seq_dir = self._prepare_frame_seq_dir()
-
-        data_json = json.dumps(
-            {
-                "audio_path": audio_path,
-                "trim_start_ms": start_ms,
-                "trim_end_ms": end_ms,
-                "total_frame_count": total_frame_count,
-                "fps": fps,
-                "width": width,
-                "height": height,
-                "global_prompt": global_prompt,
-                "clips": clips_for_json,
-            },
-            ensure_ascii=False,
-        )
+        data_json = json.dumps({
+            "schema_version": 1,
+            "fps": fps,
+            "width": width,
+            "height": height,
+            "global_prompt": global_prompt,
+            "total_frame_count": total_frame_count,
+            "clips": runtime_clips,
+        }, ensure_ascii=False)
 
         return (
-            fps,
-            width,
-            height,
-            global_prompt,
-            data_json,
-            clips_length,
-            total_frame_count,
-            clips_audio_out,
-            frame_seq_dir,
+            fps, width, height, global_prompt, data_json, len(runtime_clips),
+            total_frame_count, clips_audio_out, frame_seq_dir,
         )
 
 

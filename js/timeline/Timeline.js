@@ -217,15 +217,23 @@ export class Timeline extends EventEmitter {
       }
     });
 
-    // Keyboard shortcuts
+    // Keyboard shortcuts. These are single bare keys (Q/W/Space/arrows/...)
+    // that can collide with ComfyUI's own shortcuts (e.g. its own "W"
+    // toggles the Workflows panel) — whenever we actually act on the key,
+    // stop it from propagating any further so it can't also reach
+    // ComfyUI's handling. Consumed at window-capture time (see below) so
+    // this runs before ComfyUI's listeners regardless of where/when they
+    // were attached.
+    const consume = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); };
     this._onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       switch (e.code) {
         case 'Space':
-          e.preventDefault(); this.togglePlay(); break;
+          consume(e); this.togglePlay(); break;
         case 'Delete':
         case 'Backspace':
           if (this._selectedIds.size > 0 || this._selected) {
+            consume(e);
             this.emit('clip:delete', {
               clips: this.getSelectedClips(),
               clipIds: [...this._selectedIds],
@@ -234,31 +242,35 @@ export class Timeline extends EventEmitter {
           break;
         case 'KeyQ':
           // Delete the portion of the selected clip to the LEFT of the playhead
-          this._trimClipAtPlayhead('left');
+          if (this._selected) { consume(e); this._trimClipAtPlayhead('left'); }
           break;
         case 'KeyW':
           // Delete the portion of the selected clip to the RIGHT of the playhead
-          this._trimClipAtPlayhead('right');
+          if (this._selected) { consume(e); this._trimClipAtPlayhead('right'); }
           break;
         case 'Home':
-          e.preventDefault(); this.setCurrentTime(0); break;
+          consume(e); this.setCurrentTime(0); break;
         case 'End':
-          e.preventDefault(); this.setCurrentTime(this._seekMaxTime()); break;
+          consume(e); this.setCurrentTime(this._seekMaxTime()); break;
         case 'ArrowLeft':
-          e.preventDefault();
+          consume(e);
           this.setCurrentTime(this.currentTime - (e.shiftKey ? 1 : 1 / this.fps)); break;
         case 'ArrowRight':
-          e.preventDefault();
+          consume(e);
           this.setCurrentTime(this.currentTime + (e.shiftKey ? 1 : 1 / this.fps)); break;
         case 'Equal':
         case 'NumpadAdd':
-          if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.setZoom(this._zoom * 1.5); } break;
+          if (e.ctrlKey || e.metaKey) { consume(e); this.setZoom(this._zoom * 1.5); } break;
         case 'Minus':
         case 'NumpadSubtract':
-          if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.setZoom(this._zoom / 1.5); } break;
+          if (e.ctrlKey || e.metaKey) { consume(e); this.setZoom(this._zoom / 1.5); } break;
       }
     };
-    document.addEventListener('keydown', this._onKey);
+    // Capture on `window` (not `document`, not bubble phase): capture-phase
+    // listeners fire in strict ancestor order (window before document
+    // before canvas/body), so this always runs before ComfyUI's own
+    // shortcut handling, regardless of registration order.
+    window.addEventListener('keydown', this._onKey, true);
 
     this.on('clip:move', () => this._clampCurrentTime());
     this.on('clip:resize', () => this._clampCurrentTime());
@@ -388,6 +400,17 @@ export class Timeline extends EventEmitter {
 
   getTrack(trackId) { return this.tracks.find(t => t.id === trackId); }
 
+  /** Remove every track (including Main) — used to rebuild the timeline
+   * in place from an external snapshot (e.g. undo/redo) without recreating
+   * the whole component and losing zoom/scroll state. */
+  clearTracks() {
+    this.selectClip(null);
+    for (const track of this.tracks) track.destroy();
+    this.tracks.length = 0;
+    this._mainTrackId = null;
+    this._refresh();
+  }
+
   /**
    * Return the track of the given `type` whose DOM element is under clientY,
    * or null if none matches.  Used by Clip to find cross-track drag targets.
@@ -457,20 +480,32 @@ export class Timeline extends EventEmitter {
     const t = this.currentTime;
     const MIN = 1 / this.fps; // minimum 1 frame
 
+    // Bail out before announcing anything if the playhead position means
+    // there's nothing to cut — only emit resizestart/resizeend (which is
+    // what the app hooks to record one undo step) once we know this will
+    // actually change something, same as the drag-trim gesture does.
     if (side === 'left') {
-      if (t <= clip.startTime) return;          // playhead is before clip — nothing to cut
+      if (t <= clip.startTime) return;
+    } else {
+      if (t >= clip.endTime) return;
+    }
+
+    this.emit('clip:resizestart', { clip, track: clip.track });
+
+    if (side === 'left') {
       if (t >= clip.endTime - MIN) {            // playhead at/past end — entire clip removed
         this.removeClip(clip.track.id, clip.id);
         this.selectClip(null);
+        this.emit('clip:resizeend', { clip, track: clip.track, moved: true });
         return;
       }
       clip.duration = clip.endTime - t;
       clip.startTime = t;
     } else {
-      if (t >= clip.endTime) return;            // playhead is after clip — nothing to cut
       if (t <= clip.startTime + MIN) {          // playhead at/before start — entire clip removed
         this.removeClip(clip.track.id, clip.id);
         this.selectClip(null);
+        this.emit('clip:resizeend', { clip, track: clip.track, moved: true });
         return;
       }
       clip.duration = t - clip.startTime;
@@ -478,6 +513,7 @@ export class Timeline extends EventEmitter {
 
     clip._applyPosition();
     this.emit('clip:resize', { clip, track: clip.track });
+    this.emit('clip:resizeend', { clip, track: clip.track, moved: true });
   }
 
   updateClip(trackId, clipId, data) {
@@ -676,7 +712,7 @@ export class Timeline extends EventEmitter {
 
   destroy() {
     this.pause();
-    document.removeEventListener('keydown', this._onKey);
+    window.removeEventListener('keydown', this._onKey, true);
     this._ro?.disconnect();
     this.removeAllListeners();
     this._container.innerHTML = '';
