@@ -61,6 +61,7 @@ export class CapTimelineEditorApp {
         this._imgFiles = [];
         this._videoFiles = [];
         this._audioFiles = [];
+        this._videoThumbCache = new Map();
         this._mediaTab = "image";
         this._overlay = null;
         this._timeline = null;
@@ -645,6 +646,7 @@ export class CapTimelineEditorApp {
     async _refreshMediaLists() {
         const btn = this._overlay?.querySelector(".cat-te-media-refresh");
         btn?.classList.add("spinning");
+        this._videoThumbCache.clear();
         try {
             await Promise.all([
                 this._loadMediaList(),
@@ -753,6 +755,14 @@ export class CapTimelineEditorApp {
             icon.className = "cat-te-video-icon";
             icon.textContent = "▶";
             item.appendChild(icon);
+            this._getVideoThumbnail(file).then(dataUrl => {
+                if (!dataUrl || !item.isConnected) return;
+                const img = document.createElement("img");
+                img.src = dataUrl;
+                img.alt = "";
+                img.draggable = false;
+                icon.replaceWith(img);
+            }).catch(() => { /* keep the icon placeholder */ });
         } else {
             const icon = document.createElement("div");
             icon.className = "cat-te-audio-icon";
@@ -1015,6 +1025,15 @@ export class CapTimelineEditorApp {
             v.addEventListener("error", () => reject(new Error("load failed")));
             v.src = url;
         });
+    }
+
+    /** Cached (and de-duped) thumbnail lookup for the video media grid —
+     * each file is only decoded/seeked once per editor session. */
+    _getVideoThumbnail(file) {
+        if (this._videoThumbCache.has(file)) return this._videoThumbCache.get(file);
+        const p = this._grabVideoThumbnail(this._videoUrl(file)).catch(() => null);
+        this._videoThumbCache.set(file, p);
+        return p;
     }
 
     _audioBufferToPeaks(buf, max = 8000) {
