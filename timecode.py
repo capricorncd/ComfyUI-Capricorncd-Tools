@@ -95,9 +95,9 @@ def _natural_sort_key(name: str):
     return [int(p) if p.isdigit() else p for p in parts]
 
 
-def _list_files_ordered(directory: str, extensions: set[str]) -> list[str]:
-    """Recursively list files matching extensions; entries in subfolders are
-    returned as relative paths (forward-slashed) below `directory`."""
+def _list_files_ordered(directory: str, extensions: set[str], *, recursive: bool = True) -> list[str]:
+    """List files matching extensions under `directory`.
+    When recursive is False, only the root directory is scanned."""
     import os
 
     directory = resolve_assets_dir(directory)
@@ -105,21 +105,34 @@ def _list_files_ordered(directory: str, extensions: set[str]) -> list[str]:
         return []
 
     files: list[str] = []
-    for root, _dirs, names in os.walk(directory):
+    if recursive:
+        roots = os.walk(directory)
+    else:
+        roots = ((directory, [], os.listdir(directory)),)
+
+    for root, _dirs, names in roots:
         for name in names:
+            path = os.path.join(root, name)
+            if not os.path.isfile(path):
+                continue
             _, ext = os.path.splitext(name)
             if ext.lower() not in extensions:
                 continue
-            rel = os.path.relpath(os.path.join(root, name), directory)
+            rel = os.path.relpath(path, directory)
             files.append(rel.replace(os.sep, "/"))
 
     files.sort(key=_natural_sort_key)
     return files
 
 
+def list_image_files_ordered(directory: str, *, recursive: bool = True) -> list[str]:
+    """List image files in directory, ordered for use as an image sequence."""
+    return _list_files_ordered(directory, IMAGE_EXTENSIONS, recursive=recursive)
+
+
 def list_keyframe_files_ordered(directory: str) -> list[str]:
     """List image files in directory, ordered for use as keyframe sequence (index 0, 1, 2…)."""
-    return _list_files_ordered(directory, IMAGE_EXTENSIONS)
+    return list_image_files_ordered(directory, recursive=True)
 
 
 def list_video_files_ordered(directory: str) -> list[str]:

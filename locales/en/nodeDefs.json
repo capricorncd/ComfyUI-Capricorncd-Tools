@@ -113,6 +113,22 @@
     }
   },
 
+  "CAP_LoadImagesFromDir": {
+    "display_name": "Load Images From Dir",
+    "inputs": {
+      "directory":   { "name": "Directory" },
+      "deep":          { "name": "Include Subdirs" },
+      "start_index":   { "name": "Start Index" },
+      "max_count":     { "name": "Max Count" }
+    },
+    "outputs": {
+      "images":      { "name": "Images" },
+      "directory":   { "name": "Directory" },
+      "total_count": { "name": "Total Count" },
+      "count":       { "name": "Output Count" }
+    }
+  },
+
   "CAP_SeqToVideo": {
     "display_name": "Seq To Video",
     "inputs": {

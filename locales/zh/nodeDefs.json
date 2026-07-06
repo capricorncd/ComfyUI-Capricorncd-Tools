@@ -113,6 +113,22 @@
     }
   },
 
+  "CAP_LoadImagesFromDir": {
+    "display_name": "从目录加载图像",
+    "inputs": {
+      "directory":   { "name": "目录" },
+      "deep":          { "name": "包含子目录" },
+      "start_index":   { "name": "开始索引" },
+      "max_count":     { "name": "最大输出张数" }
+    },
+    "outputs": {
+      "images":      { "name": "图像" },
+      "directory":   { "name": "目录" },
+      "total_count": { "name": "图片总数" },
+      "count":       { "name": "输出数量" }
+    }
+  },
+
   "CAP_SeqToVideo": {
     "display_name": "序列帧合成视频",
     "inputs": {

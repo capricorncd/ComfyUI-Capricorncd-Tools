@@ -32,6 +32,10 @@ from .cap_image_batch import (
     NODE_CLASS_MAPPINGS as _CIB_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CIB_NAMES,
 )
+from .cap_load_images_from_dir import (
+    NODE_CLASS_MAPPINGS as _CLD_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CLD_NAMES,
+)
 from .timecode import (
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -53,6 +57,7 @@ NODE_CLASS_MAPPINGS = {
     **_CTE_CLASS,
     **_CSI_CLASS,
     **_CIB_CLASS,
+    **_CLD_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -64,6 +69,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CTE_NAMES,
     **_CSI_NAMES,
     **_CIB_NAMES,
+    **_CLD_NAMES,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
