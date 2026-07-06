@@ -92,6 +92,27 @@
     }
   },
 
+  "CAP_ImageBatchCount": {
+    "display_name": "图像批次数量",
+    "inputs": {
+      "images": { "name": "图像" }
+    },
+    "outputs": {
+      "count": { "name": "数量" }
+    }
+  },
+
+  "CAP_ImageFromBatchIndex": {
+    "display_name": "按索引获取图像",
+    "inputs": {
+      "images": { "name": "图像" },
+      "index":  { "name": "索引" }
+    },
+    "outputs": {
+      "image": { "name": "图像" }
+    }
+  },
+
   "CAP_SeqToVideo": {
     "display_name": "序列帧合成视频",
     "inputs": {

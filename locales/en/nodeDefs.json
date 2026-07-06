@@ -92,6 +92,27 @@
     }
   },
 
+  "CAP_ImageBatchCount": {
+    "display_name": "Image Batch Count",
+    "inputs": {
+      "images": { "name": "Images" }
+    },
+    "outputs": {
+      "count": { "name": "Count" }
+    }
+  },
+
+  "CAP_ImageFromBatchIndex": {
+    "display_name": "Image From Batch Index",
+    "inputs": {
+      "images": { "name": "Images" },
+      "index":  { "name": "Index" }
+    },
+    "outputs": {
+      "image": { "name": "Image" }
+    }
+  },
+
   "CAP_SeqToVideo": {
     "display_name": "Seq To Video",
     "inputs": {
