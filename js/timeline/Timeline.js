@@ -81,29 +81,33 @@ export class Timeline extends EventEmitter {
     // ── Toolbar ──────────────────────────────────────────────────────────────
     this.toolbarEl = el('div', 'tl-toolbar');
 
+    // Playback group can be moved by host applications (e.g. into a footer).
+    this.playbackControlsEl = el('div', 'tl-playback-controls');
+
     // Play/Pause
     this._playBtn = el('button', 'tl-btn tl-btn-play');
     this._playBtn.innerHTML = icon('play');
     this._playBtn.title = 'Play / Pause  (Space)';
     this._playBtn.addEventListener('click', () => this.togglePlay());
-    this.toolbarEl.appendChild(this._playBtn);
+    this.playbackControlsEl.appendChild(this._playBtn);
 
     // Stop (return to 0)
-    const stopBtn = el('button', 'tl-btn tl-btn-icon');
-    stopBtn.innerHTML = icon('stop');
-    stopBtn.title = 'Stop';
-    stopBtn.addEventListener('click', () => { this.pause(); this.setCurrentTime(0); });
-    this.toolbarEl.appendChild(stopBtn);
+    this._stopBtn = el('button', 'tl-btn tl-btn-icon');
+    this._stopBtn.innerHTML = icon('stop');
+    this._stopBtn.title = 'Stop';
+    this._stopBtn.addEventListener('click', () => { this.pause(); this.setCurrentTime(0); });
+    this.playbackControlsEl.appendChild(this._stopBtn);
 
     // Time display
     this._timeEl = el('span', 'tl-time-display');
     this._timeEl.textContent = '0:00.000';
-    this.toolbarEl.appendChild(this._timeEl);
+    this.playbackControlsEl.appendChild(this._timeEl);
 
     // Duration display
     this._durEl = el('span', 'tl-dur-display');
     this._durEl.textContent = `/ ${this.formatTime(this.duration)}`;
-    this.toolbarEl.appendChild(this._durEl);
+    this.playbackControlsEl.appendChild(this._durEl);
+    this.toolbarEl.appendChild(this.playbackControlsEl);
 
     // Spacer
     this.toolbarEl.appendChild(el('div', 'tl-spacer'));

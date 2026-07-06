@@ -93,7 +93,7 @@
 .cat-te-footer {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: 10px;
     height: 48px;
     padding: 0 18px;
@@ -101,6 +101,27 @@
     background: linear-gradient(0deg, #0e0e1a 0%, #0a0a16 100%);
     border-top: 1px solid #1c1c30;
 }
+
+.cat-te-footer-left,
+.cat-te-footer-center,
+.cat-te-footer-right {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cat-te-footer-center {
+    justify-content: center;
+    --tl-border: #252538;
+    --tl-radius: 6px;
+    --tl-text: #d4d4f0;
+    --tl-text-muted: #6868a0;
+    --tl-accent: #5b4eff;
+    --tl-accent-hover: #7060ff;
+    --tl-red: #ff4466;
+}
+.cat-te-footer-right { justify-content: flex-end; }
 
 /* ── Settings modal ──────────────────────────────────────── */
 
@@ -190,6 +211,25 @@
 .cat-te-media-preview-audio {
     width: min(680px, 100%);
 }
+
+.cat-te-add-material-dialog { width: min(760px, 88vw); max-width: none; }
+.cat-te-add-material-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+    max-height: 58vh;
+    padding: 14px;
+    overflow: auto;
+    background: #07070d;
+}
+.cat-te-add-material-preview img,
+.cat-te-add-material-preview video { max-width: 100%; max-height: 52vh; }
+.cat-te-add-material-preview audio { width: min(620px, 100%); }
+.cat-te-add-material-options,
+.cat-te-add-material-actions { display: flex; align-items: center; gap: 18px; padding: 12px 14px; }
+.cat-te-add-material-options { color: #ccc; font-size: 12px; }
+.cat-te-add-material-actions { justify-content: flex-end; border-top: 1px solid #25253c; }
 
 .cat-te-lang-select {
     background: #1e1e32;
@@ -331,6 +371,20 @@
     opacity: 0.55;
     cursor: grabbing;
     transform: scale(0.96);
+}
+
+.cat-te-media-item.cat-te-media-missing {
+    border: 1px solid #e14b5a;
+    background: rgba(190, 35, 55, 0.12);
+}
+.cat-te-media-item.cat-te-media-input { border-color: #d89b36; }
+.cat-te-missing-icon {
+    display: flex; align-items: center; justify-content: center;
+    height: 62px; color: #ff5b6d; font-size: 30px; font-weight: 800;
+}
+.cat-te-media-warning {
+    position: absolute; top: 3px; right: 3px; z-index: 5;
+    color: #ffc04d; font-size: 15px; text-shadow: 0 1px 3px #000;
 }
 .cat-te-media-item img {
     width: 100%;

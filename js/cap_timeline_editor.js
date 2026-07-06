@@ -21,7 +21,8 @@ function markNoSerialize(node) {
             if (w.element) w.element.style.display = "none";
             w.computeSize = () => [0, -4];
         }
-        if (w.name === "project_json") {
+        if (w.name === "project_json" || w.name === "project_version") {
+            if (w.name === "project_version") w.serialize = false;
             if (w.element) w.element.style.display = "none";
             w.computeSize = () => [0, -4];
         }

@@ -4,11 +4,40 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import torch
+import folder_paths
 
 from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines, _subtract_intervals
 from .timecode import resolve_assets_dir
+
+
+def _read_project_version() -> str:
+    """Read the package version without requiring Python 3.11's tomllib."""
+    path = os.path.join(os.path.dirname(__file__), "pyproject.toml")
+    try:
+        with open(path, "rb") as stream:
+            try:
+                import tomllib
+                value = tomllib.load(stream).get("project", {}).get("version")
+                if value:
+                    return str(value)
+            except ImportError:
+                pass
+    except OSError:
+        return "0.0.0"
+
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            text = stream.read()
+        match = re.search(r'(?ms)^\[project\]\s*$.*?^version\s*=\s*["\']([^"\']+)', text)
+        return match.group(1) if match else "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+PROJECT_VERSION = _read_project_version()
 
 
 class CAP_TimelineEditor(CAP_AudioTimeline):
@@ -36,10 +65,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "height": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
                 "assets_dir": ("STRING", {"default": "", "multiline": False}),
                 "global_prompt": ("STRING", {"default": "", "multiline": True}),
+                "project_version": ("STRING", {"default": PROJECT_VERSION}),
                 "project_json": (
                     "STRING",
                     {
-                        "default": '{"schema_version":1,"name":"未命名项目","settings":{},"tracks":[]}',
+                        "default": json.dumps({
+                            "project_version": PROJECT_VERSION,
+                            "schema_version": PROJECT_VERSION,
+                            "name": "未命名项目",
+                            "resources": [],
+                            "settings": {},
+                            "tracks": [],
+                        }, ensure_ascii=False),
                         "multiline": True,
                         "tooltip": "Track-nested editable timeline project (schema version 1).",
                     },
@@ -49,8 +86,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         }
 
     @classmethod
-    def IS_CHANGED(cls, fps, width, height, assets_dir, global_prompt, project_json, trim_offset, **_):
-        return fps, width, height, assets_dir, global_prompt, project_json, trim_offset
+    def IS_CHANGED(cls, fps, width, height, assets_dir, global_prompt,
+                   project_version, project_json, trim_offset, **_):
+        return fps, width, height, assets_dir, global_prompt, project_version, project_json, trim_offset
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -65,11 +103,14 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         try:
             value = json.loads(raw or "{}")
         except (json.JSONDecodeError, TypeError):
-            return {"schema_version": 1, "settings": {}, "tracks": []}
+            return {"project_version": PROJECT_VERSION, "schema_version": PROJECT_VERSION, "settings": {}, "tracks": []}
         if not isinstance(value, dict):
-            return {"schema_version": 1, "settings": {}, "tracks": []}
+            return {"project_version": PROJECT_VERSION, "schema_version": PROJECT_VERSION, "settings": {}, "tracks": []}
+        value["project_version"] = PROJECT_VERSION
+        value["schema_version"] = PROJECT_VERSION
         value.setdefault("settings", {})
         value.setdefault("tracks", [])
+        value.setdefault("resources", [])
         value.setdefault("name", "未命名项目")
         if not isinstance(value["settings"], dict):
             value["settings"] = {}
@@ -109,6 +150,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
                 "file": str(source.get("file") or ""),
+                "location": str(source.get("location") or "assets"),
                 "source_start_ms": source_in + overlap_start - audio_start,
                 "source_end_ms": source_in + overlap_end - audio_start,
                 "clip_offset_ms": overlap_start - start_ms,
@@ -117,7 +159,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 result.append(row)
         return result
 
-    def execute(self, fps, width, height, assets_dir, global_prompt, project_json, trim_offset=1):
+    def execute(self, fps, width, height, assets_dir, global_prompt,
+                project_version, project_json, trim_offset=1):
         project = self._project(project_json)
         settings = project["settings"]
         fps = max(1.0, float(settings.get("fps", fps) or fps))
@@ -173,8 +216,12 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         segments.sort(key=lambda row: (row[1], row[3]))
 
         img_dir = resolve_assets_dir(assets_dir) if assets_dir else ""
-        def resolve_media(name: str) -> str:
-            return os.path.join(img_dir, name) if name and img_dir else name
+        def resolve_media(name: str, location: str = "assets") -> str:
+            if not name:
+                return ""
+            if location == "input" and folder_paths.exists_annotated_filepath(name):
+                return folder_paths.get_annotated_filepath(name)
+            return os.path.join(img_dir, name) if img_dir and location == "assets" else name
 
         runtime_clips = []
         for index, (clip, start, end, z_index) in enumerate(segments, start=1):
@@ -186,7 +233,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "clip_type": str(clip.get("type") or "image"),
                 "start_ms": start,
                 "end_ms": end,
-                "start_image": resolve_media(start_image),
+                "start_image": resolve_media(start_image, str(source.get("location") or "assets")),
                 "end_image": resolve_media(str(clip.get("end_image") or "")),
                 "prompt": _strip_comment_lines(clip.get("prompt") or ""),
                 "use_global_prompt": _clip_use_global_prompt(clip),
@@ -202,7 +249,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         clips_audio_out = self._silent_audio(44100, duration_ms)
         frame_seq_dir = self._prepare_frame_seq_dir()
         data_json = json.dumps({
-            "schema_version": 1,
+            "project_version": PROJECT_VERSION,
+            "schema_version": PROJECT_VERSION,
             "fps": fps,
             "width": width,
             "height": height,

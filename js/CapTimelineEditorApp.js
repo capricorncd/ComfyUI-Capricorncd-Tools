@@ -63,6 +63,8 @@ export class CapTimelineEditorApp {
         this._imgFiles = [];
         this._videoFiles = [];
         this._audioFiles = [];
+        this._mediaStatus = new Map();
+        this._projectResources = [];
         this._videoThumbCache = new Map();
         this._mediaTab = "image";
         this._overlay = null;
@@ -83,6 +85,7 @@ export class CapTimelineEditorApp {
     }
 
     _w(name) { return this.node.widgets?.find(w => w.name === name); }
+    _currentVersion() { return String(this._w("project_version")?.value || "0.0.0"); }
     getFps() { return Math.max(1, parseInt(this._w("fps")?.value ?? 24, 10) || 24); }
     _dir() { return String(this._w("assets_dir")?.value ?? "").trim(); }
 
@@ -111,9 +114,6 @@ export class CapTimelineEditorApp {
         document.body.classList.add("cat-te-noscroll");
         CapTimelineEditorApp._open = this;
         this._overlay.focus();
-        this._loadMediaList();
-        this._loadVideoFileList();
-        this._loadAudioFileList();
         void this._openEditor();
     }
 
@@ -150,6 +150,8 @@ export class CapTimelineEditorApp {
             ["fps", "width", "height", "global_prompt"].map(name => [name, this._w(name)?.value]),
         );
         await this._initTimelineFromWidgets();
+        await Promise.all([this._loadMediaList(), this._loadVideoFileList(), this._loadAudioFileList()]);
+        await this._syncProjectMedia();
         this._refreshTimelineDuration();
         requestAnimationFrame(() => this._timeline?._refresh());
         this._undoStack = [];
@@ -186,6 +188,7 @@ export class CapTimelineEditorApp {
         this._historyReady = false;
         this._stopAudioPlayback();
         this._closeMediaPreview();
+        this._closeAddMaterial();
         if (save) this._saveToWidgets();
         else if (this._openedWidgetValues) {
             for (const [name, value] of Object.entries(this._openedWidgetValues)) {
@@ -249,8 +252,12 @@ export class CapTimelineEditorApp {
             if (!project || typeof project !== "object" || Array.isArray(project)) {
                 throw new Error("项目根节点必须是对象");
             }
-            if (project.schema_version !== 1) {
-                throw new Error(`不支持的 schema_version：${project.schema_version ?? "缺失"}`);
+            const currentVersion = this._currentVersion();
+            if (String(project.schema_version ?? "") !== currentVersion) {
+                throw new Error(`不支持的 schema_version：${project.schema_version ?? "缺失"}（当前 ${currentVersion}）`);
+            }
+            if (String(project.project_version ?? "") !== currentVersion) {
+                throw new Error(`不支持的 project_version：${project.project_version ?? "缺失"}（当前 ${currentVersion}）`);
             }
             if (!Array.isArray(project.tracks)) {
                 throw new Error("项目缺少 tracks 数组");
@@ -356,8 +363,15 @@ export class CapTimelineEditorApp {
             </aside>
           </div>
           <footer class="cat-te-footer">
-            <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-save">保存并关闭</button>
-            <button type="button" class="cat-te-btn cat-te-close">关闭</button>
+            <div class="cat-te-footer-left">
+              <button type="button" class="cat-te-btn cat-te-add-material">＋ 添加素材</button>
+              <input class="cat-te-add-material-file" type="file" accept="image/*,video/*,audio/*" hidden />
+            </div>
+            <div class="cat-te-footer-center"></div>
+            <div class="cat-te-footer-right">
+              <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-save">保存并关闭</button>
+              <button type="button" class="cat-te-btn cat-te-close">关闭</button>
+            </div>
           </footer>
           <div class="cat-te-frame-preview"></div>
           <div class="cat-te-modal-backdrop cat-te-media-preview-modal" hidden>
@@ -367,6 +381,23 @@ export class CapTimelineEditorApp {
                 <button type="button" class="cat-te-modal-close cat-te-media-preview-close" title="关闭">×</button>
               </div>
               <div class="cat-te-media-preview-body"></div>
+            </div>
+          </div>
+          <div class="cat-te-modal-backdrop cat-te-add-material-modal" hidden>
+            <div class="cat-te-modal cat-te-add-material-dialog">
+              <div class="cat-te-modal-header">
+                <span class="cat-te-add-material-title">添加素材</span>
+                <button type="button" class="cat-te-modal-close cat-te-add-material-close" title="取消">×</button>
+              </div>
+              <div class="cat-te-add-material-preview"></div>
+              <div class="cat-te-add-material-options">
+                <label><input class="cat-te-copy-to-assets" type="checkbox" checked /> 移动素材到设置目录</label>
+                <label><input class="cat-te-insert-after-add" type="checkbox" /> 插入到时间轴</label>
+              </div>
+              <div class="cat-te-add-material-actions">
+                <button type="button" class="cat-te-btn cat-te-add-material-cancel">取消</button>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-add-material-confirm">确认</button>
+              </div>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-settings-modal" hidden>
@@ -404,9 +435,15 @@ export class CapTimelineEditorApp {
         this.clipEndEl = el.querySelector(".cat-te-clip-end");
         this.clipDurEl = el.querySelector(".cat-te-clip-dur");
         this.framePreview = el.querySelector(".cat-te-frame-preview");
+        this.footerPlayback = el.querySelector(".cat-te-footer-center");
+        this.addMaterialInput = el.querySelector(".cat-te-add-material-file");
         this.mediaPreviewModal = el.querySelector(".cat-te-media-preview-modal");
         this.mediaPreviewTitle = el.querySelector(".cat-te-media-preview-title");
         this.mediaPreviewBody = el.querySelector(".cat-te-media-preview-body");
+        this.addMaterialModal = el.querySelector(".cat-te-add-material-modal");
+        this.addMaterialPreview = el.querySelector(".cat-te-add-material-preview");
+        this.copyToAssetsCb = el.querySelector(".cat-te-copy-to-assets");
+        this.insertAfterAddCb = el.querySelector(".cat-te-insert-after-add");
 
         el.querySelector(".cat-te-save").addEventListener("click", () => this.close(true));
         el.querySelector(".cat-te-close").addEventListener("click", () => this.close(false));
@@ -417,6 +454,14 @@ export class CapTimelineEditorApp {
         el.querySelector(".cat-te-import").addEventListener("click", () => this._chooseProjectImport());
         el.querySelector(".cat-te-export").addEventListener("click", () => this._exportProject());
         this.importFileInput.addEventListener("change", (e) => void this._importProject(e));
+        el.querySelector(".cat-te-add-material").addEventListener("click", () => this._chooseMaterialFile());
+        this.addMaterialInput.addEventListener("change", (e) => this._previewSelectedMaterial(e));
+        el.querySelector(".cat-te-add-material-close").addEventListener("click", () => this._closeAddMaterial());
+        el.querySelector(".cat-te-add-material-cancel").addEventListener("click", () => this._closeAddMaterial());
+        el.querySelector(".cat-te-add-material-confirm").addEventListener("click", () => void this._confirmAddMaterial());
+        this.addMaterialModal.addEventListener("click", (e) => {
+            if (e.target === this.addMaterialModal) this._closeAddMaterial();
+        });
         el.querySelector(".cat-te-media-preview-close").addEventListener("click", () => this._closeMediaPreview());
         this.mediaPreviewModal.addEventListener("click", (e) => {
             if (e.target === this.mediaPreviewModal) this._closeMediaPreview();
@@ -458,6 +503,7 @@ export class CapTimelineEditorApp {
 
         el.addEventListener("keydown", e => {
             if (e.key === "Escape") {
+                if (!this.addMaterialModal.hidden) { this._closeAddMaterial(); e.stopPropagation(); return; }
                 if (!this.mediaPreviewModal.hidden) { this._closeMediaPreview(); e.stopPropagation(); return; }
                 if (!this.settingsModal.hidden) { this._closeSettings(); e.stopPropagation(); return; }
                 if (this._removeCtxMenu()) { e.stopPropagation(); return; }
@@ -713,11 +759,14 @@ export class CapTimelineEditorApp {
             const r = await fetch(api.apiURL(`/audio_keyframe_timeline/keyframes?dir=${encodeURIComponent(dir)}`));
             const d = await r.json();
             this._imgFiles = Array.isArray(d.files) ? d.files : [];
+            for (const file of this._imgFiles) this._mediaStatus.set(`image:${file}`, { location: "assets" });
         } catch { this._imgFiles = []; }
         this._renderMediaGrid();
     }
 
     _imgUrl(file) {
+        const status = this._mediaStatus.get(`image:${file}`);
+        if (status?.location === "input") return this._assetFileUrl(file, "image", "input");
         const dir = this._dir();
         return api.apiURL(
             `/audio_keyframe_timeline/keyframe_image?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(file)}`
@@ -731,11 +780,14 @@ export class CapTimelineEditorApp {
             const r = await fetch(api.apiURL(`/audio_keyframe_timeline/videos?dir=${encodeURIComponent(dir)}`));
             const d = await r.json();
             this._videoFiles = Array.isArray(d.files) ? d.files : [];
+            for (const file of this._videoFiles) this._mediaStatus.set(`video:${file}`, { location: "assets" });
         } catch { this._videoFiles = []; }
         if (this._mediaTab === "video") this._renderMediaGrid();
     }
 
     _videoUrl(file) {
+        const status = this._mediaStatus.get(`video:${file}`);
+        if (status?.location === "input") return this._assetFileUrl(file, "video", "input");
         const dir = this._dir();
         return api.apiURL(
             `/audio_keyframe_timeline/keyframe_video?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(file)}`
@@ -749,6 +801,7 @@ export class CapTimelineEditorApp {
             const r = await fetch(api.apiURL(`/audio_keyframe_timeline/audios?dir=${encodeURIComponent(dir)}`));
             const d = await r.json();
             this._audioFiles = Array.isArray(d.files) ? d.files : [];
+            for (const file of this._audioFiles) this._mediaStatus.set(`audio:${file}`, { location: "assets" });
         } catch { this._audioFiles = []; }
         if (this._mediaTab === "audio") this._renderMediaGrid();
     }
@@ -765,6 +818,7 @@ export class CapTimelineEditorApp {
                 this._loadVideoFileList(),
                 this._loadAudioFileList(),
             ]);
+            await this._syncProjectMedia();
             this._renderMediaGrid();
         } finally {
             btn?.classList.remove("spinning");
@@ -855,16 +909,24 @@ export class CapTimelineEditorApp {
 
     _makeMediaItem(file, kind) {
         const item = document.createElement("div");
+        const status = this._mediaStatus.get(`${kind}:${file}`) || { location: "assets" };
         item.className = `cat-te-media-item cat-te-media-${kind}`;
+        item.classList.toggle("cat-te-media-missing", status.location === "missing");
+        item.classList.toggle("cat-te-media-input", status.location === "input");
         item.title = `${file}\n点击预览；右键插入时间轴；也可拖到时间轴`;
-        item.draggable = true;
+        item.draggable = status.location !== "missing";
         if (this._isMediaOnTimeline(file, kind)) {
             const addedTag = document.createElement("div");
             addedTag.className = "cat-te-media-added-tag";
             addedTag.textContent = "已添加";
             item.appendChild(addedTag);
         }
-        if (kind === "image") {
+        if (status.location === "missing") {
+            const icon = document.createElement("div");
+            icon.className = "cat-te-missing-icon";
+            icon.textContent = "!";
+            item.appendChild(icon);
+        } else if (kind === "image") {
             const img = document.createElement("img");
             img.src = this._imgUrl(file);
             img.alt = "";
@@ -896,18 +958,38 @@ export class CapTimelineEditorApp {
         dragHint.className = "cat-te-media-drag-hint";
         dragHint.textContent = "⋮⋮";
         item.append(nm, dragHint);
-        item.addEventListener("click", () => this._openMediaPreview(file, kind));
+        if (status.location === "input") {
+            const warning = document.createElement("div");
+            warning.className = "cat-te-media-warning";
+            warning.textContent = "⚠";
+            warning.title = "素材仅位于 ComfyUI Input，设置目录中不存在";
+            item.appendChild(warning);
+        }
+        item.addEventListener("click", () => {
+            if (status.location === "missing") alert("素材文件缺失，请右键选择“重新关联文件”");
+            else this._openMediaPreview(file, kind);
+        });
         item.addEventListener("contextmenu", (e) => {
             e.preventDefault();
             e.stopPropagation();
-            this._buildCtxMenu([{
+            const items = [];
+            if (status.location !== "missing") items.push({
                 label: "插入时间轴",
                 fn: () => {
                     if (kind === "audio") void this._addAudioAtPlayhead(file);
                     else if (kind === "video") void this._addVideoAtPlayhead(file);
                     else void this._addMediaAtPlayhead(file);
                 },
-            }], e.clientX, e.clientY);
+            });
+            if (status.location === "missing") items.push({
+                label: "重新关联文件",
+                fn: () => this._chooseMaterialFile({ file, kind }),
+            });
+            if (status.location === "input") items.push({
+                label: "移动到设置目录",
+                fn: () => void this._moveInputAsset(file, kind),
+            });
+            this._buildCtxMenu(items, e.clientX, e.clientY);
         });
         item.addEventListener("dragstart", (e) => {
             const dragType = kind === "audio" ? "application/x-cat-te-audio"
@@ -921,19 +1003,43 @@ export class CapTimelineEditorApp {
         return item;
     }
 
-    _pickInsertImageTrack(atSec) {
-        const tracks = this._allImageTracks().filter(t => !t.locked && t.visible !== false);
-        for (const track of tracks) {
-            const occupied = track.clips.some(c => atSec >= c.startTime && atSec < c.endTime);
-            if (!occupied) return track;
-        }
-        return null;
+    _trackHasRoom(track, atSec, duration) {
+        if (!track || track.locked) return false;
+        const next = [...track.clips].sort((a, b) => a.startTime - b.startTime)
+            .find(clip => clip.endTime > atSec);
+        if (!next) return true;
+        if (next.startTime < atSec + duration) return false;
+        return true;
     }
 
-    _pickAudioTrack(clientY) {
+    _createInsertTrack(kind) {
+        const type = kind === "audio" ? "audio" : "image";
+        const track = this._timeline.addTrack({
+            type,
+            name: type === "audio" ? "音频" : "副轨道",
+            height: TRACK_HEIGHT,
+        });
+        this._trackInfo.set(track.id, {
+            trackIndex: this._nextTrackIndex(), enabled: true,
+            role: type === "audio" ? "audio" : "overlay",
+        });
+        this._setupTrackControls(track);
+        return track;
+    }
+
+    _pickInsertImageTrack(atSec, duration = 0.05) {
+        const tracks = this._allImageTracks().filter(t => !t.locked && t.visible !== false);
+        for (const track of tracks) {
+            if (this._trackHasRoom(track, atSec, duration)) return track;
+        }
+        return this._createInsertTrack("image");
+    }
+
+    _pickAudioTrack(clientY, atSec = 0, duration = 0.05) {
         const hovered = this._timeline?._findTrackAtY(clientY, "audio");
-        if (hovered && !hovered.locked) return hovered;
-        return this._allAudioTracks().find(t => !t.locked) ?? null;
+        if (hovered && this._trackHasRoom(hovered, atSec, duration)) return hovered;
+        return this._allAudioTracks().find(t => this._trackHasRoom(t, atSec, duration))
+            ?? this._createInsertTrack("audio");
     }
 
     _addMediaAtPlayhead(filename) {
@@ -987,17 +1093,13 @@ export class CapTimelineEditorApp {
 
     async _addImageAtTime(filename, atSec, clientY) {
         if (!this._timeline) return;
+        const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
+        this._recordUndo();
         let track = clientY != null
             ? this._timeline._findTrackAtY(clientY, "image")
             : null;
-        if (track?.locked || track?.visible === false) track = null;
-        if (!track) track = this._pickInsertImageTrack(atSec);
-        if (!track) {
-            alert("没有可插入的图片轨道，或该位置已被占用");
-            return;
-        }
-        const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
-        this._recordUndo();
+        if (track?.visible === false || !this._trackHasRoom(track, atSec, dur)) track = null;
+        if (!track) track = this._pickInsertImageTrack(atSec, dur);
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -1017,11 +1119,6 @@ export class CapTimelineEditorApp {
 
     async _addAudioAtTime(filename, atSec, clientY) {
         if (!this._timeline) return;
-        const track = this._pickAudioTrack(clientY ?? 0);
-        if (!track) {
-            alert("没有可用的音频轨道");
-            return;
-        }
         const url = this._audioUrl(filename);
         let peaks = null;
         let sourceDur = 30;
@@ -1039,6 +1136,7 @@ export class CapTimelineEditorApp {
         const dur = Math.max(0.05, sourceDur);
         this._ensureTimelineLength(atSec + dur);
         this._recordUndo();
+        const track = this._pickAudioTrack(clientY ?? 0, atSec, dur);
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -1064,15 +1162,6 @@ export class CapTimelineEditorApp {
      * file actually has an audio stream. */
     async _addVideoAtTime(filename, atSec, clientY) {
         if (!this._timeline) return;
-        let track = clientY != null
-            ? this._timeline._findTrackAtY(clientY, "image")
-            : null;
-        if (track?.locked || track?.visible === false) track = null;
-        if (!track) track = this._pickInsertImageTrack(atSec);
-        if (!track) {
-            alert("没有可插入的图片轨道，或该位置已被占用");
-            return;
-        }
         const url = this._videoUrl(filename);
         let videoDur = 2;
         try {
@@ -1097,6 +1186,11 @@ export class CapTimelineEditorApp {
 
         this._ensureTimelineLength(atSec + dur);
         this._recordUndo();
+        let track = clientY != null
+            ? this._timeline._findTrackAtY(clientY, "image")
+            : null;
+        if (track?.visible === false || !this._trackHasRoom(track, atSec, dur)) track = null;
+        if (!track) track = this._pickInsertImageTrack(atSec, dur);
         const clip = this._timeline.addClip(track.id, {
             name: filename.split(/[\\/]/).pop(),
             startTime: atSec,
@@ -1219,9 +1313,53 @@ export class CapTimelineEditorApp {
 
     _audioUrl(filename) {
         if (!filename) return null;
+        const status = this._mediaStatus.get(`audio:${filename}`);
+        if (status?.location === "input") return this._assetFileUrl(filename, "audio", "input");
         const dir = this._dir();
         return api.apiURL(
             `/audio_keyframe_timeline/keyframe_audio?dir=${encodeURIComponent(dir)}&name=${encodeURIComponent(filename)}`
+        );
+    }
+
+    async _syncProjectMedia() {
+        if (!this._timeline) return;
+        const wanted = new Map();
+        for (const resource of this._projectResources) {
+            if (resource?.file && resource?.kind) {
+                wanted.set(`${resource.kind}:${resource.file}`, { kind: resource.kind, file: resource.file });
+            }
+        }
+        for (const track of this._timeline.tracks) {
+            for (const clip of track.clips) {
+                const meta = this._meta.get(clip.id);
+                if (clip.src) {
+                    const kind = track.type === "audio" ? "audio" : (meta?.mediaKind === "video" ? "video" : "image");
+                    wanted.set(`${kind}:${clip.src}`, { kind, file: clip.src });
+                }
+                if (meta?.endImage) wanted.set(`image:${meta.endImage}`, { kind: "image", file: meta.endImage });
+            }
+        }
+        for (const { kind, file } of wanted.values()) {
+            const list = kind === "audio" ? this._audioFiles : kind === "video" ? this._videoFiles : this._imgFiles;
+            if (list.includes(file)) continue;
+            let status = { location: "missing" };
+            try {
+                const url = api.apiURL(`/audio_keyframe_timeline/asset_status?dir=${encodeURIComponent(this._dir())}&name=${encodeURIComponent(file)}&kind=${kind}`);
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.assets_exists) status = { location: "assets" };
+                else if (data.input_exists) status = { location: "input" };
+            } catch { /* retain missing status */ }
+            this._mediaStatus.set(`${kind}:${file}`, status);
+            list.push(file);
+        }
+    }
+
+    _assetFileUrl(file, kind, location = "assets") {
+        return api.apiURL(
+            `/audio_keyframe_timeline/asset_file?dir=${encodeURIComponent(this._dir())}`
+            + `&name=${encodeURIComponent(file)}&kind=${encodeURIComponent(kind)}`
+            + `&location=${encodeURIComponent(location)}`
         );
     }
 
@@ -1330,9 +1468,22 @@ export class CapTimelineEditorApp {
             try {
                 project = JSON.parse(this._w("project_json")?.value || "{}");
                 if (!project || typeof project !== "object" || Array.isArray(project)) throw new Error("invalid project");
-            } catch { project = { schema_version: 1, settings: {}, tracks: [] }; }
+            } catch {
+                project = {
+                    project_version: this._currentVersion(),
+                    schema_version: this._currentVersion(),
+                    settings: {},
+                    tracks: [],
+                };
+            }
         }
 
+        this._projectResources = Array.isArray(project.resources)
+            ? project.resources.filter(resource => resource && resource.file && resource.kind).map(resource => ({ ...resource }))
+            : [];
+        for (const resource of this._projectResources) {
+            if (resource.location) this._mediaStatus.set(`${resource.kind}:${resource.file}`, { location: resource.location });
+        }
         this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
 
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
@@ -1361,6 +1512,7 @@ export class CapTimelineEditorApp {
         projectTracks.forEach((track, trackIndex) => {
             for (const clip of Array.isArray(track.clips) ? track.clips : []) {
                 const source = clip.source && typeof clip.source === "object" ? clip.source : {};
+                if (source.file && source.location) this._mediaStatus.set(`${clip.type}:${source.file}`, { location: source.location });
                 const startMs = Number(clip.start_ms) || 0;
                 const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
                 clips.push({
@@ -1732,6 +1884,142 @@ export class CapTimelineEditorApp {
         this.mediaPreviewModal.hidden = true;
     }
 
+    _chooseMaterialFile(relink = null) {
+        this._pendingRelink = relink;
+        this.addMaterialInput.value = "";
+        this.addMaterialInput.click();
+    }
+
+    _materialKind(file) {
+        const type = String(file?.type || "").toLowerCase();
+        const ext = String(file?.name || "").split(".").pop().toLowerCase();
+        if (type.startsWith("image/") || ["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(ext)) return "image";
+        if (type.startsWith("video/") || ["mp4", "webm", "mov", "mkv", "avi", "m4v"].includes(ext)) return "video";
+        if (type.startsWith("audio/") || ["wav", "mp3", "flac", "ogg", "m4a", "aac"].includes(ext)) return "audio";
+        return null;
+    }
+
+    _previewSelectedMaterial(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        const kind = this._materialKind(file);
+        if (!kind) { alert("不支持的素材格式"); return; }
+        if (this._pendingRelink && this._pendingRelink.kind !== kind) {
+            alert(`请选择同类型的${this._pendingRelink.kind === "image" ? "图片" : this._pendingRelink.kind === "video" ? "视频" : "音频"}文件`);
+            return;
+        }
+        this._pendingMaterial = { file, kind, objectUrl: URL.createObjectURL(file), relink: this._pendingRelink };
+        this._pendingRelink = null;
+        this.addMaterialPreview.replaceChildren();
+        const media = document.createElement(kind === "image" ? "img" : kind);
+        media.src = this._pendingMaterial.objectUrl;
+        if (kind !== "image") media.controls = true;
+        this.addMaterialPreview.appendChild(media);
+        this.copyToAssetsCb.checked = !!this._dir();
+        this.copyToAssetsCb.disabled = !this._dir();
+        this.copyToAssetsCb.closest("label").title = this._dir() ? "" : "请先设置资源目录";
+        this.insertAfterAddCb.checked = false;
+        this.insertAfterAddCb.closest("label").hidden = !!this._pendingMaterial.relink;
+        this.addMaterialModal.hidden = false;
+    }
+
+    _closeAddMaterial() {
+        if (!this.addMaterialModal) return;
+        for (const media of this.addMaterialPreview.querySelectorAll("audio, video")) media.pause();
+        if (this._pendingMaterial?.objectUrl) URL.revokeObjectURL(this._pendingMaterial.objectUrl);
+        this._pendingMaterial = null;
+        this._pendingRelink = null;
+        this.addMaterialPreview.replaceChildren();
+        this.addMaterialModal.hidden = true;
+    }
+
+    async _confirmAddMaterial() {
+        const pending = this._pendingMaterial;
+        if (!pending) return;
+        const form = new FormData();
+        form.append("kind", pending.kind);
+        form.append("dir", this._dir());
+        form.append("to_assets", this.copyToAssetsCb.checked ? "true" : "false");
+        form.append("file", pending.file, pending.file.name);
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/import_asset"), { method: "POST", body: form });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+            const shouldInsert = this.insertAfterAddCb.checked && !pending.relink;
+            const relink = pending.relink;
+            const kind = pending.kind;
+            this._closeAddMaterial();
+            this._registerMediaFile(result.file, kind, result.location);
+            if (relink) this._replaceMediaReference(relink.file, result.file, kind);
+            this._renderMediaGrid();
+            if (shouldInsert) {
+                if (kind === "audio") await this._addAudioAtPlayhead(result.file);
+                else if (kind === "video") await this._addVideoAtPlayhead(result.file);
+                else await this._addMediaAtPlayhead(result.file);
+            }
+        } catch (error) {
+            alert(`添加素材失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    _registerMediaFile(file, kind, location) {
+        const list = kind === "audio" ? this._audioFiles : kind === "video" ? this._videoFiles : this._imgFiles;
+        if (!list.includes(file)) list.push(file);
+        this._mediaStatus.set(`${kind}:${file}`, { location });
+        const existing = this._projectResources.find(resource => resource.kind === kind && resource.file === file);
+        if (existing) existing.location = location;
+        else this._projectResources.push({ file, kind, location });
+    }
+
+    _replaceMediaReference(oldFile, newFile, kind, recordUndo = true) {
+        if (recordUndo) this._recordUndo();
+        for (const track of this._timeline?.tracks ?? []) {
+            for (const clip of track.clips) {
+                const meta = this._meta.get(clip.id);
+                const clipKind = track.type === "audio" ? "audio" : meta?.mediaKind === "video" ? "video" : "image";
+                if (clipKind === kind && clip.src === oldFile) {
+                    clip.src = newFile;
+                    clip._audioBuffer = null;
+                    if (kind === "image") clip.thumbnail = this._imgUrl(newFile);
+                    else if (kind === "video") clip.thumbnail = null;
+                    this._refreshClipAppearance(clip);
+                }
+                if (kind === "image" && meta?.endImage === oldFile) meta.endImage = newFile;
+            }
+        }
+        const list = kind === "audio" ? this._audioFiles : kind === "video" ? this._videoFiles : this._imgFiles;
+        const index = list.indexOf(oldFile);
+        if (index >= 0) list.splice(index, 1);
+        this._mediaStatus.delete(`${kind}:${oldFile}`);
+        for (const resource of this._projectResources) {
+            if (resource.kind === kind && resource.file === oldFile) {
+                resource.file = newFile;
+                resource.location = this._mediaStatus.get(`${kind}:${newFile}`)?.location || "assets";
+            }
+        }
+        this._projectResources = [...new Map(
+            this._projectResources.map(resource => [`${resource.kind}:${resource.file}`, resource]),
+        ).values()];
+    }
+
+    async _moveInputAsset(file, kind) {
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/move_asset"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dir: this._dir(), name: file, kind }),
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+            this._registerMediaFile(result.file, kind, "assets");
+            this._replaceMediaReference(file, result.file, kind, false);
+            await this._refreshMediaLists();
+        } catch (error) {
+            alert(`移动素材失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     _removeCtxMenu() {
         const m = document.querySelector(".cat-te-ctx-menu");
         if (m) { m.remove(); return true; }
@@ -1912,6 +2200,7 @@ export class CapTimelineEditorApp {
     _configureTimelineUi() {
         const tl = this._timeline;
         if (!tl) return;
+        this.footerPlayback.replaceChildren(tl.playbackControlsEl);
 
         const packageBtn = document.createElement("button");
         packageBtn.type = "button";
@@ -1932,7 +2221,6 @@ export class CapTimelineEditorApp {
         this.undoBtn.title = "还原";
         this.undoBtn.textContent = "↶ 还原";
         this.undoBtn.addEventListener("click", () => this.undo());
-        tl.toolbarEl.appendChild(this.undoBtn);
 
         this.redoBtn = document.createElement("button");
         this.redoBtn.type = "button";
@@ -1940,7 +2228,7 @@ export class CapTimelineEditorApp {
         this.redoBtn.title = "重做";
         this.redoBtn.textContent = "↷ 重做";
         this.redoBtn.addEventListener("click", () => this.redo());
-        tl.toolbarEl.appendChild(this.redoBtn);
+        tl.toolbarEl.prepend(this.undoBtn, this.redoBtn);
 
         this._updateHistoryButtons();
 
@@ -2154,6 +2442,7 @@ export class CapTimelineEditorApp {
                     kind: track.type === "audio" ? "audio" : (m.mediaKind || "image"),
                     file: clip.src || "",
                 };
+                source.location = this._mediaStatus.get(`${source.kind}:${source.file}`)?.location || "assets";
                 if (track.type === "audio" || m.mediaKind === "video") {
                     source.in_ms = sourceInMs;
                     source.out_ms = sourceInMs + durationMs;
@@ -2200,8 +2489,10 @@ export class CapTimelineEditorApp {
             };
         });
         return {
-            schema_version: 1,
+            project_version: this._currentVersion(),
+            schema_version: this._currentVersion(),
             name: String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目",
+            resources: this._projectResources.map(resource => ({ ...resource })),
             settings: {
                 fps: Number(this._w("fps")?.value ?? 24),
                 width: Number(this._w("width")?.value ?? 720),
@@ -2276,6 +2567,12 @@ export class CapTimelineEditorApp {
             this._audioTrack = null;
 
             const projectTracks = Array.isArray(snapshot.project?.tracks) ? snapshot.project.tracks : [];
+            this._projectResources = Array.isArray(snapshot.project?.resources)
+                ? snapshot.project.resources.map(resource => ({ ...resource }))
+                : [];
+            for (const resource of this._projectResources) {
+                if (resource.location) this._mediaStatus.set(`${resource.kind}:${resource.file}`, { location: resource.location });
+            }
             this.projectNameInput.value = String(snapshot.project?.name || "未命名项目").trim() || "未命名项目";
             const tracks = projectTracks.map((track, order) => ({
                 ...track,
@@ -2293,6 +2590,7 @@ export class CapTimelineEditorApp {
             projectTracks.forEach((track, trackIndex) => {
                 for (const clip of Array.isArray(track.clips) ? track.clips : []) {
                     const source = clip.source && typeof clip.source === "object" ? clip.source : {};
+                    if (source.file && source.location) this._mediaStatus.set(`${clip.type}:${source.file}`, { location: source.location });
                     const startMs = Number(clip.start_ms) || 0;
                     const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
                     clips.push({

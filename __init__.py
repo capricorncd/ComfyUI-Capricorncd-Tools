@@ -157,6 +157,116 @@ def _register_routes():
             return web.Response(status=404, text="Not found")
         return web.FileResponse(path)
 
+    def _asset_kind(kind: str):
+        table = {
+            "image": ("images", IMAGE_EXTENSIONS),
+            "video": ("videos", VIDEO_EXTENSIONS),
+            "audio": ("audios", AUDIO_EXTENSIONS),
+        }
+        return table.get(kind)
+
+    def _unique_destination(directory: str, filename: str) -> str:
+        os.makedirs(directory, exist_ok=True)
+        filename = os.path.basename(filename)
+        destination = os.path.join(directory, filename)
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(destination):
+            destination = os.path.join(directory, f"{base}_{counter}{ext}")
+            counter += 1
+        return destination
+
+    @routes.get("/audio_keyframe_timeline/asset_status")
+    async def api_asset_status(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        directory = request.rel_url.query.get("dir", "")
+        name = request.rel_url.query.get("name", "")
+        kind = request.rel_url.query.get("kind", "")
+        spec = _asset_kind(kind)
+        if not name or not spec or os.path.splitext(name)[1].lower() not in spec[1]:
+            return web.json_response({"error": "Invalid asset"}, status=400)
+        assets_path = _safe_join(resolve_assets_dir(directory), name) if directory else None
+        input_path = _safe_join(_fp.get_input_directory(), name)
+        return web.json_response({
+            "assets_exists": bool(assets_path and os.path.isfile(assets_path)),
+            "input_exists": bool(input_path and os.path.isfile(input_path)),
+        })
+
+    @routes.get("/audio_keyframe_timeline/asset_file")
+    async def api_asset_file(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        directory = request.rel_url.query.get("dir", "")
+        name = request.rel_url.query.get("name", "")
+        kind = request.rel_url.query.get("kind", "")
+        location = request.rel_url.query.get("location", "assets")
+        spec = _asset_kind(kind)
+        if not name or not spec or os.path.splitext(name)[1].lower() not in spec[1]:
+            return web.Response(status=400, text="Invalid asset")
+        base = _fp.get_input_directory() if location == "input" else resolve_assets_dir(directory)
+        path = _safe_join(base, name) if base else None
+        if not path or not os.path.isfile(path):
+            return web.Response(status=404, text="Not found")
+        return web.FileResponse(path)
+
+    @routes.post("/audio_keyframe_timeline/import_asset")
+    async def api_import_asset(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        try:
+            reader = await request.multipart()
+            values = {}
+            upload = None
+            while field := await reader.next():
+                if field.name == "file":
+                    upload = field
+                    break
+                values[field.name] = await field.text()
+            kind = values.get("kind", "")
+            spec = _asset_kind(kind)
+            filename = os.path.basename(upload.filename or "") if upload else ""
+            if not upload or not spec or os.path.splitext(filename)[1].lower() not in spec[1]:
+                return web.json_response({"error": "Unsupported or missing file"}, status=400)
+            to_assets = values.get("to_assets") == "true"
+            if to_assets:
+                root = resolve_assets_dir(values.get("dir", ""))
+                if not root:
+                    return web.json_response({"error": "Assets directory is not configured"}, status=400)
+                subdir = spec[0]
+                destination = _unique_destination(os.path.join(root, subdir), filename)
+                location = "assets"
+                result_name = os.path.relpath(destination, root).replace(os.sep, "/")
+            else:
+                root = _fp.get_input_directory()
+                subdir = f"capricorncd-timeline/{spec[0]}"
+                destination = _unique_destination(os.path.join(root, subdir), filename)
+                location = "input"
+                result_name = os.path.relpath(destination, root).replace(os.sep, "/")
+            with open(destination, "wb") as stream:
+                while chunk := await upload.read_chunk(65536):
+                    stream.write(chunk)
+            return web.json_response({"file": result_name, "kind": kind, "location": location})
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] import_asset error")
+            return web.json_response({"error": str(exc)}, status=500)
+
+    @routes.post("/audio_keyframe_timeline/move_asset")
+    async def api_move_asset(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        try:
+            data = await request.json()
+            name, kind = str(data.get("name", "")), str(data.get("kind", ""))
+            spec = _asset_kind(kind)
+            root = resolve_assets_dir(str(data.get("dir", "")))
+            source = _safe_join(_fp.get_input_directory(), name)
+            if not spec or not root or not source or not os.path.isfile(source):
+                return web.json_response({"error": "Input asset not found"}, status=404)
+            destination = _unique_destination(os.path.join(root, spec[0]), os.path.basename(name))
+            shutil.move(source, destination)
+            result_name = os.path.relpath(destination, root).replace(os.sep, "/")
+            return web.json_response({"file": result_name, "kind": kind, "location": "assets"})
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] move_asset error")
+            return web.json_response({"error": str(exc)}, status=500)
+
     @routes.get("/cap/ffmpeg_status")
     async def api_ffmpeg_status(_request: web.Request) -> web.Response:
         path = shutil.which("ffmpeg")

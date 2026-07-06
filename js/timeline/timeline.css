@@ -52,6 +52,12 @@
   border-bottom: 1px solid var(--tl-border);
 }
 
+.tl-playback-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .tl-spacer { flex: 1; }
 
 .tl-btn {
