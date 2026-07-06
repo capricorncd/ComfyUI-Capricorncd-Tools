@@ -20,6 +20,19 @@ function getActiveCatNode() {
     return node.comfyClass === NODE_CLASS ? node : null;
 }
 
+function hasNonCatCanvasSelection() {
+    const sel = app.canvas?.selected_nodes;
+    if (!sel) return false;
+    return Object.values(sel).some(n => n.comfyClass !== NODE_CLASS);
+}
+
+// Selected CAT node UI, or last-interacted timeline when no other canvas node is selected.
+function getTimelineUi(nodeUi) {
+    if (nodeUi) return nodeUi;
+    if (hasNonCatCanvasSelection()) return null;
+    return CapAudioTimelineUI._lastActive;
+}
+
 function onGlobalKeyDown(e) {
     if (e.repeat) return;
     if (e.target?.classList?.contains("cat-prompt-input")) return;
@@ -29,22 +42,21 @@ function onGlobalKeyDown(e) {
 
     const node = getActiveCatNode();
     const nodeUi = node?._catUI;
+    const timelineUi = getTimelineUi(nodeUi);
 
     // Ctrl+B / Ctrl+G conflict with ComfyUI's built-in Bypass / Group keybindings.
-    // Delete removes the selected clip — use _lastActive as fallback so shortcuts work
-    // even when the LiteGraph node isn't selected in the canvas (users often interact
-    // with the widget without first clicking the node header).
     // Ctrl+B / Ctrl+G — skip when fullscreen timeline editor is open (it handles its own shortcuts)
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "b" || e.key === "g")) {
         if (CapTimelineEditorApp._open?._overlay?.classList.contains("open")) return;
-        const ui = nodeUi ?? CapAudioTimelineUI._lastActive;
-        if (ui) ui._onKeyDown(e, true);
+        if (timelineUi) {
+            timelineUi._onKeyDown(e, true);
+            return;
+        }
         return;
     }
     if ((e.key === "Delete" || e.key === "Backspace") && !isTypingTarget(e.target)) {
-        const ui = nodeUi ?? CapAudioTimelineUI._lastActive;
-        if (ui?.selClipId) {
-            ui._onKeyDown(e, true);
+        if (timelineUi?.selClipId) {
+            timelineUi._onKeyDown(e, true);
             return;
         }
     }
