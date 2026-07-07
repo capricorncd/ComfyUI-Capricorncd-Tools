@@ -478,7 +478,7 @@ export class CapTimelineEditorApp {
             this._projectNameUndoArmed = false;
         });
         el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
-        el.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
+        this.settingsModal.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
         this.settingsModal.addEventListener("click", (e) => {
             if (e.target === this.settingsModal) this._closeSettings();
         });
