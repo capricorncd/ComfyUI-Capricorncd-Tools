@@ -1,26 +1,138 @@
 import { app } from "../../scripts/app.js";
-import { bindRichPromptWidget } from "./rich_prompt.js";
+import {
+    bindRichPromptWidget,
+    detachRichPromptHandler,
+    isRichPromptReady,
+    resolvePromptTextarea,
+} from "./rich_prompt.js";
 
-function scheduleBind(widget, node) {
-    const tryBind = (tries = 0) => {
-        if (bindRichPromptWidget(widget)) return;
-        if (tries < 100 && document.contains(node?.el ?? node)) {
-            setTimeout(() => tryBind(tries + 1), 50);
+const NODE_CLASS = "CAP_RichPromptInput";
+
+function widgetRoot(widget, node) {
+    return widget.element
+        ?? widget.inputEl?.parentElement
+        ?? node?.el
+        ?? null;
+}
+
+function isDomNode(value) {
+    return value instanceof Node;
+}
+
+function isWatchActive(widget, node) {
+    const ta = resolvePromptTextarea(widget);
+    if (isDomNode(ta) && document.contains(ta)) return true;
+
+    const root = widgetRoot(widget, node);
+    if (isDomNode(root) && document.contains(root)) return true;
+
+    if (!node?.id) return false;
+    const graph = app.graph;
+    const live = graph?._nodes_by_id?.[node.id] ?? graph?.getNodeById?.(node.id);
+    return live === node;
+}
+
+function needsRichBind(widget) {
+    const ta = resolvePromptTextarea(widget);
+    if (!ta) return false;
+    if (widget._capBoundTa && widget._capBoundTa !== ta) return true;
+    return !isRichPromptReady(widget);
+}
+
+function ensureRichBind(widget, node) {
+    const ta = resolvePromptTextarea(widget);
+    if (!ta) return false;
+
+    if (widget._capBoundTa && widget._capBoundTa !== ta) {
+        detachRichPromptHandler(widget._capBoundTa);
+        widget._capBoundTa = null;
+    }
+
+    if (!bindRichPromptWidget(widget)) return false;
+    widget._capBoundTa = resolvePromptTextarea(widget);
+    return !!widget._capBoundTa;
+}
+
+function stopRichWatch(widget) {
+    widget._capRichObs?.disconnect();
+    widget._capRichObs = null;
+    if (widget._capRichInterval) {
+        clearInterval(widget._capRichInterval);
+        widget._capRichInterval = null;
+    }
+    if (widget._capBoundTa) {
+        detachRichPromptHandler(widget._capBoundTa);
+        widget._capBoundTa = null;
+    }
+    widget._capRichWatch = false;
+}
+
+function watchPromptWidget(widget, node) {
+    if (widget._capRichWatch) return;
+    widget._capRichWatch = true;
+
+    const check = () => {
+        if (!isWatchActive(widget, node)) {
+            stopRichWatch(widget);
+            return;
         }
+        if (needsRichBind(widget)) ensureRichBind(widget, node);
     };
-    tryBind();
+
+    const tryWatch = (tries = 0) => {
+        ensureRichBind(widget, node);
+        const root = widgetRoot(widget, node);
+        if (!isDomNode(root)) {
+            if (tries < 100) setTimeout(() => tryWatch(tries + 1), 50);
+            return;
+        }
+        widget._capRichObs = new MutationObserver(check);
+        widget._capRichObs.observe(root, { childList: true, subtree: true });
+        widget._capRichInterval = setInterval(check, 750);
+        check();
+    };
+
+    tryWatch();
+}
+
+function bindNodePromptWidgets(node) {
+    for (const widget of node.widgets ?? []) {
+        if (widget.name !== "prompt") continue;
+        watchPromptWidget(widget, node);
+        break;
+    }
 }
 
 app.registerExtension({
     name: "Capricorncd.RichPromptInput",
 
-    nodeCreated(node) {
-        if (node.comfyClass !== "CAP_RichPromptInput") return;
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData.name !== NODE_CLASS) return;
 
-        for (const widget of node.widgets ?? []) {
-            if (widget.name !== "prompt") continue;
-            scheduleBind(widget, node);
-            break;
-        }
+        const onRemoved = nodeType.prototype.onRemoved;
+        nodeType.prototype.onRemoved = function () {
+            for (const widget of this.widgets ?? []) {
+                if (widget.name === "prompt") stopRichWatch(widget);
+            }
+            return onRemoved?.apply(this, arguments);
+        };
+
+        const onResize = nodeType.prototype.onResize;
+        nodeType.prototype.onResize = function () {
+            onResize?.apply(this, arguments);
+            bindNodePromptWidgets(this);
+        };
+
+        const configure = nodeType.prototype.configure;
+        nodeType.prototype.configure = function () {
+            const result = configure?.apply(this, arguments);
+            bindNodePromptWidgets(this);
+            return result;
+        };
+    },
+
+    nodeCreated(node) {
+        if (node.comfyClass !== NODE_CLASS) return;
+        bindNodePromptWidgets(node);
     },
 });

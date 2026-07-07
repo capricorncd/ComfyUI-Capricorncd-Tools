@@ -72,6 +72,27 @@ function syncMirrorLayout(ta) {
     }
 }
 
+function hasValidMirror(ta) {
+    return !!(ta?._capMirror && document.contains(ta._capMirror) && ta._capMirror.isConnected);
+}
+
+export function isRichPromptReady(widget) {
+    const ta = resolvePromptTextarea(widget);
+    if (!ta) return false;
+    clearStaleMirror(ta);
+    return hasValidMirror(ta);
+}
+
+function clearStaleMirror(ta) {
+    if (!ta?._capMirror) return;
+    if (hasValidMirror(ta)) return;
+    ta._capMirrorResizeObs?.disconnect();
+    ta._capMirrorResizeObs = null;
+    ta._capMirrorObserver?.disconnect();
+    ta._capMirrorObserver = null;
+    ta._capMirror = null;
+}
+
 function applyMirrorSurface(mirror, cs, mode) {
     const bg = cs.backgroundColor;
     const isTransparentBg = !bg || bg === "transparent" || bg === "rgba(0, 0, 0, 0)";
@@ -81,7 +102,9 @@ function applyMirrorSurface(mirror, cs, mode) {
 }
 
 function ensureMirror(ta, mode) {
-    if (ta._capMirror || !ta.parentNode) return !!ta._capMirror;
+    if (!ta.parentNode) return false;
+    clearStaleMirror(ta);
+    if (hasValidMirror(ta)) return true;
 
     const cs = getComputedStyle(ta);
     const textColor = resolveTextColor(cs);
@@ -148,7 +171,8 @@ function ensureMirror(ta, mode) {
 }
 
 function tryEnsureMirror(ta, mode, tries = 0) {
-    if (ta._capMirror) return true;
+    clearStaleMirror(ta);
+    if (hasValidMirror(ta)) return true;
     if (ta.parentNode) return ensureMirror(ta, mode);
     if (tries >= 100) return false;
     setTimeout(() => tryEnsureMirror(ta, mode, tries + 1), 50);
@@ -158,7 +182,8 @@ function tryEnsureMirror(ta, mode, tries = 0) {
 export function ensureRichPromptMirror(ta, mode = "overlay") {
     if (!ta?.parentNode) return false;
     if (!ta._capRichMode) ta._capRichMode = mode;
-    if (ta._capMirror) {
+    clearStaleMirror(ta);
+    if (hasValidMirror(ta)) {
         syncMirrorLayout(ta);
         updateRichPromptMirror(ta);
         return true;
@@ -227,7 +252,8 @@ export function syncRichPromptEnabled(ta, enabled) {
     const mode = ta._capRichMode || "overlay";
     if (enabled) ensureRichPromptMirror(ta, mode);
 
-    if (!ta._capMirror) {
+    clearStaleMirror(ta);
+    if (!hasValidMirror(ta)) {
         ta.classList.remove("cap-rich-active");
         return;
     }
@@ -256,7 +282,12 @@ export function setRichPromptValue(ta, value, enabled = true) {
 }
 
 export function attachRichPromptHandler(ta, { mode = "widget" } = {}) {
-    if (!ta || ta._capRichAttached) return;
+    if (!ta) return;
+    if (ta._capRichAttached) {
+        clearStaleMirror(ta);
+        if (!hasValidMirror(ta)) tryEnsureMirror(ta, mode);
+        return;
+    }
     ta._capRichAttached = true;
     ta._capRichMode = mode;
 
@@ -311,7 +342,12 @@ export function resolvePromptTextarea(widget) {
 export function bindRichPromptWidget(widget, { mode = "widget" } = {}) {
     const ta = resolvePromptTextarea(widget);
     if (!ta) return false;
+    clearStaleMirror(ta);
     if (!ta._capRichAttached) attachRichPromptHandler(ta, { mode });
-    else if (!ta._capMirror) tryEnsureMirror(ta, mode);
-    return true;
+    else if (!hasValidMirror(ta)) tryEnsureMirror(ta, mode);
+    else {
+        syncMirrorLayout(ta);
+        updateRichPromptMirror(ta);
+    }
+    return hasValidMirror(ta);
 }
