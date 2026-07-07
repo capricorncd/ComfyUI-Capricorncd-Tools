@@ -135,7 +135,9 @@
       "frames_dir":        { "name": "Frames Dir" },
       "fps":               { "name": "FPS" },
       "filename_prefix":   { "name": "Filename Prefix" },
-      "audio":             { "name": "Audio" }
+      "images":            { "name": "Images" },
+      "audio":             { "name": "Audio" },
+      "image_paths":       { "name": "Image File List" }
     },
     "outputs": {
       "filename": { "name": "Filename" }

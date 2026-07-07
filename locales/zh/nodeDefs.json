@@ -135,7 +135,9 @@
       "frames_dir":        { "name": "序列帧目录" },
       "fps":               { "name": "帧率" },
       "filename_prefix":   { "name": "文件名前缀" },
-      "audio":             { "name": "音频" }
+      "images":            { "name": "图像" },
+      "audio":             { "name": "音频" },
+      "image_paths":       { "name": "图片文件列表" }
     },
     "outputs": {
       "filename": { "name": "文件名" }
