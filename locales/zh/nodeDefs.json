@@ -142,5 +142,21 @@
     "outputs": {
       "filename": { "name": "文件名" }
     }
+  },
+
+  "CAP_ClearDirectory": {
+    "display_name": "清空目录",
+    "inputs": {
+      "directory":      { "name": "目录" },
+      "delete_subdirs": { "name": "包含子目录" },
+      "delete_images":  { "name": "删除图片" },
+      "delete_videos":  { "name": "删除视频" },
+      "delete_audio":   { "name": "删除音频" },
+      "to_recycle_bin": { "name": "放入回收站" }
+    },
+    "outputs": {
+      "directory":     { "name": "目录" },
+      "deleted_count": { "name": "删除数量" }
+    }
   }
 }

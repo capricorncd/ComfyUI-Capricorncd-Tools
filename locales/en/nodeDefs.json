@@ -142,5 +142,21 @@
     "outputs": {
       "filename": { "name": "Filename" }
     }
+  },
+
+  "CAP_ClearDirectory": {
+    "display_name": "Clear Directory",
+    "inputs": {
+      "directory":      { "name": "Directory" },
+      "delete_subdirs": { "name": "Include Subdirs" },
+      "delete_images":  { "name": "Delete Images" },
+      "delete_videos":  { "name": "Delete Videos" },
+      "delete_audio":   { "name": "Delete Audio" },
+      "to_recycle_bin": { "name": "To Recycle Bin" }
+    },
+    "outputs": {
+      "directory":     { "name": "Directory" },
+      "deleted_count": { "name": "Deleted Count" }
+    }
   }
 }
