@@ -1,0 +1,306 @@
+/* Shared Capricorncd UI primitives — modal, tabs, toolbar, list, buttons */
+
+.cap-ui-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+/* Floating panel: no dimmed backdrop, click-through outside dialog */
+.cap-ui-overlay.cap-ui-float {
+    background: transparent;
+    pointer-events: none;
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.cap-ui-overlay.cap-ui-float .cap-ui-dialog {
+    pointer-events: auto;
+    position: absolute;
+    margin: 0;
+}
+
+.cap-ui-dialog {
+    width: min(780px, 96vw);
+    max-height: min(82vh, 900px);
+    display: flex;
+    flex-direction: column;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    color: #ddd;
+    font: 13px/1.4 system-ui, sans-serif;
+}
+
+.cap-ui-hd {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid #333;
+}
+
+.cap-ui-hd.cap-ui-drag {
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+}
+
+.cap-ui-hd.cap-ui-drag:active {
+    cursor: grabbing;
+}
+
+.cap-ui-hd-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.cap-ui-close {
+    border: none;
+    background: transparent;
+    color: #aaa;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.cap-ui-close svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+}
+
+.cap-ui-close:hover {
+    background: #333;
+    color: #fff;
+}
+
+.cap-ui-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px 12px 0;
+    border-bottom: 1px solid #333;
+    flex-wrap: wrap;
+}
+
+.cap-ui-tab-list {
+    display: flex;
+    gap: 4px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.cap-ui-tab {
+    border: none;
+    background: transparent;
+    color: #999;
+    padding: 8px 14px;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    font: inherit;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+}
+
+.cap-ui-tab:hover {
+    color: #ddd;
+    background: #2a2a2a;
+}
+
+.cap-ui-tab.active {
+    color: #fff;
+    border-bottom-color: #6a9eff;
+    background: #2a2a2a;
+}
+
+.cap-ui-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+    padding: 0 0 8px;
+    justify-content: flex-end;
+}
+
+.cap-ui-btn {
+    border: 1px solid #555;
+    background: #2a2a2a;
+    color: #ddd;
+    border-radius: 4px;
+    padding: 5px 10px;
+    cursor: pointer;
+    font: inherit;
+}
+
+/* LiteGraph node DOM widget button (full width inside node) */
+.cap-ui-node-btn-wrap {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 2px 0;
+}
+
+.cap-ui-node-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #555;
+    background: #2a2a2a;
+    color: #ddd;
+    border-radius: 10px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font: 11px/1 system-ui, sans-serif;
+    text-align: center;
+}
+
+.cap-ui-node-btn:hover {
+    background: #2a2a2a80;
+    border-color: #ccc;
+    color: #ccc;
+}
+
+.cap-ui-btn:disabled,
+.cap-ui-btn-primary:disabled,
+.cap-ui-btn-danger:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.cap-ui-btn:disabled:hover,
+.cap-ui-btn-primary:disabled:hover,
+.cap-ui-btn-danger:disabled:hover {
+    background: inherit;
+}
+
+.cap-ui-target-hint {
+    margin: 0;
+    padding: 0 12px 8px;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.3;
+}
+
+.cap-ui-target-hint.cap-ui-target-warn {
+    color: #e6a57e;
+}
+
+.cap-ui-btn-primary {
+    border-color: #4a7fd4;
+    background: #2d4a7a;
+}
+
+.cap-ui-btn-primary:hover {
+    background: #355a94;
+}
+
+.cap-ui-btn-danger {
+    border-color: #8a3a3a;
+    color: #ffb0b0;
+}
+
+.cap-ui-btn-danger:hover {
+    background: #4a2020;
+}
+
+.cap-ui-icon-btn {
+    border: 1px solid #555;
+    background: #2a2a2a;
+    color: #ddd;
+    border-radius: 4px;
+    padding: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+}
+
+.cap-ui-icon-btn svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+}
+
+.cap-ui-icon-btn:hover {
+    background: #353535;
+}
+
+.cap-ui-body {
+    overflow: auto;
+    padding: 8px 12px 12px;
+    flex: 1;
+    min-height: 120px;
+}
+
+.cap-ui-list-item {
+    border: 1px solid #383838;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: #252525;
+}
+
+.cap-ui-list-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.cap-ui-list-title {
+    font-weight: 600;
+    color: #eee;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cap-ui-list-sub {
+    color: #888;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.cap-ui-code-preview {
+    margin: 0;
+    padding: 8px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    color: #bbb;
+    font: 12px/1.45 ui-monospace, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow: auto;
+}
+
+.cap-ui-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.cap-ui-empty {
+    color: #888;
+    text-align: center;
+    padding: 24px 8px;
+}

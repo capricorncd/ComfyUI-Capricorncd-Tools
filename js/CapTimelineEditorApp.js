@@ -2,25 +2,16 @@ import { api } from "../../scripts/api.js";
 import { Timeline, ICONS } from "./timeline/index.js";
 import { parseTimecode, formatTimecode } from "./timecode.js";
 import { attachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
+import { loadExtensionCss } from "./cap_ui.js";
 
-const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
 /** Right-side empty margin as a fraction of the timeline viewport width. */
 const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
 /** All tracks (main/overlay/audio) share one row height. */
 const TRACK_HEIGHT = 78;
 
 function loadEditorCss() {
-    if (document.getElementById("cat-te-styles")) return;
-    const link = document.createElement("link");
-    link.id = "cat-te-styles";
-    link.rel = "stylesheet";
-    link.href = `/extensions/${EXT_PREFIX}/cap_timeline_editor.css`;
-    document.head.appendChild(link);
-    const tl = document.createElement("link");
-    tl.id = "cat-te-tl-styles";
-    tl.rel = "stylesheet";
-    tl.href = `/extensions/${EXT_PREFIX}/timeline/timeline.css`;
-    document.head.appendChild(tl);
+    loadExtensionCss("cap_timeline_editor.css", "cat-te-styles");
+    loadExtensionCss("timeline/timeline.css", "cat-te-tl-styles");
 }
 
 function uid() {

@@ -1,19 +1,14 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
+import { loadExtensionCss } from "./cap_ui.js";
 
 const NODE_CLASS     = "CAP_SeqToVideo";
-const EXT_PREFIX     = "ComfyUI-Capricorncd-Tools";
 const PLAYER_H       = 200;  // placeholder / initial height in px
 const MIN_NODE_WIDTH = 300;  // px
 
 function loadCss() {
-    if (document.getElementById("stv-styles")) return;
-    const link = document.createElement("link");
-    link.id   = "stv-styles";
-    link.rel  = "stylesheet";
-    link.href = `/extensions/${EXT_PREFIX}/cap_seq_to_video.css`;
-    document.head.appendChild(link);
+    loadExtensionCss("cap_seq_to_video.css", "stv-styles");
 }
 
 function videoUrl(info) {

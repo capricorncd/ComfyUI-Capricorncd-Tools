@@ -3,8 +3,11 @@ import WaveSurfer from "./wavesurfer.esm.js";
 import { clamp, formatTimecode, parseTimecode, segmentFrameCount } from "./timecode.js";
 import { attachRichPromptHandler, detachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
+import { loadExtensionCss } from "./cap_ui.js";
 
-const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
+function loadCss() {
+    loadExtensionCss("cap_audio_timeline.css", "cat-styles");
+}
 
 function uid() {
     return `cl_${Math.random().toString(36).slice(2, 9)}`;
@@ -13,15 +16,6 @@ function uid() {
 function clipUseGlobalPrompt(raw) {
     if (raw.use_global_prompt !== undefined) return raw.use_global_prompt !== false;
     return !String(raw.prompt ?? "").trim();
-}
-
-function loadCss() {
-    if (document.getElementById("cat-styles")) return;
-    const link = document.createElement("link");
-    link.id = "cat-styles";
-    link.rel = "stylesheet";
-    link.href = `/extensions/${EXT_PREFIX}/cap_audio_timeline.css`;
-    document.head.appendChild(link);
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

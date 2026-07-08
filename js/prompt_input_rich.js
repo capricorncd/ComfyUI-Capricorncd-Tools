@@ -113,11 +113,7 @@ function bindNodePromptWidgets(node) {
     const promptWidget = getPromptWidget(node);
     if (!promptWidget) return;
     watchPromptWidget(promptWidget, node);
-    ensurePromptLibraryButtons(
-        node,
-        () => resolvePromptTextarea(getPromptWidget(node)),
-        () => getPromptWidget(node),
-    );
+    ensurePromptLibraryButtons(node);
 }
 
 function recordHistoryFromNode(node) {

@@ -1,5 +1,6 @@
 import { EventEmitter } from './EventEmitter.js';
 import { clamp, formatTime as _formatTime, TRACK_TYPES } from './utils.js';
+import { iconHtml } from '../cap_icons.js';
 import { Track } from './Track.js';
 import { TimeRuler } from './TimeRuler.js';
 import { PlayHead } from './PlayHead.js';
@@ -733,10 +734,5 @@ function el(tag, cls) {
 }
 
 function icon(name) {
-  const icons = {
-    play:  '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>',
-    pause: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="5" y="3" width="4" height="18"/><rect x="15" y="3" width="4" height="18"/></svg>',
-    stop:  '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="4" y="4" width="16" height="16"/></svg>',
-  };
-  return icons[name] || name;
+  return iconHtml(name, 14) || name;
 }
