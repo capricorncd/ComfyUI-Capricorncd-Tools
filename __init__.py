@@ -6,7 +6,6 @@ import sys
 
 from aiohttp import web
 
-from .prompt_input import CAP_PromptInput
 from .prompt_input_rich import CAP_RichPromptInput
 from .cap_audio_timeline import (
     NODE_CLASS_MAPPINGS as _CAT_CLASS,
@@ -53,7 +52,6 @@ from .timecode import (
 WEB_DIRECTORY = "./js"
 
 NODE_CLASS_MAPPINGS = {
-    "CAP_PromptInput": CAP_PromptInput,
     "CAP_RichPromptInput": CAP_RichPromptInput,
     **_CAT_CLASS,
     **_CDP_CLASS,
@@ -66,7 +64,6 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "CAP_PromptInput": "Prompt Input",
     "CAP_RichPromptInput": "Rich Prompt Input",
     **_CAT_NAMES,
     **_CDP_NAMES,

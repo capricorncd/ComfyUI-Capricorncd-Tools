@@ -1,14 +1,4 @@
 {
-  "CAP_PromptInput": {
-    "display_name": "Prompt Input",
-    "inputs": {
-      "prompt": { "name": "Prompt" }
-    },
-    "outputs": {
-      "prompt": { "name": "Prompt" }
-    }
-  },
-
   "CAP_RichPromptInput": {
     "display_name": "Rich Prompt Input",
     "inputs": {

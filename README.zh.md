@@ -12,8 +12,7 @@
 
 | 节点 | 说明 | 文档 |
 |------|------|------|
-| **Prompt Input** | 支持 `#` 行注释的多行提示词编辑器 | [→](docs/zh/prompt-input.md) |
-| **Rich Prompt Input** | 带实时语法高亮的提示词编辑器 | [→](docs/zh/prompt-input.md) |
+| **Rich Prompt Input** | 带实时语法高亮、`#` 注释与历史/预设的提示词编辑器 | [→](docs/zh/prompt-input.md) |
 | **Audio Timeline** | 波形修剪 + 图像关键帧时间轴 + 每片段提示词 | [→](docs/zh/audio-timeline.md) |
 | **Data Json Clip Parser** | 从 Audio Timeline 的 `data_json` 输出中提取单个片段 | [→](docs/zh/data-json-clip-parser.md) |
 | **Seq To Video** | 通过 ffmpeg 将图像序列和音频合成为 MP4 | [→](docs/zh/seq-to-video.md) |

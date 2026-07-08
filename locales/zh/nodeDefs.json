@@ -1,14 +1,4 @@
 {
-  "CAP_PromptInput": {
-    "display_name": "提示词输入",
-    "inputs": {
-      "prompt": { "name": "提示词" }
-    },
-    "outputs": {
-      "prompt": { "name": "提示词" }
-    }
-  },
-
   "CAP_RichPromptInput": {
     "display_name": "富文本提示词输入",
     "inputs": {

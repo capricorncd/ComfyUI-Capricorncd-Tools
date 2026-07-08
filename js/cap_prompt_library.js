@@ -171,6 +171,14 @@ function resolveInsertRange(ta) {
     return { start: len, end: len };
 }
 
+/** Keep `#` comment lines at line start so node output filtering works. */
+function wrapInsertBlock(before, after, value) {
+    let text = value;
+    if (before && !before.endsWith("\n")) text = `\n${text}`;
+    if (after && !after.startsWith("\n") && !text.endsWith("\n")) text = `${text}\n`;
+    return text;
+}
+
 export function applyPromptToTextarea(ta, text, mode = "insert") {
     if (!ta) return;
     trackCaret(ta);
@@ -181,8 +189,11 @@ export function applyPromptToTextarea(ta, text, mode = "insert") {
         ta.setSelectionRange(pos, pos);
     } else {
         const { start, end } = resolveInsertRange(ta);
-        ta.value = ta.value.slice(0, start) + value + ta.value.slice(end);
-        const pos = start + value.length;
+        const before = ta.value.slice(0, start);
+        const after = ta.value.slice(end);
+        const block = wrapInsertBlock(before, after, value);
+        ta.value = before + block + after;
+        const pos = before.length + block.length;
         ta.setSelectionRange(pos, pos);
         ta._capCaretPos = { start: pos, end: pos, focused: true };
     }
@@ -309,10 +320,12 @@ function updateModalTargetHint() {
     const { node, textarea } = resolveActiveTarget();
     if (node && textarea) {
         const title = node.title || NODE_CLASS;
-        hint.textContent = `目标节点：#${node.id} ${title}`;
+        hint.textContent = `· #${node.id} ${title}`;
+        hint.title = `目标节点：#${node.id} ${title}`;
         hint.classList.remove("cap-ui-target-warn");
     } else {
-        hint.textContent = NO_TARGET_MSG;
+        hint.textContent = `· ${NO_TARGET_MSG}`;
+        hint.title = NO_TARGET_MSG;
         hint.classList.add("cap-ui-target-warn");
     }
     refreshModalTargetState();
@@ -632,9 +645,9 @@ function buildModal(initialKind = "history") {
       <div class="cap-ui-dialog" role="dialog" aria-modal="false">
         <div class="cap-ui-hd cap-ui-drag">
           <h3 class="cap-ui-hd-title">历史记录 / 预设</h3>
+          <span class="cap-ui-target-hint"></span>
           <button type="button" class="cap-ui-close" title="关闭">${iconHtml("close")}</button>
         </div>
-        <p class="cap-ui-target-hint"></p>
         <div class="cap-ui-tabs">
           <div class="cap-ui-tab-list">
             <button type="button" class="cap-ui-tab" data-kind="history">历史记录</button>
