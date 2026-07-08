@@ -29,6 +29,19 @@ An enhanced editor with live syntax highlighting rendered via a transparent over
 - `Ctrl+/` toggles `#` on the current line or selection
 - Paste automatically strips rich-text formatting (plain text only)
 - Comment markers are removed from the output; only the raw text content is passed downstream
+- Optional leading / trailing blank lines on output
+- **History** and **Preset** via a single **预设/历史记录** button (modal with tabs; stored in browser `localStorage`)
+
+### History / Presets
+
+| Action | Behavior |
+|--------|----------|
+| 预设 / 历史记录 tabs | Switch between named presets and recent history in one modal |
+| History | Recent prompts (auto-saved after each successful node run; also manual save) |
+| Preset | Named prompt snippets you save manually |
+| Insert | Inserts at the last known caret position; if caret is unknown, appends to the end |
+| Replace | Replaces the entire textarea content |
+| Export / Import | JSON round-trip for the active tab; import can merge or replace |
 
 | Output | Type | Description |
 |--------|------|-------------|

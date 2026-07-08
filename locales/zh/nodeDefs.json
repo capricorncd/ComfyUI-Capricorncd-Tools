@@ -12,7 +12,9 @@
   "CAP_RichPromptInput": {
     "display_name": "富文本提示词输入",
     "inputs": {
-      "prompt": { "name": "提示词" }
+      "prompt": { "name": "提示词" },
+      "add_blank_line_start": { "name": "开头空行" },
+      "add_blank_line_end": { "name": "结尾空行" }
     },
     "outputs": {
       "prompt": { "name": "提示词" }

@@ -12,7 +12,9 @@
   "CAP_RichPromptInput": {
     "display_name": "Rich Prompt Input",
     "inputs": {
-      "prompt": { "name": "Prompt" }
+      "prompt": { "name": "Prompt" },
+      "add_blank_line_start": { "name": "Leading Blank Line" },
+      "add_blank_line_end": { "name": "Trailing Blank Line" }
     },
     "outputs": {
       "prompt": { "name": "Prompt" }

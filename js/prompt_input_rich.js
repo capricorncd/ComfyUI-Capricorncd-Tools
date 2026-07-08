@@ -5,6 +5,11 @@ import {
     isRichPromptReady,
     resolvePromptTextarea,
 } from "./rich_prompt.js";
+import {
+    addPromptHistory,
+    ensurePromptLibraryButtons,
+    rememberPromptCaret,
+} from "./cap_prompt_library.js";
 
 const NODE_CLASS = "CAP_RichPromptInput";
 
@@ -39,6 +44,10 @@ function needsRichBind(widget) {
     return !isRichPromptReady(widget);
 }
 
+function getPromptWidget(node) {
+    return node.widgets?.find((w) => w.name === "prompt") ?? null;
+}
+
 function ensureRichBind(widget, node) {
     const ta = resolvePromptTextarea(widget);
     if (!ta) return false;
@@ -49,8 +58,13 @@ function ensureRichBind(widget, node) {
     }
 
     if (!bindRichPromptWidget(widget)) return false;
-    widget._capBoundTa = resolvePromptTextarea(widget);
-    return !!widget._capBoundTa;
+    const bound = resolvePromptTextarea(widget);
+    widget._capBoundTa = bound;
+    if (bound) {
+        bound._capBoundWidget = widget;
+        rememberPromptCaret(bound);
+    }
+    return !!bound;
 }
 
 function stopRichWatch(widget) {
@@ -96,11 +110,21 @@ function watchPromptWidget(widget, node) {
 }
 
 function bindNodePromptWidgets(node) {
-    for (const widget of node.widgets ?? []) {
-        if (widget.name !== "prompt") continue;
-        watchPromptWidget(widget, node);
-        break;
-    }
+    const promptWidget = getPromptWidget(node);
+    if (!promptWidget) return;
+    watchPromptWidget(promptWidget, node);
+    ensurePromptLibraryButtons(
+        node,
+        () => resolvePromptTextarea(getPromptWidget(node)),
+        () => getPromptWidget(node),
+    );
+}
+
+function recordHistoryFromNode(node) {
+    const widget = getPromptWidget(node);
+    const ta = resolvePromptTextarea(widget);
+    const text = ta?.value ?? widget?.value ?? "";
+    addPromptHistory(text);
 }
 
 app.registerExtension({
@@ -128,6 +152,12 @@ app.registerExtension({
             const result = configure?.apply(this, arguments);
             bindNodePromptWidgets(this);
             return result;
+        };
+
+        const onExecuted = nodeType.prototype.onExecuted;
+        nodeType.prototype.onExecuted = function () {
+            onExecuted?.apply(this, arguments);
+            recordHistoryFromNode(this);
         };
     },
 
