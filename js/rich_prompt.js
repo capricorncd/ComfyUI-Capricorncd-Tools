@@ -39,6 +39,7 @@ function formatLineHtml(line) {
 export function updateRichPromptMirror(ta) {
     const m = ta?._capMirror;
     if (!m) return;
+    syncMirrorLayout(ta);
     const lines = ta.value.split("\n");
     m.innerHTML =
         lines.map(formatLineHtml).join("<br>") +
@@ -62,13 +63,12 @@ function syncMirrorLayout(ta) {
     refreshMirrorColors(ta);
 
     if (ta._capRichMode === "overlay" || ta._capRichMode === "widget") {
-        const sb = Math.max(0, ta.offsetWidth - ta.clientWidth);
-        m.style.top = "0";
-        m.style.left = "0";
-        m.style.bottom = "0";
-        m.style.right = `${sb}px`;
-        m.style.width = "";
-        m.style.height = "";
+        m.style.top = `${ta.offsetTop}px`;
+        m.style.left = `${ta.offsetLeft}px`;
+        m.style.width = `${ta.clientWidth}px`;
+        m.style.height = `${ta.clientHeight}px`;
+        m.style.right = "";
+        m.style.bottom = "";
     }
 }
 
@@ -144,8 +144,6 @@ function ensureMirror(ta, mode) {
             position: "absolute",
             left: "0",
             top: "0",
-            width: "100%",
-            height: "100%",
             zIndex: "0",
         });
         parent.insertBefore(mirror, ta);
@@ -220,8 +218,62 @@ function toggleComment(ta) {
     );
 }
 
+function removeRichPromptListeners(ta) {
+    if (!ta) return;
+    if (ta._capRichOnInput) {
+        ta.removeEventListener("input", ta._capRichOnInput);
+        ta._capRichOnInput = null;
+    }
+    if (ta._capRichOnScroll) {
+        ta.removeEventListener("scroll", ta._capRichOnScroll);
+        ta._capRichOnScroll = null;
+    }
+    if (ta._capRichOnPaste) {
+        ta.removeEventListener("paste", ta._capRichOnPaste, true);
+        ta._capRichOnPaste = null;
+    }
+}
+
+function bindRichPromptListeners(ta) {
+    removeRichPromptListeners(ta);
+
+    const onInput = () => updateRichPromptMirror(ta);
+    const onScroll = () => {
+        syncMirrorLayout(ta);
+        if (!ta._capMirror) return;
+        ta._capMirror.scrollTop = ta.scrollTop;
+        ta._capMirror.scrollLeft = ta.scrollLeft;
+    };
+    const onPaste = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        if (ta._capRichPasting) return;
+        ta._capRichPasting = true;
+        try {
+            const txt = (e.clipboardData || window.clipboardData)?.getData("text/plain") ?? "";
+            const s = ta.selectionStart;
+            const end = ta.selectionEnd;
+            ta.value = ta.value.slice(0, s) + txt + ta.value.slice(end);
+            ta.setSelectionRange(s + txt.length, s + txt.length);
+            ta.dispatchEvent(new Event("input", { bubbles: true }));
+        } finally {
+            ta._capRichPasting = false;
+        }
+    };
+
+    ta._capRichOnInput = onInput;
+    ta._capRichOnScroll = onScroll;
+    ta._capRichOnPaste = onPaste;
+    ta.addEventListener("input", onInput);
+    ta.addEventListener("scroll", onScroll);
+    ta.addEventListener("paste", onPaste, true);
+}
+
 export function detachRichPromptHandler(ta) {
     if (!ta) return;
+    removeRichPromptListeners(ta);
+    ta._capRichPasting = false;
     if (ta._capMirrorResizeObs) {
         ta._capMirrorResizeObs.disconnect();
         ta._capMirrorResizeObs = null;
@@ -283,12 +335,6 @@ export function setRichPromptValue(ta, value, enabled = true) {
 
 export function attachRichPromptHandler(ta, { mode = "widget" } = {}) {
     if (!ta) return;
-    if (ta._capRichAttached) {
-        clearStaleMirror(ta);
-        if (!hasValidMirror(ta)) tryEnsureMirror(ta, mode);
-        return;
-    }
-    ta._capRichAttached = true;
     ta._capRichMode = mode;
 
     const onKeydown = (e) => {
@@ -306,26 +352,15 @@ export function attachRichPromptHandler(ta, { mode = "widget" } = {}) {
             toggleComment(ta);
         }
     };
-    ta._capRichKeydown = onKeydown;
-    window.addEventListener("keydown", onKeydown, true);
+    if (!ta._capRichKeydown) {
+        ta._capRichKeydown = onKeydown;
+        window.addEventListener("keydown", onKeydown, true);
+    }
 
-    ta.addEventListener("input", () => updateRichPromptMirror(ta));
-    ta.addEventListener("scroll", () => {
-        if (!ta._capMirror) return;
-        ta._capMirror.scrollTop = ta.scrollTop;
-        ta._capMirror.scrollLeft = ta.scrollLeft;
-    });
-    ta.addEventListener("paste", (e) => {
-        e.preventDefault();
-        const txt = (e.clipboardData || window.clipboardData).getData("text/plain");
-        const s = ta.selectionStart;
-        const end = ta.selectionEnd;
-        ta.value = ta.value.slice(0, s) + txt + ta.value.slice(end);
-        ta.setSelectionRange(s + txt.length, s + txt.length);
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
-        updateRichPromptMirror(ta);
-    });
+    bindRichPromptListeners(ta);
+    ta._capRichAttached = true;
 
+    clearStaleMirror(ta);
     if (ta.parentNode) ensureMirror(ta, mode);
     else tryEnsureMirror(ta, mode);
 }

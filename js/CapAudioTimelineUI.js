@@ -2,6 +2,7 @@ import { api } from "../../scripts/api.js";
 import WaveSurfer from "./wavesurfer.esm.js";
 import { clamp, formatTimecode, parseTimecode, segmentFrameCount } from "./timecode.js";
 import { attachRichPromptHandler, detachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
+import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
 
 const EXT_PREFIX = "ComfyUI-Capricorncd-Tools";
 
@@ -99,6 +100,7 @@ _buildDom() {
     const root = document.createElement("div");
     root.className = "cat-root";
     root.tabIndex = -1;
+    bindCanvasWheelPassthrough(root);
     root.innerHTML = `
       <div class="cat-wave-section">
         <div class="cat-time-row">

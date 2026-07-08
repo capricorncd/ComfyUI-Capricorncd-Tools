@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
 
 const NODE_CLASS     = "CAP_SeqToVideo";
 const EXT_PREFIX     = "ComfyUI-Capricorncd-Tools";
@@ -145,6 +146,7 @@ app.registerExtension({
 function _buildPlayer(node) {
     const root = document.createElement("div");
     root.className = "stv-root";  // no stv-loaded → placeholder CSS applies
+    bindCanvasWheelPassthrough(root);
 
     const holder = document.createElement("div");
     holder.className = "stv-placeholder";
@@ -221,6 +223,7 @@ function _loadVideo(node, url) {
 
     const video = document.createElement("video");
     video.className   = "stv-video";
+    bindCanvasWheelPassthrough(video);
     video.loop        = true;
     video.muted       = true;   // start muted per browser autoplay policy
     video.autoplay    = false;
