@@ -32,6 +32,8 @@ Extracts a single image from a batch by index.
 | Output | Type | Description |
 |--------|------|-------------|
 | `image` | IMAGE | Single-image batch (`shape[0] == 1`) |
+| `index` | INT | Resolved index after negative normalization and clamping |
+| `filename` | STRING | Default filename `img_{index:05d}.png` for the resolved index |
 
 ---
 
@@ -48,5 +50,5 @@ Extracts a single image from a batch by index.
 IMAGE batch (48 frames)
   ├── Image Batch Count        → count = 48
   └── Image From Batch Index
-        index = -1             → last frame only
+        index = -1             → image, index = 47, filename = img_00047.png
 ```

@@ -109,7 +109,9 @@
       "index":  { "name": "Index" }
     },
     "outputs": {
-      "image": { "name": "Image" }
+      "image":    { "name": "Image" },
+      "index":    { "name": "Index" },
+      "filename": { "name": "Filename" }
     }
   },
 

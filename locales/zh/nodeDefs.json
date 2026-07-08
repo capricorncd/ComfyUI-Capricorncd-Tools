@@ -109,7 +109,9 @@
       "index":  { "name": "索引" }
     },
     "outputs": {
-      "image": { "name": "图像" }
+      "image":    { "name": "图像" },
+      "index":    { "name": "索引" },
+      "filename": { "name": "文件名" }
     }
   },
 

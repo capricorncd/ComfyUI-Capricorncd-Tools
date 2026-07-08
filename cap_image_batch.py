@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 
+def _resolve_batch_index(batch_size: int, index: int) -> int:
+    batch_index = int(index)
+    if batch_index < 0:
+        batch_index += batch_size
+    return max(0, min(batch_size - 1, batch_index))
+
+
 class CAP_ImageBatchCount:
     @classmethod
     def INPUT_TYPES(cls):
@@ -30,18 +37,19 @@ class CAP_ImageFromBatchIndex:
             },
         }
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("image",)
+    RETURN_TYPES = ("IMAGE", "INT", "STRING")
+    RETURN_NAMES = ("image", "index", "filename")
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
-    DESCRIPTION = "Return a single image from an IMAGE batch by index."
+    DESCRIPTION = (
+        "Return a single image from an IMAGE batch by index, "
+        "along with the resolved index and default filename img_{index:05d}.png."
+    )
 
     def execute(self, images, index):
-        batch_index = int(index)
-        if batch_index < 0:
-            batch_index += images.shape[0]
-        batch_index = max(0, min(images.shape[0] - 1, batch_index))
-        return (images[batch_index:batch_index + 1].clone(),)
+        batch_index = _resolve_batch_index(images.shape[0], index)
+        filename = f"img_{batch_index:05d}.png"
+        return (images[batch_index:batch_index + 1].clone(), batch_index, filename)
 
 
 NODE_CLASS_MAPPINGS = {

@@ -32,6 +32,8 @@
 | 输出 | 类型 | 说明 |
 |------|------|------|
 | `image` | IMAGE | 单张图像批次（`shape[0] == 1`） |
+| `index` | INT | 经负索引换算与钳制后的实际索引 |
+| `filename` | STRING | 按解析后索引生成的默认文件名 `img_{index:05d}.png` |
 
 ---
 
@@ -48,5 +50,5 @@
 IMAGE 批次（48 帧）
   ├── 图像批次计数    → count = 48
   └── 按索引取图
-        index = -1   → 仅最后一帧
+        index = -1   → image、index = 47、filename = img_00047.png
 ```
