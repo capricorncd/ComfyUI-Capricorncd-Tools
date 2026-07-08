@@ -3,7 +3,7 @@
 import { app } from "../../scripts/app.js";
 import { resolvePromptTextarea, updateRichPromptMirror } from "./rich_prompt.js";
 import { iconHtml } from "./cap_icons.js";
-import { ensureCapUiCss, mkUiBtn } from "./cap_ui.js";
+import { ensureCapUiCss, mkUiBtn, mkUiIconBtn } from "./cap_ui.js";
 import {
     PRESET_CATEGORIES,
     formatPresetWriteText,
@@ -453,26 +453,23 @@ function renderList(body, kind) {
 
         const meta = document.createElement("div");
         meta.className = "cap-ui-list-meta";
+        const metaMain = document.createElement("div");
+        metaMain.className = "cap-ui-list-meta-main";
         const title = document.createElement("div");
         title.className = "cap-ui-list-title";
         if (kind === "history") {
             title.textContent = formatTime(item.ts);
-            meta.append(title);
+            metaMain.append(title);
         } else {
             title.textContent = item.title || (item.name ? `#${item.name}` : previewText(item.text, 40));
+            metaMain.append(title);
             if (!item.builtin && item.ts) {
                 const sub = document.createElement("div");
                 sub.className = "cap-ui-list-sub";
                 sub.textContent = formatTime(item.ts);
-                meta.append(title, sub);
-            } else {
-                meta.append(title);
+                metaMain.append(sub);
             }
         }
-
-        const preview = document.createElement("pre");
-        preview.className = "cap-ui-code-preview";
-        preview.textContent = item.text;
 
         const actions = document.createElement("div");
         actions.className = "cap-ui-actions";
@@ -481,7 +478,7 @@ function renderList(body, kind) {
             ? item.text
             : formatPresetWriteText(item);
 
-        const btnInsert = mkUiBtn("插入", {
+        const btnInsert = mkUiIconBtn(iconHtml("insert"), {
             needTarget: true,
             title: "插入到光标位置（无光标则追加到末尾）",
             onClick: () => {
@@ -493,7 +490,7 @@ function renderList(body, kind) {
         });
         btnInsert.dataset.capTitle = btnInsert.title;
 
-        const btnReplace = mkUiBtn("替换", {
+        const btnReplace = mkUiIconBtn(iconHtml("replace"), {
             variant: "primary",
             needTarget: true,
             title: "替换输入框全部内容",
@@ -509,8 +506,9 @@ function renderList(body, kind) {
         actions.append(btnInsert, btnReplace);
 
         if (kind === "history" || (kind === "other" && !item.builtin)) {
-            const btnDel = mkUiBtn("删除", {
+            const btnDel = mkUiIconBtn(iconHtml("trash"), {
                 variant: "danger",
+                title: "删除",
                 onClick: () => {
                     if (!confirm(kind === "history" ? "删除这条历史记录？" : "删除这条预设？")) return;
                     if (kind === "history") removePromptHistory(item.id);
@@ -521,7 +519,13 @@ function renderList(body, kind) {
             actions.append(btnDel);
         }
 
-        row.append(meta, preview, actions);
+        meta.append(metaMain, actions);
+
+        const preview = document.createElement("pre");
+        preview.className = "cap-ui-code-preview";
+        preview.textContent = item.text;
+
+        row.append(meta, preview);
         body.appendChild(row);
     }
 

@@ -5,6 +5,9 @@ export const SVG_ATTRS =
 
 export const ICONS = {
     close: `<svg ${SVG_ATTRS}><path d="M4 4l8 8M12 4l-8 8"/></svg>`,
+    insert: `<svg ${SVG_ATTRS}><path d="M8 3v10M3 8h10"/><path d="M3 13.5h10"/></svg>`,
+    replace: `<svg ${SVG_ATTRS}><path d="M3.5 6.5A4.5 4.5 0 0 1 12 5.2"/><path d="M12 3v3h-3"/><path d="M12.5 9.5A4.5 4.5 0 0 1 4 10.8"/><path d="M4 13v-3h3"/></svg>`,
+    trash: `<svg ${SVG_ATTRS}><path d="M3.5 4.5h9M6 4.5V3.2h4v1.3M5.2 4.5l.5 9h4.6l.5-9"/><path d="M7 7v5M9 7v5"/></svg>`,
     play: `<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`,
     pause: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="3" width="4" height="18"/><rect x="15" y="3" width="4" height="18"/></svg>`,
     stop: `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16"/></svg>`,

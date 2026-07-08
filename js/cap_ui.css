@@ -240,12 +240,15 @@
     background: #2a2a2a;
     color: #ddd;
     border-radius: 4px;
-    padding: 4px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     line-height: 0;
+    flex-shrink: 0;
 }
 
 .cap-ui-icon-btn svg {
@@ -256,6 +259,32 @@
 
 .cap-ui-icon-btn:hover {
     background: #353535;
+}
+
+.cap-ui-icon-btn-primary {
+    border-color: #4a7fd4;
+    background: #2d4a7a;
+    color: #dce9ff;
+}
+
+.cap-ui-icon-btn-primary:hover {
+    background: #355a94;
+}
+
+.cap-ui-icon-btn-danger {
+    border-color: #8a3a3a;
+    color: #ffb0b0;
+}
+
+.cap-ui-icon-btn-danger:hover {
+    background: #4a2020;
+}
+
+.cap-ui-icon-btn:disabled,
+.cap-ui-icon-btn-primary:disabled,
+.cap-ui-icon-btn-danger:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .cap-ui-body {
@@ -275,10 +304,18 @@
 
 .cap-ui-list-meta {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 6px;
+}
+
+.cap-ui-list-meta-main {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .cap-ui-list-title {
@@ -293,7 +330,6 @@
 .cap-ui-list-sub {
     color: #888;
     font-size: 11px;
-    flex-shrink: 0;
 }
 
 .cap-ui-code-preview {
@@ -311,9 +347,10 @@
 
 .cap-ui-actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
+    flex-wrap: nowrap;
+    gap: 4px;
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .cap-ui-empty {

@@ -43,3 +43,21 @@ export function mkUiBtn(label, { variant = "", title = "", onClick, needTarget =
     if (onClick) b.addEventListener("click", onClick);
     return b;
 }
+
+/**
+ * @param {string} icon  SVG markup
+ * @param {{ variant?: "" | "primary" | "danger", title?: string, onClick?: () => void, needTarget?: boolean }} [opts]
+ */
+export function mkUiIconBtn(icon, { variant = "", title = "", onClick, needTarget = false } = {}) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = icon;
+    const cls = ["cap-ui-icon-btn"];
+    if (variant === "primary") cls.push("cap-ui-icon-btn-primary");
+    else if (variant === "danger") cls.push("cap-ui-icon-btn-danger");
+    b.className = cls.join(" ");
+    if (title) b.title = title;
+    if (needTarget) b.dataset.capNeedTarget = "1";
+    if (onClick) b.addEventListener("click", onClick);
+    return b;
+}
