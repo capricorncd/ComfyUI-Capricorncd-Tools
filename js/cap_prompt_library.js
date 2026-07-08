@@ -710,8 +710,19 @@ export function openPromptLibraryModal({ kind = "history", node = null } = {}) {
     updateModalTargetHint();
 }
 
+function collapseHeaderButtonWidget(w) {
+    if (!w) return;
+    w.serialize = false;
+    w.computedHeight = 0;
+    w.computeSize = () => [0, -4];
+    if (w.options) {
+        w.options.getMinHeight = () => 0;
+        w.options.getHeight = () => 0;
+    }
+}
+
 export function ensurePromptLibraryButtons(node) {
-    const BTN_NAME = "预设/历史记录";
+    const BTN_NAME = "历史 | 预设";
     // Drop legacy LiteGraph canvas buttons (split + old unified).
     const LEGACY_NAMES = new Set(["历史记录", "预设", BTN_NAME]);
     if (Array.isArray(node.widgets)) {
@@ -725,12 +736,17 @@ export function ensurePromptLibraryButtons(node) {
 
     const existing = node.widgets?.find((w) => w.name === "cap_plib_btn");
     if (existing) {
-        const btn = existing.element?.querySelector?.(".cap-ui-node-btn");
-        if (btn) {
-            btn.onclick = (e) => {
-                // Let the click bubble so LiteGraph can select this node.
-                open();
-            };
+        collapseHeaderButtonWidget(existing);
+        const btn = existing.element?.querySelector?.(".cap-ui-node-btn")
+            ?? existing.element;
+        if (btn?.tagName === "BUTTON" || btn?.classList?.contains("cap-ui-node-btn")) {
+            btn.onclick = () => open();
+        }
+        // Keep collapsed widget first so absolute top offset aligns near title.
+        const wi = node.widgets.indexOf(existing);
+        if (wi > 0) {
+            node.widgets.splice(wi, 1);
+            node.widgets.unshift(existing);
         }
         node._capPLibButtons = true;
         return;
@@ -745,6 +761,7 @@ export function ensurePromptLibraryButtons(node) {
     btn.type = "button";
     btn.className = "cap-ui-node-btn";
     btn.textContent = BTN_NAME;
+    btn.title = BTN_NAME;
     btn.addEventListener("click", () => {
         // Do not stopPropagation — allow canvas to select this node.
         open();
@@ -753,8 +770,14 @@ export function ensurePromptLibraryButtons(node) {
 
     const w = node.addDOMWidget("cap_plib_btn", "button", wrap, {
         serialize: false,
-        getMinHeight: () => 26,
-        getHeight: () => 26,
+        getMinHeight: () => 0,
+        getHeight: () => 0,
     });
-    w.serialize = false;
+    collapseHeaderButtonWidget(w);
+    // First DOM slot → absolute offset sits on the canvas title row.
+    const wi = node.widgets?.indexOf(w) ?? -1;
+    if (wi > 0) {
+        node.widgets.splice(wi, 1);
+        node.widgets.unshift(w);
+    }
 }

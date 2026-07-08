@@ -167,33 +167,41 @@
     font: inherit;
 }
 
-/* LiteGraph node DOM widget button (full width inside node) */
+/* Float into canvas-drawn node title (right side). Layout height is collapsed via computeSize. */
 .cap-ui-node-btn-wrap {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 2px 0;
+    position: absolute;
+    top: -30px;
+    left: 0;
+    width: auto;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    z-index: 20;
+    pointer-events: none;
 }
 
 .cap-ui-node-btn {
-    display: flex;
+    pointer-events: auto;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    width: auto;
     box-sizing: border-box;
     border: 1px solid #555;
     background: #2a2a2a;
     color: #ddd;
-    border-radius: 10px;
+    border-radius: 999px;
     padding: 4px 8px;
     cursor: pointer;
-    font: 11px/1 system-ui, sans-serif;
-    text-align: center;
+    font: 10px/1.1 system-ui, sans-serif;
+    white-space: nowrap;
 }
 
 .cap-ui-node-btn:hover {
-    background: #2a2a2a80;
-    border-color: #ccc;
-    color: #ccc;
+    background: #353535;
+    border-color: #8ab4ff;
+    color: #fff;
 }
 
 .cap-ui-btn:disabled,
