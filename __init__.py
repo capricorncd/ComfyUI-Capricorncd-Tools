@@ -39,6 +39,10 @@ from .cap_clear_directory import (
     NODE_CLASS_MAPPINGS as _CCD_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CCD_NAMES,
 )
+from .cap_size_settings import (
+    NODE_CLASS_MAPPINGS as _CSS_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CSS_NAMES,
+)
 from .timecode import (
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -61,6 +65,7 @@ NODE_CLASS_MAPPINGS = {
     **_CIB_CLASS,
     **_CLD_CLASS,
     **_CCD_CLASS,
+    **_CSS_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -73,6 +78,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CIB_NAMES,
     **_CLD_NAMES,
     **_CCD_NAMES,
+    **_CSS_NAMES,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

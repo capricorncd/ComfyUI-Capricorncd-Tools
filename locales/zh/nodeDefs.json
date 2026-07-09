@@ -152,5 +152,22 @@
       "directory":     { "name": "目录" },
       "deleted_count": { "name": "删除数量" }
     }
+  },
+
+  "CAP_SizeSettings": {
+    "display_name": "尺寸设置",
+    "inputs": {
+      "aspect_ratio":  { "name": "比例" },
+      "resolution":    { "name": "分辨率" },
+      "orientation":   { "name": "方向" },
+      "custom_width":  { "name": "宽度" },
+      "custom_height": { "name": "高度" },
+      "count":         { "name": "数量" }
+    },
+    "outputs": {
+      "width":  { "name": "宽度" },
+      "height": { "name": "高度" },
+      "count":  { "name": "数量" }
+    }
   }
 }

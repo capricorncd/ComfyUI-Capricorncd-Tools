@@ -204,6 +204,53 @@
     color: #fff;
 }
 
+/* Size settings: orientation switch above aspect ratio row */
+.cap-size-orient-wrap {
+    position: absolute;
+    top: -36px;
+    left: 5px;
+    width: auto;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    z-index: 20;
+    pointer-events: none;
+}
+
+.cap-size-orient-switch {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid #555;
+    background: #2a2a2a;
+    border-radius: 999px;
+    padding: 2px;
+    gap: 2px;
+}
+
+.cap-size-orient-opt {
+    pointer-events: auto;
+    border: none;
+    background: transparent;
+    color: #aaa;
+    border-radius: 999px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font: 10px/1.2 system-ui, sans-serif;
+    line-height: 1;
+    min-width: 28px;
+}
+
+.cap-size-orient-opt:hover {
+    color: #fff;
+}
+
+.cap-size-orient-opt.active {
+    background: #4a6fa5;
+    color: #fff;
+}
+
 .cap-ui-btn:disabled,
 .cap-ui-btn-primary:disabled,
 .cap-ui-btn-danger:disabled {

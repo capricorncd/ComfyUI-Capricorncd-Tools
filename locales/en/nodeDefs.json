@@ -152,5 +152,22 @@
       "directory":     { "name": "Directory" },
       "deleted_count": { "name": "Deleted Count" }
     }
+  },
+
+  "CAP_SizeSettings": {
+    "display_name": "Size Settings",
+    "inputs": {
+      "aspect_ratio":  { "name": "Aspect Ratio" },
+      "resolution":    { "name": "Resolution" },
+      "orientation":   { "name": "Orientation" },
+      "custom_width":  { "name": "Width" },
+      "custom_height": { "name": "Height" },
+      "count":         { "name": "Count" }
+    },
+    "outputs": {
+      "width":  { "name": "Width" },
+      "height": { "name": "Height" },
+      "count":  { "name": "Count" }
+    }
   }
 }
