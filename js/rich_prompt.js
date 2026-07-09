@@ -232,12 +232,23 @@ function removeRichPromptListeners(ta) {
         ta.removeEventListener("paste", ta._capRichOnPaste, true);
         ta._capRichOnPaste = null;
     }
+    if (ta._capRichOnChange) {
+        ta.removeEventListener("change", ta._capRichOnChange);
+        ta._capRichOnChange = null;
+    }
+    if (ta._capRichOnBlur) {
+        ta.removeEventListener("blur", ta._capRichOnBlur);
+        ta._capRichOnBlur = null;
+    }
 }
 
 function bindRichPromptListeners(ta) {
     removeRichPromptListeners(ta);
 
-    const onInput = () => updateRichPromptMirror(ta);
+    const onInput = () => {
+        syncPromptWidgetFromTextarea(ta);
+        updateRichPromptMirror(ta);
+    };
     const onScroll = () => {
         syncMirrorLayout(ta);
         if (!ta._capMirror) return;
@@ -256,6 +267,7 @@ function bindRichPromptListeners(ta) {
             const end = ta.selectionEnd;
             ta.value = ta.value.slice(0, s) + txt + ta.value.slice(end);
             ta.setSelectionRange(s + txt.length, s + txt.length);
+            syncPromptWidgetFromTextarea(ta);
             ta.dispatchEvent(new Event("input", { bubbles: true }));
         } finally {
             ta._capRichPasting = false;
@@ -265,9 +277,13 @@ function bindRichPromptListeners(ta) {
     ta._capRichOnInput = onInput;
     ta._capRichOnScroll = onScroll;
     ta._capRichOnPaste = onPaste;
+    ta._capRichOnChange = onInput;
+    ta._capRichOnBlur = onInput;
     ta.addEventListener("input", onInput);
     ta.addEventListener("scroll", onScroll);
     ta.addEventListener("paste", onPaste, true);
+    ta.addEventListener("change", onInput);
+    ta.addEventListener("blur", onInput);
 }
 
 export function detachRichPromptHandler(ta) {
@@ -372,6 +388,23 @@ export function resolvePromptTextarea(widget) {
     return direct?.querySelector?.("textarea.comfy-multiline-input")
         ?? direct?.querySelector?.("textarea")
         ?? null;
+}
+
+export function syncPromptWidgetFromTextarea(ta) {
+    const widget = ta?._capBoundWidget;
+    if (!widget || !("value" in widget)) return;
+    if (widget.value !== ta.value) widget.value = ta.value;
+}
+
+export function syncTextareaFromPromptWidget(widget) {
+    const ta = resolvePromptTextarea(widget);
+    if (!ta || widget?.value == null) return;
+    const saved = widget.value;
+    if (typeof saved !== "string") return;
+    if (ta.value !== saved) {
+        ta.value = saved;
+        updateRichPromptMirror(ta);
+    }
 }
 
 export function bindRichPromptWidget(widget, { mode = "widget" } = {}) {

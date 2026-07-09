@@ -170,7 +170,7 @@
 /* Float into canvas-drawn node title (right side). Layout height is collapsed via computeSize. */
 .cap-ui-node-btn-wrap {
     position: absolute;
-    top: -30px;
+    top: -249px;
     left: 0;
     width: auto;
     height: 0;
@@ -179,6 +179,12 @@
     overflow: visible;
     z-index: 20;
     pointer-events: none;
+}
+
+.cap-ui-node-btn-wrap--row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .cap-ui-node-btn {
@@ -207,7 +213,7 @@
 /* Size settings: orientation switch above aspect ratio row */
 .cap-size-orient-wrap {
     position: absolute;
-    top: -36px;
+    top: -156px;
     left: 5px;
     width: auto;
     height: 0;

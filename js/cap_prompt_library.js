@@ -5,6 +5,10 @@ import { resolvePromptTextarea, updateRichPromptMirror } from "./rich_prompt.js"
 import { iconHtml } from "./cap_icons.js";
 import { ensureCapUiCss, mkUiBtn, mkUiIconBtn } from "./cap_ui.js";
 import {
+    appendDomWidgetLast,
+    hoistNodeOverlay,
+} from "./cap_widget_persist.js";
+import {
     PRESET_CATEGORIES,
     formatPresetWriteText,
     getBuiltinPresets,
@@ -717,6 +721,7 @@ export function openPromptLibraryModal({ kind = "history", node = null } = {}) {
 function collapseHeaderButtonWidget(w) {
     if (!w) return;
     w.serialize = false;
+    w.serializeValue = () => undefined;
     w.computedHeight = 0;
     w.computeSize = () => [0, -4];
     if (w.options) {
@@ -725,10 +730,60 @@ function collapseHeaderButtonWidget(w) {
     }
 }
 
+function savePromptHistoryFromNode(node) {
+    selectGraphNode(node);
+    const widget = getPromptWidget(node);
+    const ta = resolvePromptTextarea(widget);
+    const text = ta?.value ?? widget?.value ?? "";
+    if (!normalizeText(text).trim()) {
+        alert("当前提示词为空");
+        return false;
+    }
+    addPromptHistory(text);
+    if (_modal && _modalKind === "history") {
+        const body = _modal.querySelector(".cap-ui-list-body");
+        if (body) renderList(body, "history");
+    }
+    return true;
+}
+
+function bindNodeHeaderButtons(wrap, node, open) {
+    if (!wrap) return;
+    wrap.classList.add("cap-ui-node-btn-wrap--row");
+
+    let historyBtn = wrap.querySelector(".cap-ui-node-btn-history");
+    if (!historyBtn) {
+        historyBtn = wrap.querySelector(".cap-ui-node-btn:not(.cap-ui-node-btn-save)");
+    }
+    if (!historyBtn) {
+        historyBtn = document.createElement("button");
+        historyBtn.type = "button";
+        historyBtn.className = "cap-ui-node-btn cap-ui-node-btn-history";
+        historyBtn.textContent = "历史 | 预设";
+        wrap.insertBefore(historyBtn, wrap.firstChild);
+    } else {
+        historyBtn.classList.add("cap-ui-node-btn-history");
+        if (!historyBtn.textContent) historyBtn.textContent = "历史 | 预设";
+    }
+    historyBtn.title = "历史 | 预设";
+    historyBtn.onclick = () => open();
+
+    let saveBtn = wrap.querySelector(".cap-ui-node-btn-save");
+    if (!saveBtn) {
+        saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "cap-ui-node-btn cap-ui-node-btn-save";
+        saveBtn.textContent = "保存";
+        wrap.appendChild(saveBtn);
+    }
+    saveBtn.title = "保存当前提示词到历史记录";
+    saveBtn.onclick = () => savePromptHistoryFromNode(node);
+}
+
 export function ensurePromptLibraryButtons(node) {
     const BTN_NAME = "历史 | 预设";
     // Drop legacy LiteGraph canvas buttons (split + old unified).
-    const LEGACY_NAMES = new Set(["历史记录", "预设", BTN_NAME]);
+    const LEGACY_NAMES = new Set(["历史记录", "预设", BTN_NAME, "保存"]);
     if (Array.isArray(node.widgets)) {
         node.widgets = node.widgets.filter((w) => !(w.type === "button" && LEGACY_NAMES.has(w.name)));
     }
@@ -741,17 +796,9 @@ export function ensurePromptLibraryButtons(node) {
     const existing = node.widgets?.find((w) => w.name === "cap_plib_btn");
     if (existing) {
         collapseHeaderButtonWidget(existing);
-        const btn = existing.element?.querySelector?.(".cap-ui-node-btn")
-            ?? existing.element;
-        if (btn?.tagName === "BUTTON" || btn?.classList?.contains("cap-ui-node-btn")) {
-            btn.onclick = () => open();
-        }
-        // Keep collapsed widget first so absolute top offset aligns near title.
-        const wi = node.widgets.indexOf(existing);
-        if (wi > 0) {
-            node.widgets.splice(wi, 1);
-            node.widgets.unshift(existing);
-        }
+        bindNodeHeaderButtons(existing.element, node, open);
+        appendDomWidgetLast(node, existing);
+        hoistNodeOverlay(node, existing.element);
         node._capPLibButtons = true;
         return;
     }
@@ -761,16 +808,7 @@ export function ensurePromptLibraryButtons(node) {
 
     const wrap = document.createElement("div");
     wrap.className = "cap-ui-node-btn-wrap";
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "cap-ui-node-btn";
-    btn.textContent = BTN_NAME;
-    btn.title = BTN_NAME;
-    btn.addEventListener("click", () => {
-        // Do not stopPropagation — allow canvas to select this node.
-        open();
-    });
-    wrap.appendChild(btn);
+    bindNodeHeaderButtons(wrap, node, open);
 
     const w = node.addDOMWidget("cap_plib_btn", "button", wrap, {
         serialize: false,
@@ -778,10 +816,6 @@ export function ensurePromptLibraryButtons(node) {
         getHeight: () => 0,
     });
     collapseHeaderButtonWidget(w);
-    // First DOM slot → absolute offset sits on the canvas title row.
-    const wi = node.widgets?.indexOf(w) ?? -1;
-    if (wi > 0) {
-        node.widgets.splice(wi, 1);
-        node.widgets.unshift(w);
-    }
+    appendDomWidgetLast(node, w);
+    hoistNodeOverlay(node, wrap);
 }

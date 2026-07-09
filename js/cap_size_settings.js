@@ -1,9 +1,24 @@
 import { app } from "../../scripts/app.js";
 import { ensureCapUiCss } from "./cap_ui.js";
+import {
+    appendDomWidgetLast,
+    applyWidgetValuesByNames,
+    captureWidgetValues,
+    positionOverlayAboveWidget,
+    restoreWidgetValues,
+} from "./cap_widget_persist.js";
 
 const NODE_CLASS = "CAP_SizeSettings";
 const ORIENT_DOM = "cap_size_orient";
 const DEFAULT_ORIENTATION = "竖屏";
+const WIDGET_NAMES = [
+    "aspect_ratio",
+    "resolution",
+    "orientation",
+    "custom_width",
+    "custom_height",
+    "count",
+];
 
 const RATIO_PARTS = {
     "1:1": [1, 1],
@@ -71,6 +86,7 @@ function sizeFromRatio(aspectRatio, resolution, orientation) {
 function collapseFloatingWidget(w) {
     if (!w) return;
     w.serialize = false;
+    w.serializeValue = () => undefined;
     w.computedHeight = 0;
     w.computeSize = () => [0, -4];
     if (w.options) {
@@ -102,8 +118,29 @@ function chainCallback(widget, fn) {
 }
 
 function setWidgetValue(widget, value) {
-    if (!widget || widget.value === value) return;
+    if (!widget) return;
+    if (widget.value === value) return;
     widget.value = value;
+}
+
+function hasValidSizeWidgets(node) {
+    const w = getWidget(node, "custom_width");
+    const h = getWidget(node, "custom_height");
+    const c = getWidget(node, "count");
+    return Number.isFinite(Number(w?.value))
+        && Number.isFinite(Number(h?.value))
+        && Number.isFinite(Number(c?.value))
+        && Number(c.value) <= 256;
+}
+
+function repairLegacySizeValues(node, info) {
+    const values = info?.widgets_values;
+    if (!Array.isArray(values) || hasValidSizeWidgets(node)) return;
+    if (values.length >= 7) {
+        applyWidgetValuesByNames(node, WIDGET_NAMES, values.slice(1));
+        if (hasValidSizeWidgets(node)) return;
+    }
+    applyWidgetValuesByNames(node, WIDGET_NAMES, values);
 }
 
 function ensureDefaultOrientation(node) {
@@ -141,15 +178,11 @@ function setOrientation(node, orientation) {
     applyComputedSize(node);
 }
 
-function moveWidgetBefore(node, widget, beforeName) {
-    if (!widget || !node.widgets) return;
-    const target = getWidget(node, beforeName);
-    if (!target) return;
-    const cur = node.widgets.indexOf(widget);
-    const idx = node.widgets.indexOf(target);
-    if (cur < 0 || idx < 0 || cur === idx) return;
-    node.widgets.splice(cur, 1);
-    node.widgets.splice(idx, 0, widget);
+function layoutOrientSwitch(node) {
+    const domWidget = getWidget(node, ORIENT_DOM);
+    const wrap = node._capSizeOrientWrap ?? domWidget?.element;
+    if (!wrap) return;
+    positionOverlayAboveWidget(node, wrap, "aspect_ratio", { offsetY: -26, left: 6 });
 }
 
 function ensureOrientationSwitch(node) {
@@ -195,9 +228,10 @@ function ensureOrientationSwitch(node) {
         collapseFloatingWidget(domWidget);
     }
 
-    moveWidgetBefore(node, domWidget, "aspect_ratio");
+    appendDomWidgetLast(node, domWidget);
     ensureDefaultOrientation(node);
     updateOrientationSwitch(node, getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION);
+    requestAnimationFrame(() => layoutOrientSwitch(node));
 }
 
 function hookOptionCallbacks(node) {
@@ -212,20 +246,31 @@ function hookOptionCallbacks(node) {
     });
 }
 
-function setupNode(node, { initialSync = false } = {}) {
+function setupNode(node, info = null, { initialSync = false } = {}) {
     const aspectWidget = getWidget(node, "aspect_ratio");
     if (!aspectWidget) return false;
+    if (info) repairLegacySizeValues(node, info);
+    const snapshot = captureWidgetValues(node);
     ensureDefaultOrientation(node);
     ensureOrientationSwitch(node);
+    restoreWidgetValues(node, snapshot);
     hookOptionCallbacks(node);
-    if (initialSync) applyComputedSize(node);
-    else updateOrientationSwitch(node, getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION);
+    if (initialSync) {
+        applyComputedSize(node);
+    } else if (!hasValidSizeWidgets(node)) {
+        applyComputedSize(node);
+    } else {
+        updateOrientationSwitch(node, getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION);
+    }
+    layoutOrientSwitch(node);
     return true;
 }
 
-function trySetupWhenReady(node, { initialSync = false, tries = 0 } = {}) {
-    if (setupNode(node, { initialSync })) return;
-    if (tries < 40) setTimeout(() => trySetupWhenReady(node, { initialSync, tries: tries + 1 }), 50);
+function trySetupWhenReady(node, info = null, { initialSync = false, tries = 0 } = {}) {
+    if (setupNode(node, info, { initialSync })) return;
+    if (tries < 40) {
+        setTimeout(() => trySetupWhenReady(node, info, { initialSync, tries: tries + 1 }), 50);
+    }
 }
 
 app.registerExtension({
@@ -235,15 +280,22 @@ app.registerExtension({
         if (nodeData.name !== NODE_CLASS) return;
 
         const configure = nodeType.prototype.configure;
-        nodeType.prototype.configure = function () {
+        nodeType.prototype.configure = function (info) {
             const result = configure?.apply(this, arguments);
-            trySetupWhenReady(this);
+            trySetupWhenReady(this, info);
             return result;
+        };
+
+        const onAfterGraphConfigured = nodeType.prototype.onAfterGraphConfigured;
+        nodeType.prototype.onAfterGraphConfigured = function () {
+            onAfterGraphConfigured?.apply(this, arguments);
+            trySetupWhenReady(this);
         };
     },
 
     nodeCreated(node) {
         if (node.comfyClass !== NODE_CLASS) return;
-        trySetupWhenReady(node, { initialSync: true });
+        if (app.configuringGraph) return;
+        trySetupWhenReady(node, null, { initialSync: true });
     },
 });
