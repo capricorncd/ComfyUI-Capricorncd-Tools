@@ -71,13 +71,17 @@ function setupNodeUi(node, info = null) {
     ensurePromptLibraryButtons(node);
     restoreWidgetValues(node, snapshot);
     ensureRichBind(prompt);
+    ensurePromptLibraryButtons(node);
 }
 
 function trySyncPromptDisplay(node, tries = 0) {
     const prompt = getPromptWidget(node);
     if (!prompt) return;
-    if (ensureRichBind(prompt)) return;
-    if (tries < 40) setTimeout(() => trySyncPromptDisplay(node, tries + 1), 50);
+    if (ensureRichBind(prompt)) {
+        ensurePromptLibraryButtons(node);
+        return;
+    }
+    if (tries < 80) setTimeout(() => trySyncPromptDisplay(node, tries + 1), 50);
 }
 
 function recordHistoryFromNode(node) {
@@ -99,7 +103,20 @@ app.registerExtension({
                 detachRichPromptHandler(prompt._capBoundTa);
                 prompt._capBoundTa = null;
             }
+            this._capPlibBtnWrap?.remove?.();
+            this._capPlibBtnWrap = null;
+            for (const fn of this._capOverlayCleanups ?? []) fn();
+            this._capOverlayCleanups = [];
             return onRemoved?.apply(this, arguments);
+        };
+
+        const onTitleButtonClick = nodeType.prototype.onTitleButtonClick;
+        nodeType.prototype.onTitleButtonClick = function (button, canvas) {
+            if (button?.name === "cap_save" || button?.name === "cap_plib") {
+                button.onClick?.();
+                return;
+            }
+            return onTitleButtonClick?.apply(this, arguments);
         };
 
         const configure = nodeType.prototype.configure;

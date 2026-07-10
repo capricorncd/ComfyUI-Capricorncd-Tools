@@ -5,8 +5,12 @@ import { resolvePromptTextarea, updateRichPromptMirror } from "./rich_prompt.js"
 import { iconHtml } from "./cap_icons.js";
 import { ensureCapUiCss, mkUiBtn, mkUiIconBtn } from "./cap_ui.js";
 import {
-    appendDomWidgetLast,
     hoistNodeOverlay,
+    positionOverlayFixedToHeader,
+    positionOverlayInNodeHeader,
+    positionOverlayOnCanvasTitle,
+    watchCanvasTitleOverlay,
+    watchNodeOverlayAnchor,
 } from "./cap_widget_persist.js";
 import {
     PRESET_CATEGORIES,
@@ -718,16 +722,111 @@ export function openPromptLibraryModal({ kind = "history", node = null } = {}) {
     updateModalTargetHint();
 }
 
-function collapseHeaderButtonWidget(w) {
-    if (!w) return;
-    w.serialize = false;
-    w.serializeValue = () => undefined;
-    w.computedHeight = 0;
-    w.computeSize = () => [0, -4];
-    if (w.options) {
-        w.options.getMinHeight = () => 0;
-        w.options.getHeight = () => 0;
+function clearCanvasTitleButtons(node) {
+    if (!Array.isArray(node.title_buttons)) return;
+    const had = node.title_buttons.some(
+        (b) => b.name === "cap_plib" || b.name === "cap_save",
+    );
+    node.title_buttons = node.title_buttons.filter(
+        (b) => b.name !== "cap_plib" && b.name !== "cap_save",
+    );
+    if (had) node.setDirtyCanvas?.(true, true);
+}
+
+function findVueNodeEl(node) {
+    if (node?.id == null) return null;
+    return document.querySelector(`[data-node-id="${node.id}"]`);
+}
+
+function removeLegacyPromptHeaderUi(node) {
+    const LEGACY_NAMES = new Set(["历史记录", "预设", "历史 | 预设", "保存"]);
+    if (Array.isArray(node.widgets)) {
+        node.widgets = node.widgets.filter((w) => {
+            if (w.name === "cap_plib_btn") {
+                w.element?.remove?.();
+                return false;
+            }
+            return !(w.type === "button" && LEGACY_NAMES.has(w.name));
+        });
     }
+}
+
+function bindPromptHeaderButtons(wrap, node, open) {
+    if (!wrap) return;
+    wrap.classList.add("cap-ui-node-btn-wrap--row");
+
+    let historyBtn = wrap.querySelector(".cap-ui-node-btn-history");
+    if (!historyBtn) {
+        historyBtn = document.createElement("button");
+        historyBtn.type = "button";
+        historyBtn.className = "cap-ui-node-btn cap-ui-node-btn-history";
+        historyBtn.textContent = "历史 | 预设";
+        wrap.appendChild(historyBtn);
+    }
+    historyBtn.title = "历史 | 预设";
+    historyBtn.onmousedown = (e) => e.stopPropagation();
+    historyBtn.onclick = (e) => {
+        e.stopPropagation();
+        open();
+    };
+
+    let saveBtn = wrap.querySelector(".cap-ui-node-btn-save");
+    if (!saveBtn) {
+        saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "cap-ui-node-btn cap-ui-node-btn-save";
+        saveBtn.textContent = "保存";
+        wrap.appendChild(saveBtn);
+    }
+    saveBtn.title = "保存当前提示词到历史记录";
+    saveBtn.onmousedown = (e) => e.stopPropagation();
+    saveBtn.onclick = (e) => {
+        e.stopPropagation();
+        savePromptHistoryFromNode(node);
+    };
+}
+
+function ensurePromptHeaderOverlay(node, open, tries = 0) {
+    ensureCapUiCss();
+    let wrap = node._capPlibBtnWrap;
+    if (!wrap) {
+        wrap = document.createElement("div");
+        wrap.className = "cap-ui-node-btn-wrap cap-ui-node-btn-wrap--row";
+        node._capPlibBtnWrap = wrap;
+    }
+    bindPromptHeaderButtons(wrap, node, open);
+
+    const vueEl = findVueNodeEl(node);
+    const anchor = () => {
+        if (vueEl || findVueNodeEl(node)) {
+            return positionOverlayInNodeHeader(node, wrap)
+                ?? positionOverlayFixedToHeader(node, wrap);
+        }
+        return positionOverlayOnCanvasTitle(node, wrap)
+            ?? hoistNodeOverlay(node, wrap, { top: 4, left: 6 });
+    };
+    const host = anchor();
+    if (!host) {
+        if (tries < 80) setTimeout(() => ensurePromptHeaderOverlay(node, open, tries + 1), 50);
+        return;
+    }
+    if (vueEl || findVueNodeEl(node)) {
+        watchNodeOverlayAnchor(node, wrap, anchor, "plib");
+    } else {
+        watchCanvasTitleOverlay(node, wrap, anchor, "plib");
+    }
+}
+
+export function ensurePromptLibraryButtons(node) {
+    removeLegacyPromptHeaderUi(node);
+    clearCanvasTitleButtons(node);
+
+    const open = () => {
+        selectGraphNode(node);
+        openPromptLibraryModal({ kind: "history", node });
+    };
+
+    ensurePromptHeaderOverlay(node, open);
 }
 
 function savePromptHistoryFromNode(node) {
@@ -745,77 +844,4 @@ function savePromptHistoryFromNode(node) {
         if (body) renderList(body, "history");
     }
     return true;
-}
-
-function bindNodeHeaderButtons(wrap, node, open) {
-    if (!wrap) return;
-    wrap.classList.add("cap-ui-node-btn-wrap--row");
-
-    let historyBtn = wrap.querySelector(".cap-ui-node-btn-history");
-    if (!historyBtn) {
-        historyBtn = wrap.querySelector(".cap-ui-node-btn:not(.cap-ui-node-btn-save)");
-    }
-    if (!historyBtn) {
-        historyBtn = document.createElement("button");
-        historyBtn.type = "button";
-        historyBtn.className = "cap-ui-node-btn cap-ui-node-btn-history";
-        historyBtn.textContent = "历史 | 预设";
-        wrap.insertBefore(historyBtn, wrap.firstChild);
-    } else {
-        historyBtn.classList.add("cap-ui-node-btn-history");
-        if (!historyBtn.textContent) historyBtn.textContent = "历史 | 预设";
-    }
-    historyBtn.title = "历史 | 预设";
-    historyBtn.onclick = () => open();
-
-    let saveBtn = wrap.querySelector(".cap-ui-node-btn-save");
-    if (!saveBtn) {
-        saveBtn = document.createElement("button");
-        saveBtn.type = "button";
-        saveBtn.className = "cap-ui-node-btn cap-ui-node-btn-save";
-        saveBtn.textContent = "保存";
-        wrap.appendChild(saveBtn);
-    }
-    saveBtn.title = "保存当前提示词到历史记录";
-    saveBtn.onclick = () => savePromptHistoryFromNode(node);
-}
-
-export function ensurePromptLibraryButtons(node) {
-    const BTN_NAME = "历史 | 预设";
-    // Drop legacy LiteGraph canvas buttons (split + old unified).
-    const LEGACY_NAMES = new Set(["历史记录", "预设", BTN_NAME, "保存"]);
-    if (Array.isArray(node.widgets)) {
-        node.widgets = node.widgets.filter((w) => !(w.type === "button" && LEGACY_NAMES.has(w.name)));
-    }
-
-    const open = () => {
-        selectGraphNode(node);
-        openPromptLibraryModal({ kind: "history", node });
-    };
-
-    const existing = node.widgets?.find((w) => w.name === "cap_plib_btn");
-    if (existing) {
-        collapseHeaderButtonWidget(existing);
-        bindNodeHeaderButtons(existing.element, node, open);
-        appendDomWidgetLast(node, existing);
-        hoistNodeOverlay(node, existing.element);
-        node._capPLibButtons = true;
-        return;
-    }
-
-    ensureCapUiCss();
-    node._capPLibButtons = true;
-
-    const wrap = document.createElement("div");
-    wrap.className = "cap-ui-node-btn-wrap";
-    bindNodeHeaderButtons(wrap, node, open);
-
-    const w = node.addDOMWidget("cap_plib_btn", "button", wrap, {
-        serialize: false,
-        getMinHeight: () => 0,
-        getHeight: () => 0,
-    });
-    collapseHeaderButtonWidget(w);
-    appendDomWidgetLast(node, w);
-    hoistNodeOverlay(node, wrap);
 }

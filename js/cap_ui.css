@@ -167,10 +167,10 @@
     font: inherit;
 }
 
-/* Float into canvas-drawn node title (right side). Layout height is collapsed via computeSize. */
+/* Collapsed DOM widget fallback (before hoist). */
 .cap-ui-node-btn-wrap {
     position: absolute;
-    top: -249px;
+    top: -17px;
     left: 0;
     width: auto;
     height: 0;
@@ -179,6 +179,30 @@
     overflow: visible;
     z-index: 20;
     pointer-events: none;
+}
+
+/* Pinned to node card top-left; survives node height changes. */
+.cap-ui-node-btn-wrap.cap-ui-node-btn-wrap--hoisted {
+    top: 4px;
+    left: 6px;
+}
+
+/* Pinned to vue node header (top-right), above canvas layers. */
+.cap-ui-node-btn-wrap.cap-ui-node-btn-wrap--header {
+    top: 0;
+    right: 40px;
+    left: auto;
+    height: auto;
+    display: inline-flex;
+    align-items: center;
+}
+
+.cap-ui-node-btn-wrap.cap-ui-node-btn-wrap--fixed {
+    right: auto;
+}
+
+.cap-ui-node-btn-wrap.cap-ui-node-btn-wrap--canvas {
+    right: auto;
 }
 
 .cap-ui-node-btn-wrap--row {
