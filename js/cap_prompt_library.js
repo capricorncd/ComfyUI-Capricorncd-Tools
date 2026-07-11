@@ -14,20 +14,32 @@ import {
 } from "./cap_widget_persist.js";
 import {
     PRESET_CATEGORIES,
+    PRESET_FILTER_ORDER,
     formatPresetWriteText,
     getBuiltinPresets,
 } from "./cap_prompt_presets.js";
 
 const STORAGE_HISTORY = "capricorncd.rich_prompt.history";
 const STORAGE_PRESETS = "capricorncd.rich_prompt.presets";
+const STORAGE_HIDDEN_BUILTIN = "capricorncd.rich_prompt.hidden_builtin_presets";
+const STORAGE_PRESET_META = "capricorncd.rich_prompt.preset_meta";
 const HISTORY_MAX = 80;
 const NODE_CLASS = "CAP_RichPromptInput";
-const PRESET_KINDS = new Set(["style", "quality", "other"]);
+const HISTORY_STAR_FILTERS = [
+    { id: "all", label: "全部" },
+    { id: "1", label: "★" },
+    { id: "2", label: "★★" },
+    { id: "3", label: "★★★" },
+    { id: "4", label: "★★★★" },
+    { id: "5", label: "★★★★★" },
+];
+const PRESET_CAT_FILTERS = [
+    { id: "all", label: "全部" },
+    ...PRESET_FILTER_ORDER.map((id) => ({ id, label: PRESET_CATEGORIES[id].label })),
+];
 const EMPTY_LABEL = {
     history: "暂无历史记录",
-    style: "暂无风格预设",
-    quality: "暂无质量预设",
-    other: "暂无其他预设",
+    preset: "暂无预设",
 };
 const NO_TARGET_MSG = "请选中提示词节点后再操作";
 
@@ -77,25 +89,95 @@ export function getPromptPresets() {
 }
 
 export function getPresetsForKind(kind) {
-    if (kind === "style" || kind === "quality") {
-        return getBuiltinPresets(kind);
+    return getAllPresets();
+}
+
+function stripLeadingHash(text) {
+    return String(text ?? "").trim().replace(/^#+/, "");
+}
+
+function loadPresetMeta() {
+    try {
+        const raw = localStorage.getItem(STORAGE_PRESET_META);
+        if (!raw) return {};
+        const data = JSON.parse(raw);
+        return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+    } catch {
+        return {};
     }
-    if (kind === "other") {
-        const user = getPromptPresets().map((item) => ({
-            ...item,
-            category: "other",
-            builtin: false,
-            title: item.name?.startsWith("#") ? item.name : `#${item.name || previewText(item.text, 40)}`,
-        }));
-        return [...getBuiltinPresets("other"), ...user];
+}
+
+function savePresetMeta(meta) {
+    localStorage.setItem(STORAGE_PRESET_META, JSON.stringify(meta));
+}
+
+function updateBuiltinPresetMeta(id, patch) {
+    const meta = loadPresetMeta();
+    const cur = { ...(meta[id] || {}) };
+    if ("title" in patch) {
+        const trimmed = String(patch.title ?? "").trim();
+        if (trimmed) cur.title = trimmed;
+        else delete cur.title;
     }
-    return [];
+    if ("stars" in patch) {
+        const n = Number(patch.stars);
+        if (Number.isFinite(n) && n >= 1 && n <= 5) cur.stars = n;
+        else delete cur.stars;
+    }
+    if (!cur.title && !cur.stars) delete meta[id];
+    else meta[id] = cur;
+    savePresetMeta(meta);
+}
+
+function getHiddenBuiltinPresetIds() {
+    const list = loadList(STORAGE_HIDDEN_BUILTIN);
+    return new Set(list.filter((id) => typeof id === "string" && id.startsWith("builtin_")));
+}
+
+function hideBuiltinPreset(id) {
+    const hidden = getHiddenBuiltinPresetIds();
+    hidden.add(id);
+    saveList(STORAGE_HIDDEN_BUILTIN, [...hidden]);
+}
+
+function getAllPresets() {
+    const hidden = getHiddenBuiltinPresetIds();
+    const meta = loadPresetMeta();
+    const user = getPromptPresets().map((item) => ({
+        ...item,
+        name: stripLeadingHash(item.name),
+        category: item.category || "other",
+        builtin: false,
+    }));
+    const builtin = PRESET_FILTER_ORDER.flatMap((id) => getBuiltinPresets(id))
+        .filter((item) => !hidden.has(item.id))
+        .map((item) => {
+            const extra = meta[item.id] || {};
+            return {
+                ...item,
+                title: extra.title,
+                stars: extra.stars,
+            };
+        });
+    return [...builtin, ...user];
+}
+
+function filterPresetsByCategory(list, categoryId) {
+    if (!categoryId || categoryId === "all") return list;
+    return list.filter((item) => item.category === categoryId);
+}
+
+function filterHistoryByStars(list, starFilter) {
+    if (!starFilter || starFilter === "all") return list;
+    const stars = parseInt(starFilter, 10);
+    if (!Number.isFinite(stars)) return list;
+    return list.filter((item) => item.stars === stars);
 }
 
 function normalizeKind(kind) {
     if (kind === "history") return "history";
-    if (PRESET_KINDS.has(kind)) return kind;
-    if (kind === "presets") return "other";
+    if (kind === "preset" || kind === "presets") return "preset";
+    if (kind === "style" || kind === "quality" || kind === "other") return "preset";
     return "history";
 }
 
@@ -115,17 +197,63 @@ export function removePromptHistory(id) {
     return list;
 }
 
+export function updatePromptHistoryTitle(id, title) {
+    const list = getPromptHistory();
+    const item = list.find((x) => x.id === id);
+    if (!item) return list;
+    const trimmed = String(title ?? "").trim();
+    item.title = trimmed || undefined;
+    saveList(STORAGE_HISTORY, list);
+    return list;
+}
+
+export function updatePromptHistoryStars(id, stars) {
+    const list = getPromptHistory();
+    const item = list.find((x) => x.id === id);
+    if (!item) return list;
+    const n = Number(stars);
+    item.stars = Number.isFinite(n) && n >= 1 && n <= 5 ? n : undefined;
+    saveList(STORAGE_HISTORY, list);
+    return list;
+}
+
 export function clearPromptHistory() {
     saveList(STORAGE_HISTORY, []);
     return [];
 }
 
-export function addPromptPreset(text, name = "") {
+export function addPromptPreset(text, name = "", category = "other") {
     const value = normalizeText(text);
     if (!value.trim()) return getPromptPresets();
-    const title = String(name || "").trim() || previewText(value, 40);
+    const presetName = stripLeadingHash(String(name || "").trim()) || previewText(value, 40);
     const list = getPromptPresets();
-    list.unshift({ id: uid(), name: title, text: value, ts: Date.now() });
+    list.unshift({
+        id: uid(),
+        name: presetName,
+        text: value,
+        ts: Date.now(),
+        category: PRESET_CATEGORIES[category] ? category : "other",
+    });
+    saveList(STORAGE_PRESETS, list);
+    return list;
+}
+
+export function updatePromptPresetTitle(id, title) {
+    const list = getPromptPresets();
+    const item = list.find((x) => x.id === id);
+    if (!item) return list;
+    const trimmed = String(title ?? "").trim();
+    item.title = trimmed || undefined;
+    saveList(STORAGE_PRESETS, list);
+    return list;
+}
+
+export function updatePromptPresetStars(id, stars) {
+    const list = getPromptPresets();
+    const item = list.find((x) => x.id === id);
+    if (!item) return list;
+    const n = Number(stars);
+    item.stars = Number.isFinite(n) && n >= 1 && n <= 5 ? n : undefined;
     saveList(STORAGE_PRESETS, list);
     return list;
 }
@@ -251,6 +379,8 @@ function pickJsonFile() {
 
 let _modal = null;
 let _modalKind = "history";
+let _modalCatFilter = "all";
+let _modalStarFilter = "all";
 /** @type {{ x: number, y: number } | null} */
 let _modalPos = null;
 let _selectionWatch = null;
@@ -264,6 +394,9 @@ function closePromptLibraryModal() {
     _modal?.remove();
     _modal = null;
     _modalKind = "history";
+    _modalCatFilter = "all";
+    _modalStarFilter = "all";
+    _modalPos = null;
 }
 
 function getSelectedNodes() {
@@ -375,11 +508,13 @@ function startSelectionWatch() {
     _selectionWatch = setInterval(tick, 250);
 }
 
+const MODAL_RIGHT_MARGIN_RATIO = 0.1;
+
 function clampDialogPos(dialog, x, y) {
     const w = dialog.offsetWidth || 720;
     const h = dialog.offsetHeight || 240;
-    const maxX = Math.max(0, window.innerWidth - Math.min(w, 80));
-    const maxY = Math.max(0, window.innerHeight - 48);
+    const maxX = Math.max(0, window.innerWidth - w);
+    const maxY = Math.max(0, window.innerHeight - h);
     return {
         x: Math.min(Math.max(0, x), maxX),
         y: Math.min(Math.max(0, y), maxY),
@@ -396,8 +531,9 @@ function placeDialog(dialog, pos) {
 function defaultDialogPos(dialog) {
     const w = dialog.offsetWidth || Math.min(720, window.innerWidth * 0.96);
     const h = dialog.offsetHeight || 360;
+    const rightMargin = window.innerWidth * MODAL_RIGHT_MARGIN_RATIO;
     return {
-        x: Math.max(16, Math.round((window.innerWidth - w) / 2)),
+        x: Math.max(0, window.innerWidth - w - rightMargin),
         y: Math.max(16, Math.round((window.innerHeight - h) / 2)),
     };
 }
@@ -444,14 +580,133 @@ function syncWidgetFromTa(target = resolveActiveTarget()) {
     }
 }
 
+function ensureListLayout(body) {
+    let catHost = body.querySelector(".cap-ui-cat-host");
+    let scroll = body.querySelector(".cap-ui-list-scroll");
+    if (!catHost || !scroll) {
+        body.replaceChildren();
+        catHost = document.createElement("div");
+        catHost.className = "cap-ui-cat-host";
+        scroll = document.createElement("div");
+        scroll.className = "cap-ui-list-scroll";
+        body.append(catHost, scroll);
+    }
+    return { catHost, scroll };
+}
+
+function resolveListBody(host) {
+    return host?.closest?.(".cap-ui-body") ?? _modal?.querySelector?.(".cap-ui-body") ?? null;
+}
+
+function renderFilterBar(host, kind, filters, activeId, onToggle) {
+    const bar = document.createElement("div");
+    bar.className = "cap-ui-cat-bar";
+    for (const { id, label } of filters) {
+        const tag = document.createElement("button");
+        tag.type = "button";
+        tag.className = "cap-ui-cat-tag";
+        tag.textContent = label;
+        tag.dataset.filterId = id;
+        if (activeId === id) tag.classList.add("active");
+        tag.addEventListener("click", () => {
+            onToggle(id);
+            const listBody = resolveListBody(host);
+            if (listBody) renderList(listBody, kind);
+        });
+        bar.appendChild(tag);
+    }
+    host.appendChild(bar);
+}
+
+function renderCategoryBar(host, kind) {
+    if (kind === "history") {
+        renderFilterBar(host, kind, HISTORY_STAR_FILTERS, _modalStarFilter, (id) => {
+            _modalStarFilter = _modalStarFilter === id ? "all" : id;
+        });
+        return;
+    }
+    renderFilterBar(host, kind, PRESET_CAT_FILTERS, _modalCatFilter, (id) => {
+        _modalCatFilter = _modalCatFilter === id ? "all" : id;
+    });
+    renderFilterBar(host, kind, HISTORY_STAR_FILTERS, _modalStarFilter, (id) => {
+        _modalStarFilter = _modalStarFilter === id ? "all" : id;
+    });
+}
+
+function makeItemStars(item, kind, onChange) {
+    const wrap = document.createElement("div");
+    wrap.className = "cap-ui-history-stars";
+    const current = item.stars ?? 0;
+    for (let i = 1; i <= 5; i++) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cap-ui-star-btn";
+        btn.textContent = "★";
+        btn.title = `${i} 星`;
+        if (i <= current) btn.classList.add("on");
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const next = item.stars === i ? undefined : i;
+            if (kind === "history") updatePromptHistoryStars(item.id, next);
+            else if (item.builtin) updateBuiltinPresetMeta(item.id, { stars: next });
+            else updatePromptPresetStars(item.id, next);
+            item.stars = next;
+            onChange?.();
+        });
+        wrap.appendChild(btn);
+    }
+    return wrap;
+}
+
+function appendTitleInput(metaMain, item, kind) {
+    const titleInput = document.createElement("input");
+    titleInput.type = "text";
+    titleInput.className = "cap-ui-list-title-input";
+    titleInput.value = item.title || "";
+    titleInput.placeholder = "标题（可选）";
+    titleInput.title = "点击编辑标题，失焦自动保存";
+    titleInput.addEventListener("blur", () => {
+        if (kind === "history") {
+            updatePromptHistoryTitle(item.id, titleInput.value);
+            const saved = getPromptHistory().find((x) => x.id === item.id);
+            titleInput.value = saved?.title || "";
+        } else if (item.builtin) {
+            updateBuiltinPresetMeta(item.id, { title: titleInput.value });
+            const extra = loadPresetMeta()[item.id] || {};
+            item.title = extra.title;
+            titleInput.value = extra.title || "";
+        } else {
+            updatePromptPresetTitle(item.id, titleInput.value);
+            const saved = getPromptPresets().find((x) => x.id === item.id);
+            titleInput.value = saved?.title || "";
+        }
+    });
+    titleInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") titleInput.blur();
+    });
+    metaMain.append(titleInput);
+}
+
 function renderList(body, kind) {
-    body.innerHTML = "";
-    const list = kind === "history" ? getPromptHistory() : getPresetsForKind(kind);
+    const { catHost, scroll } = ensureListLayout(body);
+    catHost.innerHTML = "";
+    scroll.innerHTML = "";
+    renderCategoryBar(catHost, kind);
+
+    let list = kind === "history" ? getPromptHistory() : getAllPresets();
+    if (kind === "history") {
+        list = filterHistoryByStars(list, _modalStarFilter);
+    } else {
+        list = filterPresetsByCategory(list, _modalCatFilter);
+        list = filterHistoryByStars(list, _modalStarFilter);
+    }
+
     if (!list.length) {
         const empty = document.createElement("div");
         empty.className = "cap-ui-empty";
         empty.textContent = EMPTY_LABEL[kind] || "暂无内容";
-        body.appendChild(empty);
+        scroll.appendChild(empty);
+        refreshModalTargetState();
         return;
     }
 
@@ -463,20 +718,8 @@ function renderList(body, kind) {
         meta.className = "cap-ui-list-meta";
         const metaMain = document.createElement("div");
         metaMain.className = "cap-ui-list-meta-main";
-        const title = document.createElement("div");
-        title.className = "cap-ui-list-title";
-        if (kind === "history") {
-            title.textContent = formatTime(item.ts);
-            metaMain.append(title);
-        } else {
-            title.textContent = item.title || (item.name ? `#${item.name}` : previewText(item.text, 40));
-            metaMain.append(title);
-            if (!item.builtin && item.ts) {
-                const sub = document.createElement("div");
-                sub.className = "cap-ui-list-sub";
-                sub.textContent = formatTime(item.ts);
-                metaMain.append(sub);
-            }
+        if (kind === "history" || kind === "preset") {
+            appendTitleInput(metaMain, item, kind);
         }
 
         const actions = document.createElement("div");
@@ -513,13 +756,32 @@ function renderList(body, kind) {
 
         actions.append(btnInsert, btnReplace);
 
-        if (kind === "history" || (kind === "other" && !item.builtin)) {
+        if (kind === "history") {
+            const defaultName = item.title || previewText(item.text, 40);
+            const btnToPreset = mkUiIconBtn(iconHtml("toPreset"), {
+                title: "设为预设",
+                onClick: () => {
+                    const name = prompt("预设名称（可留空）", defaultName);
+                    if (name === null) return;
+                    addPromptPreset(item.text, name, "other");
+                },
+            });
+            actions.append(btnToPreset);
+        }
+
+        if (kind === "history" || kind === "preset") {
             const btnDel = mkUiIconBtn(iconHtml("trash"), {
                 variant: "danger",
                 title: "删除",
                 onClick: () => {
-                    if (!confirm(kind === "history" ? "删除这条历史记录？" : "删除这条预设？")) return;
+                    const msg = kind === "history"
+                        ? "删除这条历史记录？"
+                        : item.builtin
+                            ? "删除这条内置预设？"
+                            : "删除这条预设？";
+                    if (!confirm(msg)) return;
                     if (kind === "history") removePromptHistory(item.id);
+                    else if (item.builtin) hideBuiltinPreset(item.id);
                     else removePromptPreset(item.id);
                     renderList(body, kind);
                 },
@@ -534,7 +796,16 @@ function renderList(body, kind) {
         preview.textContent = item.text;
 
         row.append(meta, preview);
-        body.appendChild(row);
+
+        const footer = document.createElement("div");
+        footer.className = "cap-ui-list-footer";
+        const date = document.createElement("span");
+        date.className = "cap-ui-list-date";
+        date.textContent = item.ts ? formatTime(item.ts) : "";
+        footer.append(makeItemStars(item, kind, () => renderList(body, kind)), date);
+        row.append(footer);
+
+        scroll.appendChild(row);
     }
 
     refreshModalTargetState();
@@ -543,7 +814,7 @@ function renderList(body, kind) {
 function renderToolbar(toolbar, body, kind) {
     toolbar.innerHTML = "";
 
-    if (kind === "other") {
+    if (kind === "preset") {
         const btnSave = mkUiBtn("保存当前为预设", {
             variant: "primary",
             needTarget: true,
@@ -557,7 +828,10 @@ function renderToolbar(toolbar, body, kind) {
                 }
                 const name = prompt("预设名称（可留空）", previewText(text, 40));
                 if (name === null) return;
-                addPromptPreset(text, name);
+                const cat = _modalCatFilter !== "all" && PRESET_CATEGORIES[_modalCatFilter]
+                    ? _modalCatFilter
+                    : "other";
+                addPromptPreset(text, name, cat);
                 renderList(body, kind);
             },
         });
@@ -581,7 +855,7 @@ function renderToolbar(toolbar, body, kind) {
         toolbar.appendChild(btnSave);
     }
 
-    if (kind === "history" || kind === "other") {
+    if (kind === "history" || kind === "preset") {
         toolbar.appendChild(mkUiBtn("导出", { onClick: () => {
             const list = kind === "history" ? getPromptHistory() : getPromptPresets();
             const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
@@ -608,10 +882,13 @@ function renderToolbar(toolbar, body, kind) {
                     const text = normalizeText(item?.text ?? item);
                     if (!text.trim()) continue;
                     list = list.filter((x) => x.text !== text);
+                    const stars = Number(item.stars);
                     list.unshift({
                         id: item.id || uid(),
                         text,
                         ts: item.ts || Date.now(),
+                        title: item.title || undefined,
+                        stars: Number.isFinite(stars) && stars >= 1 && stars <= 5 ? stars : undefined,
                     });
                 }
                 if (list.length > HISTORY_MAX) list = list.slice(0, HISTORY_MAX);
@@ -621,11 +898,15 @@ function renderToolbar(toolbar, body, kind) {
                 for (const item of items) {
                     const text = normalizeText(item?.text ?? "");
                     if (!text.trim()) continue;
+                    const stars = Number(item.stars);
                     list.unshift({
                         id: item.id || uid(),
-                        name: String(item.name || previewText(text, 40)),
+                        name: stripLeadingHash(item.name || previewText(text, 40)),
                         text,
                         ts: item.ts || Date.now(),
+                        title: item.title ? stripLeadingHash(item.title) : undefined,
+                        stars: Number.isFinite(stars) && stars >= 1 && stars <= 5 ? stars : undefined,
+                        category: PRESET_CATEGORIES[item.category] ? item.category : "other",
                     });
                 }
                 saveList(STORAGE_PRESETS, list);
@@ -663,9 +944,7 @@ function buildModal(initialKind = "history") {
         <div class="cap-ui-tabs">
           <div class="cap-ui-tab-list">
             <button type="button" class="cap-ui-tab" data-kind="history">历史记录</button>
-            <button type="button" class="cap-ui-tab" data-kind="style">${PRESET_CATEGORIES.style.label}</button>
-            <button type="button" class="cap-ui-tab" data-kind="quality">${PRESET_CATEGORIES.quality.label}</button>
-            <button type="button" class="cap-ui-tab" data-kind="other">${PRESET_CATEGORIES.other.label}</button>
+            <button type="button" class="cap-ui-tab" data-kind="preset">预设</button>
           </div>
           <div class="cap-ui-toolbar"></div>
         </div>
@@ -682,6 +961,8 @@ function buildModal(initialKind = "history") {
 
     const switchKind = (kind) => {
         _modalKind = normalizeKind(kind);
+        _modalCatFilter = "all";
+        _modalStarFilter = "all";
         setActiveTab(tabs, _modalKind);
         renderToolbar(toolbar, body, _modalKind);
         renderList(body, _modalKind);
@@ -751,7 +1032,7 @@ function removeLegacyPromptHeaderUi(node) {
     }
 }
 
-function bindPromptHeaderButtons(wrap, node, open) {
+function bindPromptHeaderButtons(wrap, node, openHistory, openPreset) {
     if (!wrap) return;
     wrap.classList.add("cap-ui-node-btn-wrap--row");
 
@@ -759,25 +1040,44 @@ function bindPromptHeaderButtons(wrap, node, open) {
     if (!historyBtn) {
         historyBtn = document.createElement("button");
         historyBtn.type = "button";
-        historyBtn.className = "cap-ui-node-btn cap-ui-node-btn-history";
-        historyBtn.textContent = "历史 | 预设";
+        historyBtn.className = "cap-ui-node-btn cap-ui-node-btn-history cap-ui-node-btn-icon";
         wrap.appendChild(historyBtn);
     }
-    historyBtn.title = "历史 | 预设";
+    historyBtn.classList.add("cap-ui-node-btn-icon");
+    historyBtn.innerHTML = iconHtml("history", 13);
+    historyBtn.title = "历史记录";
     historyBtn.onmousedown = (e) => e.stopPropagation();
     historyBtn.onclick = (e) => {
         e.stopPropagation();
-        open();
+        openHistory();
+    };
+
+    let presetBtn = wrap.querySelector(".cap-ui-node-btn-preset");
+    if (!presetBtn) {
+        presetBtn = document.createElement("button");
+        presetBtn.type = "button";
+        presetBtn.className = "cap-ui-node-btn cap-ui-node-btn-preset cap-ui-node-btn-icon";
+        wrap.appendChild(presetBtn);
+    }
+    presetBtn.classList.add("cap-ui-node-btn-icon");
+    presetBtn.innerHTML = iconHtml("preset", 13);
+    presetBtn.title = "预设";
+    presetBtn.onmousedown = (e) => e.stopPropagation();
+    presetBtn.onclick = (e) => {
+        e.stopPropagation();
+        openPreset();
     };
 
     let saveBtn = wrap.querySelector(".cap-ui-node-btn-save");
     if (!saveBtn) {
         saveBtn = document.createElement("button");
         saveBtn.type = "button";
-        saveBtn.className = "cap-ui-node-btn cap-ui-node-btn-save";
-        saveBtn.textContent = "保存";
+        saveBtn.className = "cap-ui-node-btn cap-ui-node-btn-save cap-ui-node-btn-icon";
         wrap.appendChild(saveBtn);
+    } else {
+        saveBtn.classList.add("cap-ui-node-btn-icon");
     }
+    saveBtn.innerHTML = iconHtml("save", 13);
     saveBtn.title = "保存当前提示词到历史记录";
     saveBtn.onmousedown = (e) => e.stopPropagation();
     saveBtn.onclick = (e) => {
@@ -786,7 +1086,7 @@ function bindPromptHeaderButtons(wrap, node, open) {
     };
 }
 
-function ensurePromptHeaderOverlay(node, open, tries = 0) {
+function ensurePromptHeaderOverlay(node, openHistory, openPreset, tries = 0) {
     ensureCapUiCss();
     let wrap = node._capPlibBtnWrap;
     if (!wrap) {
@@ -794,7 +1094,7 @@ function ensurePromptHeaderOverlay(node, open, tries = 0) {
         wrap.className = "cap-ui-node-btn-wrap cap-ui-node-btn-wrap--row";
         node._capPlibBtnWrap = wrap;
     }
-    bindPromptHeaderButtons(wrap, node, open);
+    bindPromptHeaderButtons(wrap, node, openHistory, openPreset);
 
     const vueEl = findVueNodeEl(node);
     const anchor = () => {
@@ -807,7 +1107,7 @@ function ensurePromptHeaderOverlay(node, open, tries = 0) {
     };
     const host = anchor();
     if (!host) {
-        if (tries < 80) setTimeout(() => ensurePromptHeaderOverlay(node, open, tries + 1), 50);
+        if (tries < 80) setTimeout(() => ensurePromptHeaderOverlay(node, openHistory, openPreset, tries + 1), 50);
         return;
     }
     if (vueEl || findVueNodeEl(node)) {
@@ -821,12 +1121,16 @@ export function ensurePromptLibraryButtons(node) {
     removeLegacyPromptHeaderUi(node);
     clearCanvasTitleButtons(node);
 
-    const open = () => {
+    const openHistory = () => {
         selectGraphNode(node);
         openPromptLibraryModal({ kind: "history", node });
     };
+    const openPreset = () => {
+        selectGraphNode(node);
+        openPromptLibraryModal({ kind: "preset", node });
+    };
 
-    ensurePromptHeaderOverlay(node, open);
+    ensurePromptHeaderOverlay(node, openHistory, openPreset);
 }
 
 function savePromptHistoryFromNode(node) {
@@ -840,7 +1144,7 @@ function savePromptHistoryFromNode(node) {
     }
     addPromptHistory(text);
     if (_modal && _modalKind === "history") {
-        const body = _modal.querySelector(".cap-ui-list-body");
+        const body = _modal.querySelector(".cap-ui-body");
         if (body) renderList(body, "history");
     }
     return true;

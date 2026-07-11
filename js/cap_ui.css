@@ -234,6 +234,108 @@
     color: #fff;
 }
 
+.cap-ui-node-btn.cap-ui-node-btn-icon {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 5px;
+    line-height: 0;
+}
+
+.cap-ui-node-btn.cap-ui-node-btn-icon svg {
+    width: 13px;
+    height: 13px;
+    display: block;
+}
+
+.cap-ui-cat-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 0 10px;
+    margin-bottom: 0;
+    border-bottom: 1px solid #333;
+}
+
+.cap-ui-cat-host {
+    flex-shrink: 0;
+    padding: 8px 12px 0;
+    background: #1e1e1e;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cap-ui-cat-bar + .cap-ui-cat-bar {
+    padding-top: 0;
+}
+
+.cap-ui-list-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 12px 12px;
+}
+
+.cap-ui-cat-tag {
+    border: 1px solid #555;
+    background: #2a2a2a;
+    color: #aaa;
+    border-radius: 999px;
+    padding: 3px 10px;
+    cursor: pointer;
+    font: 11px/1.2 system-ui, sans-serif;
+}
+
+.cap-ui-cat-tag:hover {
+    color: #ddd;
+    border-color: #777;
+}
+
+.cap-ui-cat-tag.active {
+    color: #fff;
+    border-color: #6a9eff;
+    background: #2d4a7a;
+}
+
+.cap-ui-history-stars {
+    display: inline-flex;
+    gap: 1px;
+}
+
+.cap-ui-list-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
+    padding-top: 4px;
+}
+
+.cap-ui-list-date {
+    color: #777;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.cap-ui-star-btn {
+    border: none;
+    background: transparent;
+    color: #555;
+    padding: 0 1px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.cap-ui-star-btn.on {
+    color: #e6b422;
+}
+
+.cap-ui-star-btn:hover {
+    color: #f0d060;
+}
+
 /* Size settings: orientation switch above aspect ratio row */
 .cap-size-orient-wrap {
     position: absolute;
@@ -365,8 +467,10 @@
 }
 
 .cap-ui-body {
-    overflow: auto;
-    padding: 8px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
     flex: 1;
     min-height: 120px;
 }
@@ -402,6 +506,35 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 11px;
+}
+
+.cap-ui-list-title-input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #eee;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 400;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+.cap-ui-list-title-input:hover {
+    border-color: #444;
+}
+
+.cap-ui-list-title-input:focus {
+    border-color: #6a9eff;
+    background: #252525;
+    outline: none;
+}
+
+.cap-ui-list-created {
+    color: #777;
+    font-size: 10px;
 }
 
 .cap-ui-list-sub {

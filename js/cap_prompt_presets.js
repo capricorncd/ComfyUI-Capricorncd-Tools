@@ -7,20 +7,19 @@ function ensureComma(text) {
 }
 
 function preset(category, id, name, text) {
-    const title = name.startsWith("#") ? name : `#${name}`;
+    const cleanName = String(name ?? "").trim().replace(/^#+/, "");
     const body = ensureComma(text);
     return {
         id: `builtin_${category}_${id}`,
         category,
-        name: title.replace(/^#/, ""),
-        title,
+        name: cleanName,
         text: body,
         builtin: true,
         ts: 0,
     };
 }
 
-/** @type {ReadonlyArray<{id:string,category:string,name:string,title:string,text:string,builtin:boolean,ts:number}>} */
+/** @type {ReadonlyArray<{id:string,category:string,name:string,text:string,builtin:boolean,ts:number}>} */
 export const BUILTIN_PRESETS = [
     // ── 质量 ──────────────────────────────────────────────
     preset(
@@ -198,10 +197,20 @@ export const BUILTIN_PRESETS = [
 ];
 
 export const PRESET_CATEGORIES = {
+    gu_feng_female: { id: "gu_feng_female", label: "古风女" },
+    gu_feng_male: { id: "gu_feng_male", label: "古风男" },
     style: { id: "style", label: "风格" },
     quality: { id: "quality", label: "质量" },
-    other: { id: "other", label: "其他预设" },
+    other: { id: "other", label: "其他" },
 };
+
+export const PRESET_FILTER_ORDER = [
+    "gu_feng_female",
+    "gu_feng_male",
+    "style",
+    "quality",
+    "other",
+];
 
 export function getBuiltinPresets(category) {
     return BUILTIN_PRESETS.filter((p) => p.category === category);
@@ -209,8 +218,8 @@ export function getBuiltinPresets(category) {
 
 /** Payload written into the node prompt on insert/replace. */
 export function formatPresetWriteText(item) {
-    const title = item.title
-        || (item.name ? (String(item.name).startsWith("#") ? item.name : `#${item.name}`) : "");
+    const raw = String(item.title ?? item.name ?? "").trim().replace(/^#+/, "");
+    const title = raw ? `#${raw}` : "";
     const body = ensureComma(item.text ?? "");
     if (title && body) return `${title}\n${body}`;
     return title || body;

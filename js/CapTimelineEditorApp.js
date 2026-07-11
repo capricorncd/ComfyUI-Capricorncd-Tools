@@ -728,9 +728,9 @@ export class CapTimelineEditorApp {
             this._meta.delete(clip.id);
             this._timeline.removeClip(clip.track.id, clip.id);
         }
-        this._selClip = null;
-        this._selClips = [];
-        this._timeline.clearSelection();
+        if (!this._timeline.getSelectedClips().length) {
+            this._timeline.selectClip(null);
+        }
         this._updatePromptPanel();
         this._refreshTimelineDuration();
         return true;
@@ -1753,6 +1753,25 @@ export class CapTimelineEditorApp {
         return null;
     }
 
+    /** Keep app selection aligned with the timeline after clip removal. */
+    _syncSelectedClip() {
+        const tl = this._timeline;
+        if (!tl) {
+            this._selClip = null;
+            this._selClips = [];
+            return null;
+        }
+        this._selClips = tl.getSelectedClips();
+        const primary = tl._selected ?? null;
+        if (primary && this._findClipById(primary.id)) {
+            this._selClip = primary;
+            return this._selClip;
+        }
+        const fallback = this._selClips.at(-1) ?? null;
+        this._selClip = fallback && this._findClipById(fallback.id) ? fallback : null;
+        return this._selClip;
+    }
+
     _findClipAt(clientX, clientY) {
         const el = document.elementFromPoint(clientX, clientY)?.closest?.(".tl-clip");
         if (!el?.dataset?.clipId) return null;
@@ -2026,8 +2045,10 @@ export class CapTimelineEditorApp {
             this._selClip = null;
             this._selClips = [];
             this._timeline.clearSelection();
-            this._updatePromptPanel();
+        } else {
+            this._syncSelectedClip();
         }
+        this._updatePromptPanel();
         const list = kind === "audio" ? this._audioFiles : kind === "video" ? this._videoFiles : this._imgFiles;
         const index = list.indexOf(file);
         if (index >= 0) list.splice(index, 1);
@@ -2177,7 +2198,9 @@ export class CapTimelineEditorApp {
         this._recordUndo();
         this._meta.delete(clip.id);
         this._timeline.removeClip(clip.track.id, clip.id);
-        if (this._selClip?.id === clip.id) this._selClip = null;
+        if (!this._timeline.getSelectedClips().length) {
+            this._timeline.selectClip(null);
+        }
         this._updatePromptPanel();
     }
 
@@ -2339,8 +2362,7 @@ export class CapTimelineEditorApp {
         });
         tl.on("clip:remove", ({ clipId, trackId }) => {
             this._meta.delete(clipId);
-            if (this._selClip?.id === clipId) this._selClip = null;
-            this._selClips = tl.getSelectedClips();
+            this._syncSelectedClip();
             this._updatePromptPanel();
             this._refreshTimelineDuration();
             this._pruneEmptyTrack(tl.getTrack(trackId));
@@ -2426,7 +2448,7 @@ export class CapTimelineEditorApp {
     }
 
     _updatePromptPanel() {
-        const clip = this._selClip;
+        const clip = this._syncSelectedClip();
         const m = clip ? this._meta.get(clip.id) : null;
         const isAudio = clip?.track?.type === "audio" || m?.clipType === "audio";
         this._updateClipInfoPanel(clip);
