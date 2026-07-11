@@ -668,17 +668,17 @@ export class Timeline extends EventEmitter {
     const t = this.currentTime + dt;
     const max = this._seekMaxTime();
     if (t >= max) {
-      this.setCurrentTime(max);
+      this.setCurrentTime(max, { userSeek: false });
       this.pause();
       return;
     }
-    this.setCurrentTime(t);
+    this.setCurrentTime(t, { userSeek: false });
     this._rafId = requestAnimationFrame(() => this._tick());
   }
 
   // ─── time control ─────────────────────────────────────────────────────────
 
-  setCurrentTime(time) {
+  setCurrentTime(time, opts = {}) {
     this.currentTime = clamp(time, 0, this._seekMaxTime());
     this._playhead.update();
     this._timeEl.textContent = this.formatTime(this.currentTime);
@@ -693,6 +693,7 @@ export class Timeline extends EventEmitter {
     }
 
     this.emit('timechange', { time: this.currentTime });
+    if (opts.userSeek !== false) this.emit('seek', { time: this.currentTime });
   }
 
   _clampCurrentTime() {

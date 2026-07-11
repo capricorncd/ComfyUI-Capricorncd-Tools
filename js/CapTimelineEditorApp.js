@@ -147,6 +147,22 @@ export class CapTimelineEditorApp {
         return true;
     }
 
+    /**
+     * Arrow keys — browse media preview when the modal is open.
+     * @returns {boolean} true if the event was handled
+     */
+    handleMediaPreviewKey(e) {
+        if (!this._overlay?.classList.contains("open")) return false;
+        if (this.mediaPreviewModal?.hidden) return false;
+        if (e.target?.closest?.("input, textarea, select")) return false;
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return false;
+        this._stepMediaPreview(e.key === "ArrowRight" ? 1 : -1);
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        return true;
+    }
+
     async _openEditor() {
         this._historyReady = false;
         this._openedWidgetValues = Object.fromEntries(
@@ -403,7 +419,7 @@ export class CapTimelineEditorApp {
                 <div class="cat-te-media-preview-stage"></div>
                 <button type="button" class="cat-te-media-preview-nav next" title="下一张（左键）" aria-label="下一张">›</button>
               </div>
-              <div class="cat-te-media-preview-footer">左键下一张 · 右键上一张 · 点击星星设置评级</div>
+              <div class="cat-te-media-preview-footer">← → 切换 · 左键下一张 · 右键上一张 · 点击星星设置评级</div>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-add-material-modal" hidden>
@@ -573,6 +589,12 @@ export class CapTimelineEditorApp {
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
 
         el.addEventListener("keydown", e => {
+            if (!this.mediaPreviewModal.hidden && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+                this._stepMediaPreview(e.key === "ArrowRight" ? 1 : -1);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
             if (e.key === "Escape") {
                 if (!this.addMaterialModal.hidden) { this._closeAddMaterial(); e.stopPropagation(); return; }
                 if (!this.mediaPreviewModal.hidden) { this._closeMediaPreview(); e.stopPropagation(); return; }
@@ -1641,6 +1663,10 @@ export class CapTimelineEditorApp {
     }
 
     _stopAudioPlayback() {
+        if (this._seekAudioRaf) {
+            cancelAnimationFrame(this._seekAudioRaf);
+            this._seekAudioRaf = null;
+        }
         for (const src of this._activeAudioSources) {
             try { src.stop(); } catch { /* already stopped */ }
             try { src.disconnect(); } catch { /* already disconnected */ }
@@ -2807,6 +2833,14 @@ export class CapTimelineEditorApp {
         tl.on("zoomchange", () => this._refreshTimelineDuration());
         tl.on("play", () => this._startAudioPlayback());
         tl.on("pause", () => this._stopAudioPlayback());
+        tl.on("seek", () => {
+            if (!tl._playing) return;
+            if (this._seekAudioRaf) cancelAnimationFrame(this._seekAudioRaf);
+            this._seekAudioRaf = requestAnimationFrame(() => {
+                this._seekAudioRaf = null;
+                this._startAudioPlayback();
+            });
+        });
         if (!this._onWinResize) {
             this._onWinResize = () => {
                 if (this._overlay?.classList.contains("open") && this._timeline) {
