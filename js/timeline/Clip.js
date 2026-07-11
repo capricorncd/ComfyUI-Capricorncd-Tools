@@ -290,9 +290,10 @@ export class Clip extends EventEmitter {
       } else {
         // Dragging right reveals later source content; it can't go past
         // however much of the source remains after the current offset.
+        const sourceMax = origStart + (this.sourceDuration - origSourceOffset);
         const maxEnd = Math.min(
-          nextClip ? nextClip.startTime : tl.duration,
-          origStart + (this.sourceDuration - origSourceOffset),
+          nextClip ? nextClip.startTime : Number.POSITIVE_INFINITY,
+          sourceMax,
         );
         const newDur = this._snap(clamp(origDur + dt, MIN_DURATION, maxEnd - origStart));
         this.duration = Math.max(MIN_DURATION, newDur);

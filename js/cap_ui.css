@@ -568,3 +568,26 @@
     text-align: center;
     padding: 24px 8px;
 }
+
+.cap-format-json-preview {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 80px;
+    margin: 0;
+    padding: 8px 10px;
+    resize: none;
+    overflow: auto !important;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.35);
+    color: #d8d8ec;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre;
+}
+
+.cap-format-json-preview::placeholder {
+    color: #6868a0;
+    opacity: 1;
+}

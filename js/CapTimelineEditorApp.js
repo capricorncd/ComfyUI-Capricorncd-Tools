@@ -18,6 +18,8 @@ const MAX_MEDIA_PANEL_FRAC = 0.55;
 const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
+/** Must match CAP_TimelineEditor INPUT_TYPES defaults. */
+const PY_SCALAR_DEFAULTS = { fps: 24, width: 1280, height: 720, global_prompt: "" };
 const MEDIA_TAB_ICONS = { image: "image", video: "video", audio: "audio" };
 const MEDIA_TAB_TITLES = { image: "图片", video: "视频", audio: "音频" };
 
@@ -317,7 +319,7 @@ export class CapTimelineEditorApp {
             this._stopAudioPlayback();
             this._timeline?.destroy();
             this._timeline = null;
-            await this._initTimelineFromWidgets(project);
+            await this._initTimelineFromWidgets(project, { applySettingsFromProject: true });
             this._undoStack = [];
             this._redoStack = [];
             this._historyReady = true;
@@ -1632,6 +1634,40 @@ export class CapTimelineEditorApp {
         });
     }
 
+    /** Restore full media length when project JSON only stored the trimmed window. */
+    async _reconcileClipSourceDurations() {
+        const tl = this._timeline;
+        if (!tl) return;
+        const tasks = [];
+        for (const track of tl.tracks) {
+            for (const clip of track.clips) {
+                if (!clip.src) continue;
+                const isAudio = track.type === "audio";
+                const m = this._meta.get(clip.id);
+                const isVideo = m?.mediaKind === "video";
+                if (!isAudio && !isVideo) continue;
+                const cur = Number(clip.sourceDuration);
+                if (Number.isFinite(cur) && cur > clip.duration + 0.01) continue;
+                const url = isAudio ? this._audioUrl(clip.src) : this._videoUrl(clip.src);
+                if (!url) continue;
+                tasks.push((async () => {
+                    try {
+                        const probed = isAudio
+                            ? await this._probeAudioDuration(url)
+                            : await this._probeVideoDuration(url);
+                        if (!Number.isFinite(probed) || probed <= clip.duration + 0.01) return;
+                        clip.sourceDuration = probed;
+                        const meta = this._meta.get(clip.id)
+                            ?? (isAudio ? defaultAudioMeta() : defaultImageMeta());
+                        meta.sourceDuration = probed;
+                        this._meta.set(clip.id, meta);
+                    } catch { /* keep existing */ }
+                })());
+            }
+        }
+        await Promise.all(tasks);
+    }
+
     async _fetchPeaks(url) {
         const r = await fetch(url, { credentials: "same-origin" });
         if (!r.ok) throw new Error(`无法加载音频 (${r.status})`);
@@ -1787,11 +1823,60 @@ export class CapTimelineEditorApp {
         this._activeAudioSources = [];
     }
 
-    _initTimelineFromWidgets(projectOverride = null) {
-        return this._initTimelineFromWidgetsAsync(projectOverride);
+    _initTimelineFromWidgets(projectOverride = null, options = {}) {
+        return this._initTimelineFromWidgetsAsync(projectOverride, options);
     }
 
-    async _initTimelineFromWidgetsAsync(projectOverride = null) {
+    _resolvedScalar(widgetVal, settingsVal, defaultVal) {
+        const w = widgetVal ?? defaultVal;
+        if (settingsVal == null) return w;
+        if (w !== settingsVal) return w;
+        return settingsVal;
+    }
+
+    _applyScalarSettings(settings, { applySettingsFromProject = false } = {}) {
+        for (const name of ["fps", "width", "height", "global_prompt"]) {
+            const widget = this._w(name);
+            if (!widget) continue;
+            const sVal = settings[name];
+            if (applySettingsFromProject) {
+                if (sVal != null) widget.value = sVal;
+                continue;
+            }
+            widget.value = this._resolvedScalar(widget.value, sVal, PY_SCALAR_DEFAULTS[name]);
+        }
+        const ignoreWidget = this._w("ignore_occluded");
+        if (!ignoreWidget) return;
+        const sIgnore = settings.ignore_occluded != null ? settings.ignore_occluded !== false : null;
+        if (applySettingsFromProject) {
+            if (sIgnore != null) ignoreWidget.value = sIgnore;
+            return;
+        }
+        ignoreWidget.value = this._resolvedScalar(ignoreWidget.value !== false, sIgnore, true) !== false;
+    }
+
+    /** Keep project_json.settings aligned with node scalar widgets. */
+    _syncScalarsToProjectJson() {
+        const projectW = this._w("project_json");
+        if (!projectW) return;
+        let project;
+        try {
+            project = JSON.parse(projectW.value || "{}");
+        } catch {
+            return;
+        }
+        if (!project || typeof project !== "object" || Array.isArray(project)) return;
+        if (!project.settings || typeof project.settings !== "object") project.settings = {};
+        project.settings.fps = Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps);
+        project.settings.width = Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width);
+        project.settings.height = Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height);
+        project.settings.global_prompt = String(this._w("global_prompt")?.value ?? "");
+        project.settings.ignore_occluded = this._w("ignore_occluded")?.value !== false;
+        projectW.value = JSON.stringify(project);
+        this.node.setDirtyCanvas(true, true);
+    }
+
+    async _initTimelineFromWidgetsAsync(projectOverride = null, { applySettingsFromProject = false } = {}) {
         this._meta.clear();
         this._trackInfo.clear();
         this.tlHost.replaceChildren();
@@ -1829,19 +1914,15 @@ export class CapTimelineEditorApp {
         this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
 
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
-        for (const name of ["fps", "width", "height", "global_prompt"]) {
-            if (settings[name] == null) continue;
-            const widget = this._w(name);
-            if (widget) widget.value = settings[name];
-        }
-        const ignoreWidget = this._w("ignore_occluded");
-        if (ignoreWidget) {
-            if (settings.ignore_occluded != null) {
-                ignoreWidget.value = settings.ignore_occluded !== false;
-            } else {
-                ignoreWidget.value = true;
-            }
-        }
+        this._applyScalarSettings(settings, { applySettingsFromProject });
+        project.settings = {
+            ...settings,
+            fps: Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps),
+            width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
+            height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
+            global_prompt: String(this._w("global_prompt")?.value ?? ""),
+            ignore_occluded: this._w("ignore_occluded")?.value !== false,
+        };
         this._timeline.fps = this.getFps();
 
         const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
@@ -1872,7 +1953,11 @@ export class CapTimelineEditorApp {
                     end_ms: startMs + durationMs,
                     start_image: source.file || null,
                     audio_file: source.file || null,
-                    source_duration: Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms)) / 1000,
+                    source_duration: (
+                        Number(source.duration_ms) > 0
+                            ? Number(source.duration_ms)
+                            : Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms))
+                    ) / 1000,
                     trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
                     disabled: clip.enabled === false,
                 });
@@ -1880,12 +1965,14 @@ export class CapTimelineEditorApp {
         });
 
         await Promise.all(clips.map(c => this._addClipFromJson(c)));
+        await this._reconcileClipSourceDurations();
 
         this._refreshTimelineDuration();
         this._applyTimelineZoomFromSettings(settings);
         this._decorateAllClips();
         this._bindTimelineEvents();
         this._configureTimelineUi();
+        this._syncScalarsToProjectJson();
     }
 
     _createDefaultTracks() {
@@ -3187,6 +3274,11 @@ export class CapTimelineEditorApp {
                 if (track.type === "audio" || m.mediaKind === "video") {
                     source.in_ms = sourceInMs;
                     source.out_ms = sourceInMs + durationMs;
+                    const fullSec = clip.sourceDuration ?? m.sourceDuration ?? clip.duration;
+                    source.duration_ms = Math.max(
+                        source.out_ms,
+                        Math.round(Math.max(0, fullSec) * 1000),
+                    );
                 }
                 const row = {
                     id: clip.id,
@@ -3344,7 +3436,11 @@ export class CapTimelineEditorApp {
                         end_ms: startMs + durationMs,
                         start_image: source.file || null,
                         audio_file: source.file || null,
-                        source_duration: Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms)) / 1000,
+                        source_duration: (
+                        Number(source.duration_ms) > 0
+                            ? Number(source.duration_ms)
+                            : Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms))
+                    ) / 1000,
                         trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
                         disabled: clip.enabled === false,
                     });

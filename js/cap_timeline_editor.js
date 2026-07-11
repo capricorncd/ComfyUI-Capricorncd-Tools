@@ -2,6 +2,21 @@ import { app } from "../../scripts/app.js";
 import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 
 const NODE_CLASS = "CAP_TimelineEditor";
+const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt", "ignore_occluded"];
+
+function hookScalarWidgets(node) {
+    for (const name of SCALAR_WIDGETS) {
+        const w = node.widgets?.find(widget => widget.name === name);
+        if (!w || w._capScalarHooked) continue;
+        w._capScalarHooked = true;
+        const orig = w.callback;
+        w.callback = function (...args) {
+            const ret = orig?.apply(this, args);
+            node._teApp?._syncScalarsToProjectJson?.();
+            return ret;
+        };
+    }
+}
 
 function onTeGlobalKeyDown(e) {
     const te = CapTimelineEditorApp._open;
@@ -63,6 +78,8 @@ app.registerExtension({
                     if (w) w.value = v;
                 }
             }
+            hookScalarWidgets(this);
+            this._teApp?._syncScalarsToProjectJson?.();
         };
 
         const onSerialize = nodeType.prototype.onSerialize;
@@ -84,6 +101,8 @@ app.registerExtension({
         if (!node._teApp) {
             node._teApp = new CapTimelineEditorApp(node);
         }
+        hookScalarWidgets(node);
+        node._teApp._syncScalarsToProjectJson();
     },
 });
 

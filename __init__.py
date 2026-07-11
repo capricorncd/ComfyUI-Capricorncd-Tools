@@ -43,6 +43,10 @@ from .cap_size_settings import (
     NODE_CLASS_MAPPINGS as _CSS_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CSS_NAMES,
 )
+from .cap_format_json import (
+    NODE_CLASS_MAPPINGS as _CFJ_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CFJ_NAMES,
+)
 from .timecode import (
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -66,6 +70,7 @@ NODE_CLASS_MAPPINGS = {
     **_CLD_CLASS,
     **_CCD_CLASS,
     **_CSS_CLASS,
+    **_CFJ_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -79,6 +84,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CLD_NAMES,
     **_CCD_NAMES,
     **_CSS_NAMES,
+    **_CFJ_NAMES,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
