@@ -11,6 +11,10 @@ const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
 const TRACK_HEIGHT = 78;
 const STORAGE_MEDIA_STARS = "capricorncd.timeline.media_stars";
 const STORAGE_AUTOSAVE_INTERVAL = "cat-te-autosave-interval-sec";
+const STORAGE_MEDIA_PANEL_W = "cat-te-media-panel-w";
+const MIN_MEDIA_PANEL_W = 220;
+const DEFAULT_MEDIA_PANEL_W = MIN_MEDIA_PANEL_W;
+const MAX_MEDIA_PANEL_FRAC = 0.55;
 const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
@@ -329,6 +333,10 @@ export class CapTimelineEditorApp {
             window.removeEventListener("resize", this._onWinResize);
             this._onWinResize = null;
         }
+        if (this._onMediaPanelWinResize) {
+            window.removeEventListener("resize", this._onMediaPanelWinResize);
+            this._onMediaPanelWinResize = null;
+        }
         if (this._playbackCtx) {
             this._playbackCtx.close().catch(() => {});
             this._playbackCtx = null;
@@ -362,6 +370,7 @@ export class CapTimelineEditorApp {
               <div class="cat-te-media-filters"></div>
               <div class="cat-te-media-grid"></div>
             </aside>
+            <div class="cat-te-media-split" role="separator" aria-orientation="vertical" aria-label="调整素材栏宽度" title="拖动调整素材栏宽度"></div>
             <div class="cat-te-center">
               <div class="cat-te-timeline-host"></div>
             </div>
@@ -466,6 +475,8 @@ export class CapTimelineEditorApp {
         this.projectNameInput = el.querySelector(".cat-te-title");
         this.mediaStarFilterHost = el.querySelector(".cat-te-media-filters");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
+        this.mediaPanel = el.querySelector(".cat-te-media");
+        this.mediaPanelSplit = el.querySelector(".cat-te-media-split");
         this.tlHost = el.querySelector(".cat-te-timeline-host");
         this.promptInput = el.querySelector(".cat-te-prompt-input");
         attachRichPromptHandler(this.promptInput, { mode: "widget" });
@@ -606,6 +617,69 @@ export class CapTimelineEditorApp {
         });
 
         document.addEventListener("click", this._onDocClick = () => this._removeCtxMenu());
+
+        this._applySavedMediaPanelWidth();
+        this._bindMediaPanelResize();
+    }
+
+    _mediaPanelMaxWidth() {
+        const main = this._overlay?.querySelector(".cat-te-main");
+        const mainW = main?.clientWidth ?? 0;
+        if (mainW <= 0) return MIN_MEDIA_PANEL_W + 400;
+        return Math.max(MIN_MEDIA_PANEL_W, Math.floor(mainW * MAX_MEDIA_PANEL_FRAC));
+    }
+
+    _setMediaPanelWidth(w) {
+        const clamped = Math.min(this._mediaPanelMaxWidth(), Math.max(MIN_MEDIA_PANEL_W, Math.round(w)));
+        this._overlay?.style.setProperty("--cat-te-media-w", `${clamped}px`);
+        return clamped;
+    }
+
+    _applySavedMediaPanelWidth() {
+        const saved = parseInt(localStorage.getItem(STORAGE_MEDIA_PANEL_W), 10);
+        if (Number.isFinite(saved) && saved >= MIN_MEDIA_PANEL_W) {
+            this._setMediaPanelWidth(saved);
+        } else {
+            this._setMediaPanelWidth(DEFAULT_MEDIA_PANEL_W);
+        }
+    }
+
+    _bindMediaPanelResize() {
+        const split = this.mediaPanelSplit;
+        const panel = this.mediaPanel;
+        if (!split || !panel) return;
+
+        split.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            const startX = e.clientX;
+            const startW = panel.offsetWidth;
+            split.classList.add("dragging");
+            document.body.classList.add("cat-te-col-resize");
+
+            const onMove = (ev) => {
+                this._setMediaPanelWidth(startW + (ev.clientX - startX));
+            };
+            const onUp = () => {
+                split.classList.remove("dragging");
+                document.body.classList.remove("cat-te-col-resize");
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                localStorage.setItem(STORAGE_MEDIA_PANEL_W, String(panel.offsetWidth));
+                this._refreshTimelineDuration();
+            };
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+        });
+
+        if (!this._onMediaPanelWinResize) {
+            this._onMediaPanelWinResize = () => {
+                if (!this._overlay?.classList.contains("open")) return;
+                const w = this._setMediaPanelWidth(panel.offsetWidth);
+                localStorage.setItem(STORAGE_MEDIA_PANEL_W, String(w));
+            };
+            window.addEventListener("resize", this._onMediaPanelWinResize);
+        }
     }
 
     _viewportRightPaddingSec() {
