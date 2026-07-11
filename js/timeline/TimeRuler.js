@@ -14,21 +14,8 @@ export class TimeRuler {
 
   _setupEvents() {
     this.canvas.addEventListener('mousedown', (e) => {
-      this._seek(e);
-      const onMove = (e) => this._seek(e);
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      this.timeline._beginSeekScrub(e);
     });
-  }
-
-  _seek(e) {
-    const rect = this.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left + this.timeline.scrollEl.scrollLeft;
-    this.timeline.setCurrentTime(Math.max(0, x / this.timeline.pixelsPerSecond));
   }
 
   render() {

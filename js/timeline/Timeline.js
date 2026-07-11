@@ -215,11 +215,12 @@ export class Timeline extends EventEmitter {
       }
     }, { passive: false });
 
-    // Deselect clip on background click
+    // Seek on empty timeline area (tracks / background); clips stop propagation.
     this._contentEl.addEventListener('mousedown', (e) => {
-      if (e.target === this._contentEl || e.target === this._tracksEl) {
-        this.selectClip(null);
-      }
+      if (e.button !== 0) return;
+      if (e.target.closest('.tl-clip')) return;
+      this._beginSeekScrub(e);
+      this.selectClip(null);
     });
 
     // Keyboard shortcuts. These are single bare keys (Q/W/Space/arrows/...)
@@ -677,6 +678,25 @@ export class Timeline extends EventEmitter {
   }
 
   // ─── time control ─────────────────────────────────────────────────────────
+
+  _seekFromEvent(e) {
+    const rect = this.scrollEl.getBoundingClientRect();
+    const x = e.clientX - rect.left + this.scrollEl.scrollLeft;
+    this.setCurrentTime(Math.max(0, x / this.pixelsPerSecond));
+  }
+
+  _beginSeekScrub(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    this._seekFromEvent(e);
+    const onMove = (ev) => this._seekFromEvent(ev);
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
   setCurrentTime(time, opts = {}) {
     this.currentTime = clamp(time, 0, this._seekMaxTime());

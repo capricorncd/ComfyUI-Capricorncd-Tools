@@ -347,6 +347,7 @@
 .tl-content {
   position: relative;
   min-height: 100%;
+  cursor: pointer;
 }
 
 .tl-tracks {
