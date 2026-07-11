@@ -80,6 +80,7 @@ app.registerExtension({
     async nodeCreated(node) {
         if (node.comfyClass !== NODE_CLASS) return;
         markNoSerialize(node);
+        node.setSize([1280, 720]);
         if (!node._teApp) {
             node._teApp = new CapTimelineEditorApp(node);
         }

@@ -298,12 +298,27 @@ body.cat-te-col-resize * {
 }
 
 .cat-te-media-preview-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     padding: 8px 14px 10px;
     font-size: 11px;
     color: #6868a0;
-    text-align: center;
     border-top: 1px solid #25253c;
     background: #10101c;
+}
+
+.cat-te-media-preview-hint {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    line-height: 1.4;
+}
+
+.cat-te-media-preview-insert {
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .cat-te-media-preview-content {
@@ -318,6 +333,15 @@ body.cat-te-col-resize * {
 
 .cat-te-media-preview-audio {
     width: min(680px, 100%);
+}
+
+.cat-te-media-preview-solo .cat-te-media-preview-nav {
+    display: none;
+}
+
+.cat-te-media-preview-solo .cat-te-media-preview-stage {
+    padding-left: 16px;
+    padding-right: 16px;
 }
 
 .cat-te-add-material-dialog { width: min(760px, 88vw); max-width: none; }
@@ -906,6 +930,23 @@ body.cat-te-col-resize * {
     pointer-events: auto;
 }
 
+.cat-te-force-badge {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    z-index: 4;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: #fff;
+    background: rgba(230, 120, 40, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    cursor: default;
+    pointer-events: none;
+}
+
 .cat-te-ctx-menu {
     position: fixed;
     z-index: 100001;
@@ -928,6 +969,7 @@ body.cat-te-col-resize * {
 }
 .cat-te-ctx-item:hover { background: rgba(91, 78, 255, 0.2); color: #fff; }
 .cat-te-ctx-item.danger:hover { background: rgba(255, 68, 102, 0.2); }
+.cat-te-ctx-item.strike { text-decoration: line-through; opacity: 0.72; }
 
 .cat-te-frame-preview {
     position: fixed;
@@ -1012,6 +1054,16 @@ body.cat-te-col-resize * {
     background: #0a0a12;
 }
 
+.cat-te-clip-thumb-wrap.cat-te-clip-thumb-clickable {
+    cursor: pointer;
+    transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.cat-te-clip-thumb-wrap.cat-te-clip-thumb-clickable:hover {
+    border-color: rgba(91, 78, 255, 0.65);
+    box-shadow: 0 0 0 2px rgba(91, 78, 255, 0.18);
+}
+
 .cat-te-clip-thumb {
     width: 100%;
     height: 100%;
@@ -1059,6 +1111,27 @@ body.cat-te-col-resize * {
     gap: 6px;
     flex: 1;
     min-height: 0;
+}
+
+.cat-te-force-render-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 0;
+    font-size: 11px;
+    color: #8888b0;
+    cursor: pointer;
+    flex-shrink: 0;
+    border-bottom: 1px solid #1c1c30;
+    padding-bottom: 8px;
+}
+
+.cat-te-force-render-wrap[hidden] {
+    display: none !important;
+}
+
+.cat-te-force-render-wrap input:disabled + span {
+    opacity: 0.45;
 }
 
 .cat-te-prompt-label {

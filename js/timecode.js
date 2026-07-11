@@ -56,11 +56,20 @@ export function formatTimecode(ms, fps = 24) {
     return `${String(minutes).padStart(2, "0")}:${secPart}`;
 }
 
-/** Frame count in (startMs, endMs] at given fps (matches formatTimecode rounding). */
+/** Frame index at `secs`, matching timeline `formatTime` (floor sec + floor fractional frames). */
+export function frameIndexFromSecs(secs, fps = 24) {
+    fps = Math.max(1, Math.floor(fps));
+    const s = Math.max(0, secs);
+    const sec = Math.floor(s);
+    const frame = Math.floor((s - sec) * fps + 1e-9);
+    return sec * fps + frame;
+}
+
+/** Frame count between start/end times at given fps (matches displayed m:ss.ff boundaries). */
 export function segmentFrameCount(startMs, endMs, fps = 24) {
     fps = Math.max(1, Math.floor(fps));
-    const a = Math.max(0, Math.round((Math.max(0, startMs) * fps) / 1000));
-    const b = Math.max(0, Math.round((Math.max(0, endMs) * fps) / 1000));
+    const a = frameIndexFromSecs(Math.max(0, startMs) / 1000, fps);
+    const b = frameIndexFromSecs(Math.max(0, endMs) / 1000, fps);
     return Math.max(0, b - a);
 }
 

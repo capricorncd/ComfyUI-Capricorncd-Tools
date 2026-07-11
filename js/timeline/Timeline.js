@@ -72,6 +72,25 @@ export class Timeline extends EventEmitter {
     return end > 0 ? end : this.duration;
   }
 
+  /** Snap seconds to the nearest frame boundary (matches clip drag/trim). */
+  _snapTime(secs) {
+    const fps = Math.max(1, this.fps || 24);
+    return Math.round(secs * fps) / fps;
+  }
+
+  /** Current playhead position as a frame index. */
+  _frameAtTime(secs) {
+    const fps = Math.max(1, this.fps || 24);
+    return Math.round(secs * fps);
+  }
+
+  _stepSeekByFrames(delta) {
+    const fps = Math.max(1, this.fps || 24);
+    const maxFrame = Math.round(this._seekMaxTime() * fps);
+    const frame = clamp(this._frameAtTime(this.currentTime) + delta, 0, maxFrame);
+    this.setCurrentTime(frame / fps);
+  }
+
   // ─── DOM construction ─────────────────────────────────────────────────────
 
   _buildDOM() {
@@ -260,10 +279,10 @@ export class Timeline extends EventEmitter {
           consume(e); this.setCurrentTime(this._seekMaxTime()); break;
         case 'ArrowLeft':
           consume(e);
-          this.setCurrentTime(this.currentTime - (e.shiftKey ? 1 : 1 / this.fps)); break;
+          this._stepSeekByFrames(e.shiftKey ? -this.fps : -1); break;
         case 'ArrowRight':
           consume(e);
-          this.setCurrentTime(this.currentTime + (e.shiftKey ? 1 : 1 / this.fps)); break;
+          this._stepSeekByFrames(e.shiftKey ? this.fps : 1); break;
         case 'Equal':
         case 'NumpadAdd':
           if (e.ctrlKey || e.metaKey) { consume(e); this.setZoom(this._zoom * 1.5); } break;
@@ -473,10 +492,7 @@ export class Timeline extends EventEmitter {
     const r = this.scrollEl.getBoundingClientRect();
     const x = clientX - r.left + this.scrollEl.scrollLeft;
     const secs = x / this.pixelsPerSecond;
-    const fps = Math.max(1, this.fps || 24);
-    const step = 1 / fps;
-    const snapped = Math.round(secs / step) * step;
-    return Math.max(0, Math.min(this._seekMaxTime(), snapped));
+    return Math.max(0, Math.min(this._seekMaxTime(), this._snapTime(secs)));
   }
 
   // ─── clip management ──────────────────────────────────────────────────────
@@ -521,7 +537,7 @@ export class Timeline extends EventEmitter {
     const clip = this._selected;
     if (!clip) return;
 
-    const t = this.currentTime;
+    const t = this._snapTime(this.currentTime);
     const MIN = 1 / this.fps; // minimum 1 frame
 
     // Bail out before announcing anything if the playhead position means
@@ -680,9 +696,7 @@ export class Timeline extends EventEmitter {
   // ─── time control ─────────────────────────────────────────────────────────
 
   _seekFromEvent(e) {
-    const rect = this.scrollEl.getBoundingClientRect();
-    const x = e.clientX - rect.left + this.scrollEl.scrollLeft;
-    this.setCurrentTime(Math.max(0, x / this.pixelsPerSecond));
+    this.setCurrentTime(this.clientXToTime(e.clientX));
   }
 
   _beginSeekScrub(e) {

@@ -15,7 +15,7 @@ export const formatTime = (secs, fps = null) => {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
   if (fps != null && fps > 0) {
-    const frame = Math.floor((s % 1) * fps);
+    const frame = Math.floor((s - Math.floor(s)) * fps + 1e-9);
     const pad = String(fps - 1).length; // 24fps→2 digits, 120fps→3 digits
     return `${m}:${String(sec).padStart(2, '0')}.${String(frame).padStart(pad, '0')}`;
   }

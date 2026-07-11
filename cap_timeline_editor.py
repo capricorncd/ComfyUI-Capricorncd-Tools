@@ -61,10 +61,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         return {
             "required": {
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
-                "width": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
-                "height": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
+                "width": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
+                "height": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
                 "assets_dir": ("STRING", {"default": "", "multiline": False}),
                 "global_prompt": ("STRING", {"default": "", "multiline": True}),
+                "ignore_occluded": ("BOOLEAN", {"default": True, "label_on": "忽略遮挡", "label_off": "输出全部"}),
                 "project_version": ("STRING", {"default": PROJECT_VERSION}),
                 "project_json": (
                     "STRING",
@@ -87,8 +88,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     @classmethod
     def IS_CHANGED(cls, fps, width, height, assets_dir, global_prompt,
-                   project_version, project_json, trim_offset, **_):
-        return fps, width, height, assets_dir, global_prompt, project_version, project_json, trim_offset
+                   ignore_occluded, project_version, project_json, trim_offset, **_):
+        return fps, width, height, assets_dir, global_prompt, ignore_occluded, project_version, project_json, trim_offset
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -159,7 +160,30 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 result.append(row)
         return result
 
-    def execute(self, fps, width, height, assets_dir, global_prompt,
+    def _visual_segments(self, visual_clips: list[tuple[dict, dict, int]], ignore_occluded: bool) -> list[tuple[dict, int, int, int]]:
+        entries: list[tuple[dict, int, int, int, bool]] = []
+        for _track, clip, z_index in visual_clips:
+            start, end = self._clip_range(clip)
+            if end <= start:
+                continue
+            entries.append((clip, z_index, start, end, clip.get("force_render", False) is True))
+
+        if not ignore_occluded:
+            return [(clip, start, end, z_index) for clip, z_index, start, end, _force in entries]
+
+        segments: list[tuple[dict, int, int, int]] = []
+        for clip, z_index, start, end, force in entries:
+            if force:
+                segments.append((clip, start, end, z_index))
+                continue
+            higher_cuts = [(s, e) for _c, z, s, e, _f in entries if z > z_index]
+            for part_start, part_end in _subtract_intervals(start, end, higher_cuts):
+                if part_end > part_start:
+                    segments.append((clip, part_start, part_end, z_index))
+        segments.sort(key=lambda row: (row[1], row[3]))
+        return segments
+
+    def execute(self, fps, width, height, assets_dir, global_prompt, ignore_occluded,
                 project_version, project_json, trim_offset=1):
         project = self._project(project_json)
         settings = project["settings"]
@@ -197,23 +221,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                         embedded["source"] = dict(self._source(clip), kind="video")
                         audio_clips.append(embedded)
 
-        main = [(t, c, z) for t, c, z in visual_clips if str(t.get("role", "")).lower() == "main"]
-        overlays = [(t, c, z) for t, c, z in visual_clips if str(t.get("role", "")).lower() != "main"]
-        if not main and visual_clips:
-            main, overlays = [visual_clips[0]], visual_clips[1:]
-
-        overlay_cuts = [self._clip_range(c) for _, c, _ in overlays]
-        segments: list[tuple[dict, int, int, int]] = []
-        for _, clip, z_index in overlays:
-            start, end = self._clip_range(clip)
-            if end > start:
-                segments.append((clip, start, end, z_index))
-        for _, clip, z_index in main:
-            start, end = self._clip_range(clip)
-            for part_start, part_end in _subtract_intervals(start, end, overlay_cuts):
-                if part_end > part_start:
-                    segments.append((clip, part_start, part_end, z_index))
-        segments.sort(key=lambda row: (row[1], row[3]))
+        segments = self._visual_segments(visual_clips, ignore_occluded is not False)
 
         img_dir = resolve_assets_dir(assets_dir) if assets_dir else ""
         def resolve_media(name: str, location: str = "assets") -> str:

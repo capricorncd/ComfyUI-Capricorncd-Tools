@@ -1,6 +1,6 @@
 import { api } from "../../scripts/api.js";
 import { Timeline, ICONS } from "./timeline/index.js";
-import { parseTimecode, formatTimecode } from "./timecode.js";
+import { parseTimecode, formatTimecode, frameIndexFromSecs } from "./timecode.js";
 import { attachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 import { loadExtensionCss } from "./cap_ui.js";
 import { iconHtml } from "./cap_icons.js";
@@ -39,6 +39,7 @@ function defaultImageMeta(trackIndex = 0) {
         useGlobalPrompt: true,
         disabled: false,
         visible: true,
+        forceRender: false,
         muted: false,
         trackIndex,
     };
@@ -110,7 +111,7 @@ export class CapTimelineEditorApp {
         });
         w.serialize = false;
         this.launcherWidget = w;
-        this.node.setSize([Math.max(this.node.size[0], 320), Math.max(this.node.size[1], 120)]);
+        this.node.setSize([1280, 720]);
     }
 
     open() {
@@ -158,6 +159,7 @@ export class CapTimelineEditorApp {
     handleMediaPreviewKey(e) {
         if (!this._overlay?.classList.contains("open")) return false;
         if (this.mediaPreviewModal?.hidden) return false;
+        if (this._mediaPreviewState?.browse === false) return false;
         if (e.target?.closest?.("input, textarea, select")) return false;
         if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return false;
         this._stepMediaPreview(e.key === "ArrowRight" ? 1 : -1);
@@ -394,6 +396,10 @@ export class CapTimelineEditorApp {
                   </div>
                 </div>
               </div>
+              <label class="cat-te-force-render-wrap" hidden>
+                <input class="cat-te-force-render-cb" type="checkbox" disabled />
+                <span>强制渲染（生成）</span>
+              </label>
               <div class="cat-te-prompt-wrap">
                 <div class="cat-te-prompt-label">Keyframe Prompt</div>
                 <div class="cat-te-prompt-input-wrap">
@@ -428,7 +434,10 @@ export class CapTimelineEditorApp {
                 <div class="cat-te-media-preview-stage"></div>
                 <button type="button" class="cat-te-media-preview-nav next" title="下一张（左键）" aria-label="下一张">›</button>
               </div>
-              <div class="cat-te-media-preview-footer">← → 切换 · 左键下一张 · 右键上一张 · 点击星星设置评级</div>
+              <div class="cat-te-media-preview-footer">
+                <span class="cat-te-media-preview-hint">← → 切换 · 左键下一张 · 右键上一张 · 点击星星设置评级</span>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-media-preview-insert">插入到当前位置</button>
+              </div>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-add-material-modal" hidden>
@@ -481,7 +490,10 @@ export class CapTimelineEditorApp {
         this.promptInput = el.querySelector(".cat-te-prompt-input");
         attachRichPromptHandler(this.promptInput, { mode: "widget" });
         this.useGlobalCb = el.querySelector(".cat-te-use-global-cb");
+        this.forceRenderWrap = el.querySelector(".cat-te-force-render-wrap");
+        this.forceRenderCb = el.querySelector(".cat-te-force-render-cb");
         this.clipInfoDetail = el.querySelector(".cat-te-clip-info-detail");
+        this.clipThumbWrap = el.querySelector(".cat-te-clip-thumb-wrap");
         this.clipThumb = el.querySelector(".cat-te-clip-thumb");
         this.clipNameEl = el.querySelector(".cat-te-clip-name");
         this.clipStartEl = el.querySelector(".cat-te-clip-start");
@@ -497,6 +509,9 @@ export class CapTimelineEditorApp {
         this.mediaPreviewStage = el.querySelector(".cat-te-media-preview-stage");
         this.mediaPreviewPrevBtn = el.querySelector(".cat-te-media-preview-nav.prev");
         this.mediaPreviewNextBtn = el.querySelector(".cat-te-media-preview-nav.next");
+        this.mediaPreviewInsertBtn = el.querySelector(".cat-te-media-preview-insert");
+        this.mediaPreviewFooter = el.querySelector(".cat-te-media-preview-footer");
+        this.mediaPreviewHint = el.querySelector(".cat-te-media-preview-hint");
         this.addMaterialModal = el.querySelector(".cat-te-add-material-modal");
         this.addMaterialPreview = el.querySelector(".cat-te-add-material-preview");
         this.copyToAssetsCb = el.querySelector(".cat-te-copy-to-assets");
@@ -530,8 +545,13 @@ export class CapTimelineEditorApp {
             e.stopPropagation();
             this._stepMediaPreview(1);
         });
+        this.mediaPreviewInsertBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            void this._insertMediaPreviewAtSeek();
+        });
         this.mediaPreviewBody?.addEventListener("mousedown", (e) => {
             if (this.mediaPreviewModal.hidden) return;
+            if (this._mediaPreviewState?.browse === false) return;
             if (e.button !== 0) return;
             if (e.target.closest(".cat-te-media-preview-stars, .cat-te-media-preview-nav, .cat-te-modal-close")) return;
             if (e.target.closest("video, audio")) return;
@@ -540,6 +560,7 @@ export class CapTimelineEditorApp {
         });
         this.mediaPreviewBody?.addEventListener("contextmenu", (e) => {
             if (this.mediaPreviewModal.hidden) return;
+            if (this._mediaPreviewState?.browse === false) return;
             if (e.target.closest(".cat-te-media-preview-stars, .cat-te-media-preview-nav, .cat-te-modal-close")) return;
             e.preventDefault();
             e.stopPropagation();
@@ -598,9 +619,15 @@ export class CapTimelineEditorApp {
         this.promptInput.addEventListener("blur", () => { this._promptUndoArmed = false; });
         this.promptInput.addEventListener("input", () => this._onPromptInput());
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
+        this.forceRenderCb.addEventListener("change", () => this._onForceRenderChange());
+        this.clipThumbWrap?.addEventListener("click", () => {
+            const clip = this._selClip;
+            if (clip) this._openClipMediaPreview(clip);
+        });
 
         el.addEventListener("keydown", e => {
-            if (!this.mediaPreviewModal.hidden && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+            if (!this.mediaPreviewModal.hidden && this._mediaPreviewState?.browse !== false
+                && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
                 this._stepMediaPreview(e.key === "ArrowRight" ? 1 : -1);
                 e.preventDefault();
                 e.stopPropagation();
@@ -742,6 +769,22 @@ export class CapTimelineEditorApp {
         tl.minZoom = fitZoom != null
             ? Math.min(Math.max(fitZoom, absoluteFloor), tl.maxZoom)
             : absoluteFloor;
+    }
+
+    _readTimelineZoom(settings) {
+        const z = Number(settings?.timeline_zoom);
+        return Number.isFinite(z) && z > 0 ? z : null;
+    }
+
+    _applyTimelineZoomFromSettings(settings, { autoFitIfMissing = true } = {}) {
+        const tl = this._timeline;
+        if (!tl) return;
+        const saved = this._readTimelineZoom(settings);
+        if (saved != null) {
+            tl.setZoom(saved);
+        } else if (autoFitIfMissing) {
+            this._autoFitZoom();
+        }
     }
 
     _computeTimelineDuration() {
@@ -1385,7 +1428,6 @@ export class CapTimelineEditorApp {
         this._timeline.selectClip(clip);
         this._timeline.setCurrentTime(atSec);
         this._decorateClip(clip);
-        this._autoFitZoom();
         this._refreshTimelineDuration();
     }
 
@@ -1411,7 +1453,6 @@ export class CapTimelineEditorApp {
         this._timeline.selectClip(clip);
         this._timeline.setCurrentTime(atSec);
         this._decorateClip(clip);
-        this._autoFitZoom();
         this._refreshTimelineDuration();
     }
 
@@ -1451,7 +1492,6 @@ export class CapTimelineEditorApp {
         this._timeline.selectClip(clip);
         this._timeline.setCurrentTime(atSec);
         this._decorateClip(clip);
-        this._autoFitZoom();
         this._refreshTimelineDuration();
     }
 
@@ -1507,7 +1547,6 @@ export class CapTimelineEditorApp {
         this._timeline.selectClip(clip);
         this._timeline.setCurrentTime(atSec);
         this._decorateClip(clip);
-        this._autoFitZoom();
         this._refreshTimelineDuration();
     }
 
@@ -1795,6 +1834,14 @@ export class CapTimelineEditorApp {
             const widget = this._w(name);
             if (widget) widget.value = settings[name];
         }
+        const ignoreWidget = this._w("ignore_occluded");
+        if (ignoreWidget) {
+            if (settings.ignore_occluded != null) {
+                ignoreWidget.value = settings.ignore_occluded !== false;
+            } else {
+                ignoreWidget.value = true;
+            }
+        }
         this._timeline.fps = this.getFps();
 
         const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
@@ -1834,8 +1881,8 @@ export class CapTimelineEditorApp {
 
         await Promise.all(clips.map(c => this._addClipFromJson(c)));
 
-        this._autoFitZoom();
         this._refreshTimelineDuration();
+        this._applyTimelineZoomFromSettings(settings);
         this._decorateAllClips();
         this._bindTimelineEvents();
         this._configureTimelineUi();
@@ -1991,6 +2038,7 @@ export class CapTimelineEditorApp {
                 mediaKind: "package",
                 items: Array.isArray(c.items) ? c.items : [],
                 disabled: !!c.disabled,
+                forceRender: c.force_render === true,
             });
             this._decorateClip(clip);
             return;
@@ -2037,9 +2085,9 @@ export class CapTimelineEditorApp {
                 useGlobalPrompt: c.use_global_prompt !== false,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
+                forceRender: c.force_render === true,
                 sourceDuration: sourceDur,
                 muted: !!c.muted,
-                visible: c.visible !== false,
             });
             this._decorateClip(clip);
             return;
@@ -2063,6 +2111,7 @@ export class CapTimelineEditorApp {
             useGlobalPrompt: c.use_global_prompt !== false,
             disabled: !!c.disabled,
             visible: c.visible !== false,
+            forceRender: c.force_render === true,
         });
         this._decorateClip(clip);
     }
@@ -2155,6 +2204,19 @@ export class CapTimelineEditorApp {
         } else if (badge) {
             badge.remove();
         }
+
+        let forceBadge = clip.el.querySelector(".cat-te-force-badge");
+        if (!isAudio && m.forceRender) {
+            if (!forceBadge) {
+                forceBadge = document.createElement("div");
+                forceBadge.className = "cat-te-force-badge";
+                forceBadge.textContent = "强";
+                forceBadge.title = "强制渲染：被上层遮挡时仍参与生成";
+                clip.el.appendChild(forceBadge);
+            }
+        } else if (forceBadge) {
+            forceBadge.remove();
+        }
     }
 
     _refreshClipAppearance(clip) {
@@ -2241,6 +2303,7 @@ export class CapTimelineEditorApp {
                 this._setMediaStars(kind, file, cur === i ? undefined : i);
                 this._renderMediaPreviewStars(kind, file);
                 this._renderMediaGrid();
+                if (this._mediaPreviewState?.browse === false) return;
                 if (this._mediaPreviewState) {
                     const files = this._getVisibleMediaFiles(kind);
                     if (!files.includes(file) && files.length) {
@@ -2258,10 +2321,61 @@ export class CapTimelineEditorApp {
     }
 
     _updateMediaPreviewNav() {
+        this._applyMediaPreviewChrome();
+    }
+
+    _applyMediaPreviewChrome() {
         const state = this._mediaPreviewState;
-        const multi = (state?.files?.length ?? 0) > 1;
-        if (this.mediaPreviewPrevBtn) this.mediaPreviewPrevBtn.disabled = !multi;
-        if (this.mediaPreviewNextBtn) this.mediaPreviewNextBtn.disabled = !multi;
+        const browse = state?.browse !== false;
+        const multi = browse && (state?.files?.length ?? 0) > 1;
+
+        this.mediaPreviewModal?.classList.toggle("cat-te-media-preview-solo", !browse);
+
+        if (this.mediaPreviewPrevBtn) {
+            this.mediaPreviewPrevBtn.hidden = !browse;
+            this.mediaPreviewPrevBtn.disabled = !multi;
+        }
+        if (this.mediaPreviewNextBtn) {
+            this.mediaPreviewNextBtn.hidden = !browse;
+            this.mediaPreviewNextBtn.disabled = !multi;
+        }
+        if (this.mediaPreviewFooter) this.mediaPreviewFooter.hidden = !browse;
+        if (this.mediaPreviewInsertBtn) this.mediaPreviewInsertBtn.hidden = !browse;
+
+        if (browse) this._updateMediaPreviewInsertBtn();
+    }
+
+    _updateMediaPreviewInsertBtn() {
+        const btn = this.mediaPreviewInsertBtn;
+        const state = this._mediaPreviewState;
+        if (!btn || state?.browse === false) return;
+        if (!state?.files?.length || !this._timeline) {
+            btn.disabled = true;
+            btn.title = "";
+            return;
+        }
+        const file = state.files[state.index];
+        const kind = state.kind;
+        const status = this._mediaStatus.get(`${kind}:${file}`);
+        const missing = status?.location === "missing";
+        btn.disabled = missing;
+        const t = this._timeline.formatTime(this._timeline.currentTime);
+        btn.title = missing ? "素材文件缺失，无法插入" : `插入到 Seek 位置（${t}）`;
+    }
+
+    _insertMediaPreviewAtSeek() {
+        const state = this._mediaPreviewState;
+        if (!state?.files?.length || !this._timeline) return;
+        const file = state.files[state.index];
+        const kind = state.kind;
+        const status = this._mediaStatus.get(`${kind}:${file}`);
+        if (status?.location === "missing") {
+            alert("素材文件缺失，无法插入");
+            return;
+        }
+        if (kind === "audio") void this._addAudioAtPlayhead(file);
+        else if (kind === "video") void this._addVideoAtPlayhead(file);
+        else void this._addMediaAtPlayhead(file);
     }
 
     _showMediaPreviewAt(index) {
@@ -2309,17 +2423,45 @@ export class CapTimelineEditorApp {
 
     _stepMediaPreview(delta) {
         const state = this._mediaPreviewState;
+        if (state?.browse === false) return;
         if (!state?.files?.length || state.files.length <= 1) return;
         this._showMediaPreviewAt(state.index + delta);
     }
 
     _openMediaPreview(file, kind) {
         const files = this._getVisibleMediaFiles(kind);
+        let index = file ? files.indexOf(file) : -1;
+        if (index < 0 && file) {
+            this._mediaPreviewState = { kind, files: [file], index: 0, browse: true };
+            this._showMediaPreviewAt(0);
+            return;
+        }
         if (!files.length) return;
-        let index = files.indexOf(file);
         if (index < 0) index = 0;
-        this._mediaPreviewState = { kind, files, index };
+        this._mediaPreviewState = { kind, files, index, browse: true };
         this._showMediaPreviewAt(index);
+    }
+
+    _clipMediaKind(clip) {
+        const m = this._meta.get(clip.id);
+        if (clip.track?.type === "audio" || m?.clipType === "audio") return "audio";
+        if (m?.mediaKind === "video") return "video";
+        if (m?.mediaKind === "package") return null;
+        return "image";
+    }
+
+    _openClipMediaPreview(clip) {
+        const kind = this._clipMediaKind(clip);
+        if (!kind) return;
+        const file = clip.src;
+        if (!file) return;
+        const status = this._mediaStatus.get(`${kind}:${file}`);
+        if (status?.location === "missing") {
+            alert("素材文件缺失，无法预览");
+            return;
+        }
+        this._mediaPreviewState = { kind, files: [file], index: 0, browse: false };
+        this._showMediaPreviewAt(0);
     }
 
     _closeMediaPreview() {
@@ -2333,7 +2475,7 @@ export class CapTimelineEditorApp {
         this.mediaPreviewStars?.replaceChildren();
         this.mediaPreviewModal.hidden = true;
         this._mediaPreviewState = null;
-        this._updateMediaPreviewNav();
+        this._applyMediaPreviewChrome();
     }
 
     _chooseMaterialFile(relink = null) {
@@ -2526,9 +2668,9 @@ export class CapTimelineEditorApp {
         menu.className = "cat-te-ctx-menu";
         menu.style.left = `${x}px`;
         menu.style.top = `${y}px`;
-        for (const { label, fn, danger } of items) {
+        for (const { label, fn, danger, strike } of items) {
             const div = document.createElement("div");
-            div.className = `cat-te-ctx-item${danger ? " danger" : ""}`;
+            div.className = `cat-te-ctx-item${danger ? " danger" : ""}${strike ? " strike" : ""}`;
             div.textContent = label;
             div.addEventListener("click", () => { fn(); this._removeCtxMenu(); });
             menu.appendChild(div);
@@ -2560,7 +2702,7 @@ export class CapTimelineEditorApp {
             });
         } else {
             items.push(
-                { label: m.disabled ? "启用  Ctrl+B" : "禁用  Ctrl+B", fn: () => this._toggleDisableClip(clip) },
+                { label: m.disabled ? "启用  Ctrl+B" : "禁用  Ctrl+B", strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
                 { label: "禁用其他素材  Ctrl+G", fn: () => this._disableOthers(clip) },
                 ...(m.endImage ? [
                     { label: "交换首尾帧", fn: () => this._swapStartEndFrames(clip) },
@@ -2908,6 +3050,7 @@ export class CapTimelineEditorApp {
         tl.on("play", () => this._startAudioPlayback());
         tl.on("pause", () => this._stopAudioPlayback());
         tl.on("seek", () => {
+            this._updateMediaPreviewInsertBtn();
             if (!tl._playing) return;
             if (this._seekAudioRaf) cancelAnimationFrame(this._seekAudioRaf);
             this._seekAudioRaf = requestAnimationFrame(() => {
@@ -2930,6 +3073,8 @@ export class CapTimelineEditorApp {
         this.clipThumb.removeAttribute("src");
         this.clipThumb.style.display = "";
         this.clipThumb.parentElement.classList.remove("cat-te-clip-thumb-audio");
+        this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-clickable");
+        this.clipThumbWrap?.removeAttribute("title");
         this.clipNameEl.textContent = "";
         this.clipStartEl.textContent = "";
         this.clipEndEl.textContent = "";
@@ -2954,11 +3099,15 @@ export class CapTimelineEditorApp {
             this.clipThumb.parentElement.classList.remove("cat-te-clip-thumb-audio");
             this.clipThumb.src = clip.thumbnail || "";
         }
+        const canPreview = !isAudio || !!clip.src;
+        const isPackage = (this._meta.get(clip.id)?.mediaKind === "package");
+        this.clipThumbWrap.classList.toggle("cat-te-clip-thumb-clickable", canPreview && !isPackage && !!clip.src);
+        this.clipThumbWrap.title = (canPreview && !isPackage && clip.src) ? "点击预览素材" : "";
         this.clipNameEl.textContent = clip.name || "素材";
         this.clipStartEl.textContent = tl.formatTime(clip.startTime);
         this.clipEndEl.textContent = tl.formatTime(clip.endTime);
         const fps = this.getFps();
-        const totalFrames = Math.max(0, Math.round(clip.duration * fps));
+        const totalFrames = Math.max(0, frameIndexFromSecs(clip.endTime, fps) - frameIndexFromSecs(clip.startTime, fps));
         this.clipDurEl.textContent = `时长 ${tl.formatTime(clip.duration)}（总帧数 ${totalFrames}）`;
     }
 
@@ -2966,20 +3115,37 @@ export class CapTimelineEditorApp {
         const clip = this._syncSelectedClip();
         const m = clip ? this._meta.get(clip.id) : null;
         const isAudio = clip?.track?.type === "audio" || m?.clipType === "audio";
+        const isVisual = clip && m && !isAudio;
         this._updateClipInfoPanel(clip);
         const label = this._overlay.querySelector(".cat-te-prompt-label");
-        if (clip && m && !isAudio) {
+        if (isVisual) {
             this.promptInput.disabled = false;
             this.useGlobalCb.disabled = false;
             setRichPromptValue(this.promptInput, m.prompt ?? "");
             this.useGlobalCb.checked = m.useGlobalPrompt !== false;
             label.textContent = "Keyframe Prompt";
+            this.forceRenderWrap.hidden = false;
+            this.forceRenderCb.disabled = false;
+            this.forceRenderCb.checked = !!m.forceRender;
         } else {
             this.promptInput.disabled = true;
             this.useGlobalCb.disabled = true;
             setRichPromptValue(this.promptInput, "");
             label.textContent = isAudio ? "音频素材（无提示词）" : "Keyframe Prompt";
+            this.forceRenderWrap.hidden = true;
+            this.forceRenderCb.disabled = true;
+            this.forceRenderCb.checked = false;
         }
+    }
+
+    _onForceRenderChange() {
+        if (!this._selClip) return;
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        if (this._selClip.track?.type === "audio") return;
+        this._recordUndo();
+        m.forceRender = !!this.forceRenderCb.checked;
+        this._meta.set(this._selClip.id, m);
+        this._decorateClip(this._selClip);
     }
 
     _onPromptInput() {
@@ -3035,6 +3201,7 @@ export class CapTimelineEditorApp {
                     row.prompt = m.prompt ?? "";
                     row.end_image = m.endImage ?? null;
                     row.use_global_prompt = m.useGlobalPrompt !== false;
+                    row.force_render = m.forceRender === true;
                     if (m.mediaKind === "video") {
                         row.has_audio = !!clip.hasAudio;
                         row.muted = !!m.muted;
@@ -3068,9 +3235,11 @@ export class CapTimelineEditorApp {
             resources: this._projectResources.map(resource => ({ ...resource })),
             settings: {
                 fps: Number(this._w("fps")?.value ?? 24),
-                width: Number(this._w("width")?.value ?? 720),
-                height: Number(this._w("height")?.value ?? 1280),
+                width: Number(this._w("width")?.value ?? 1280),
+                height: Number(this._w("height")?.value ?? 720),
                 global_prompt: String(this._w("global_prompt")?.value ?? ""),
+                ignore_occluded: this._w("ignore_occluded")?.value !== false,
+                timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
             },
             tracks,
         };
@@ -3183,8 +3352,8 @@ export class CapTimelineEditorApp {
 
             this._timeline.setCurrentTime(snapshot.currentTime || 0);
             this._decorateAllClips();
-            this._autoFitZoom();
             this._refreshTimelineDuration();
+            this._applyTimelineZoomFromSettings(snapshot.project?.settings ?? {});
             this._updatePromptPanel();
             this._renderMediaGrid();
         } finally {
