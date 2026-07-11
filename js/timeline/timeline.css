@@ -176,6 +176,16 @@
   color: #f5d9a8;
 }
 
+.tl-btn-insert-material {
+  background: rgba(91, 180, 255, 0.12);
+  border-color: rgba(91, 180, 255, 0.35);
+  color: #9fd0ff;
+}
+.tl-btn-insert-material:hover {
+  background: rgba(91, 180, 255, 0.22);
+  color: #c8e8ff;
+}
+
 .tl-btn-history:disabled {
   opacity: 0.35;
   cursor: default;

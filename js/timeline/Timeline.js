@@ -352,6 +352,17 @@ export class Timeline extends EventEmitter {
   // ─── track management ─────────────────────────────────────────────────────
 
   /**
+   * Whether a newly added non-audio track should become Main.
+   * Explicit `isMain: false` prevents auto-promotion during project load.
+   */
+  _resolveWillBeMain(data, isAudio) {
+    if (isAudio) return false;
+    if (data.isMain === true) return true;
+    if (data.isMain === false) return false;
+    return !this._mainTrackId;
+  }
+
+  /**
    * Add a track with zone-aware placement:
    *   • First non-audio track → becomes the Main track (appended at current bottom)
    *   • Subsequent non-audio tracks → overlays, inserted at position 0 (above all overlays)
@@ -363,10 +374,7 @@ export class Timeline extends EventEmitter {
    */
   addTrack(data = {}) {
     const isAudio = (data.type || 'video') === 'audio';
-    const forceMain = !!data.isMain;
-
-    // Auto-designate: first non-audio track becomes Main
-    const willBeMain = forceMain || (!isAudio && !this._mainTrackId);
+    const willBeMain = this._resolveWillBeMain(data, isAudio);
     const track = new Track(this, { ...data, isMain: willBeMain });
 
     if (willBeMain) {
@@ -381,6 +389,36 @@ export class Timeline extends EventEmitter {
     } else {
       // Main track (first non-audio), audio track, or no main yet → append
       this.tracks.push(track);
+      this._tracksEl.appendChild(track.el);
+      this._trackHeadersEl.appendChild(track.headerEl);
+    }
+
+    this.emit('track:add', { track });
+    this._refresh();
+    return track;
+  }
+
+  /**
+   * Insert a track at an exact row index — used when rebuilding from saved
+   * project order so overlay/main stacking matches persisted `order`.
+   */
+  addTrackAt(data = {}, index = this.tracks.length) {
+    const isAudio = (data.type || 'video') === 'audio';
+    const willBeMain = this._resolveWillBeMain(data, isAudio);
+    const track = new Track(this, { ...data, isMain: willBeMain });
+
+    if (willBeMain) {
+      this._mainTrackId = track.id;
+    }
+
+    const at = Math.max(0, Math.min(index, this.tracks.length));
+    this.tracks.splice(at, 0, track);
+
+    const next = this.tracks[at + 1];
+    if (next) {
+      this._tracksEl.insertBefore(track.el, next.el);
+      this._trackHeadersEl.insertBefore(track.headerEl, next.headerEl);
+    } else {
       this._tracksEl.appendChild(track.el);
       this._trackHeadersEl.appendChild(track.headerEl);
     }
