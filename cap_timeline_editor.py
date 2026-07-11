@@ -137,7 +137,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
     def _track_active(track: dict) -> bool:
         return track.get("enabled", True) is not False and track.get("visible", True) is not False
 
-    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict]) -> list[dict]:
+    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media) -> list[dict]:
         result = []
         for audio in audio_clips:
             audio_start, audio_end = self._clip_range(audio)
@@ -150,7 +150,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             row = {
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
-                "file": str(source.get("file") or ""),
+                "file": resolve_media(str(source.get("file") or ""), str(source.get("location") or "assets")),
                 "location": str(source.get("location") or "assets"),
                 "source_start_ms": source_in + overlap_start - audio_start,
                 "source_end_ms": source_in + overlap_end - audio_start,
@@ -246,7 +246,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "prompt": _strip_comment_lines(clip.get("prompt") or ""),
                 "use_global_prompt": _clip_use_global_prompt(clip),
                 "z_index": z_index,
-                "audios": self._audio_slices(start, end, audio_clips),
+                "audios": self._audio_slices(start, end, audio_clips, resolve_media),
             })
 
         total_frame_count = max(1, sum(

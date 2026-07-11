@@ -2191,16 +2191,16 @@ export class CapTimelineEditorApp {
         }
 
         let badge = clip.el.querySelector(".cat-te-end-badge");
-        if (!isAudio && m.endImage) {
+        if (!isAudio && track.type === "image" && m.mediaKind !== "package") {
             if (!badge) {
                 badge = document.createElement("div");
                 badge.className = "cat-te-end-badge";
-                badge.textContent = "尾";
                 badge.title = "首尾帧（悬停预览）";
                 badge.addEventListener("mouseenter", () => this._showStartEndPreview(clip, badge));
                 badge.addEventListener("mouseleave", () => this._hideImagePreview());
                 clip.el.appendChild(badge);
             }
+            badge.textContent = m.endImage ? "首尾" : "首";
         } else if (badge) {
             badge.remove();
         }
@@ -2243,14 +2243,15 @@ export class CapTimelineEditorApp {
     _showStartEndPreview(clip, anchor) {
         if (!this.framePreview || !anchor || !clip) return;
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
-        if (!m.endImage) return;
+        const startSrc = this._startFramePreviewSrc(clip, m);
+        if (!startSrc && !m.endImage) return;
 
         this.framePreview.replaceChildren();
 
         const row = document.createElement("div");
         row.className = "cat-te-frame-preview-row";
 
-        for (const [label, src] of [["首", this._startFramePreviewSrc(clip, m)], ["尾", this._imgUrl(m.endImage)]]) {
+        for (const [label, src] of [["首", startSrc], ["尾", m.endImage ? this._imgUrl(m.endImage) : ""]]) {
             if (!src) continue;
             const item = document.createElement("div");
             item.className = "cat-te-frame-preview-item";
@@ -2340,6 +2341,7 @@ export class CapTimelineEditorApp {
             this.mediaPreviewNextBtn.disabled = !multi;
         }
         if (this.mediaPreviewFooter) this.mediaPreviewFooter.hidden = !browse;
+        if (this.mediaPreviewHint) this.mediaPreviewHint.hidden = !browse;
         if (this.mediaPreviewInsertBtn) this.mediaPreviewInsertBtn.hidden = !browse;
 
         if (browse) this._updateMediaPreviewInsertBtn();

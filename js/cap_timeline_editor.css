@@ -339,6 +339,10 @@ body.cat-te-col-resize * {
     display: none;
 }
 
+.cat-te-media-preview-solo .cat-te-media-preview-footer {
+    display: none !important;
+}
+
 .cat-te-media-preview-solo .cat-te-media-preview-stage {
     padding-left: 16px;
     padding-right: 16px;
@@ -1006,8 +1010,8 @@ body.cat-te-col-resize * {
 
 .cat-te-frame-preview img {
     display: block;
-    max-width: 160px;
-    max-height: 160px;
+    max-width: 320px;
+    max-height: 320px;
     object-fit: contain;
     border-radius: 4px;
 }
