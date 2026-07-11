@@ -976,6 +976,11 @@ export class CapTimelineEditorApp {
                 label: "重新关联文件",
                 fn: () => this._chooseMaterialFile({ file, kind }),
             });
+            if (status.location === "missing") items.push({
+                label: "删除",
+                fn: () => this._deleteMissingMedia(file, kind),
+                danger: true,
+            });
             if (status.location === "input") items.push({
                 label: "移动到设置目录",
                 fn: () => void this._moveInputAsset(file, kind),
@@ -1992,6 +1997,46 @@ export class CapTimelineEditorApp {
         this._projectResources = [...new Map(
             this._projectResources.map(resource => [`${resource.kind}:${resource.file}`, resource]),
         ).values()];
+    }
+
+    _deleteMissingMedia(file, kind) {
+        const label = file.split(/[\\/]/).pop() || file;
+        if (!confirm(`确定删除失联素材「${label}」？相关时间轴素材将一并移除。`)) return;
+        this._recordUndo();
+        const removedClipIds = new Set();
+        for (const track of this._timeline?.tracks ?? []) {
+            for (const clip of [...track.clips]) {
+                const meta = this._meta.get(clip.id);
+                const clipKind = track.type === "audio" ? "audio" : meta?.mediaKind === "video" ? "video" : "image";
+                if (clipKind === kind && clip.src === file) {
+                    removedClipIds.add(clip.id);
+                    this._meta.delete(clip.id);
+                    this._timeline.removeClip(track.id, clip.id);
+                    this._pruneEmptyTrack(track);
+                    continue;
+                }
+                if (kind === "image" && meta?.endImage === file) {
+                    meta.endImage = null;
+                    this._meta.set(clip.id, meta);
+                    this._decorateClip(clip);
+                }
+            }
+        }
+        if (this._selClip && removedClipIds.has(this._selClip.id)) {
+            this._selClip = null;
+            this._selClips = [];
+            this._timeline.clearSelection();
+            this._updatePromptPanel();
+        }
+        const list = kind === "audio" ? this._audioFiles : kind === "video" ? this._videoFiles : this._imgFiles;
+        const index = list.indexOf(file);
+        if (index >= 0) list.splice(index, 1);
+        this._mediaStatus.delete(`${kind}:${file}`);
+        this._projectResources = this._projectResources.filter(
+            resource => !(resource.kind === kind && resource.file === file),
+        );
+        this._renderMediaGrid();
+        this._refreshTimelineDuration();
     }
 
     async _moveInputAsset(file, kind) {
