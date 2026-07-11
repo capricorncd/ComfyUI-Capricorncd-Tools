@@ -15,6 +15,7 @@ import {
 import {
     PRESET_CATEGORIES,
     PRESET_FILTER_ORDER,
+    GU_FENG_FEMALE_SUB_FILTERS,
     formatPresetWriteText,
     getBuiltinPresets,
 } from "./cap_prompt_presets.js";
@@ -165,6 +166,11 @@ function getAllPresets() {
 function filterPresetsByCategory(list, categoryId) {
     if (!categoryId || categoryId === "all") return list;
     return list.filter((item) => item.category === categoryId);
+}
+
+function filterPresetsBySubCategory(list, categoryId, subCatId) {
+    if (categoryId !== "gu_feng_female" || !subCatId || subCatId === "all") return list;
+    return list.filter((item) => item.subCategory === subCatId);
 }
 
 function filterHistoryByStars(list, starFilter) {
@@ -380,6 +386,7 @@ function pickJsonFile() {
 let _modal = null;
 let _modalKind = "history";
 let _modalCatFilter = "all";
+let _modalSubCatFilter = "all";
 let _modalStarFilter = "all";
 /** @type {{ x: number, y: number } | null} */
 let _modalPos = null;
@@ -395,6 +402,7 @@ function closePromptLibraryModal() {
     _modal = null;
     _modalKind = "history";
     _modalCatFilter = "all";
+    _modalSubCatFilter = "all";
     _modalStarFilter = "all";
     _modalPos = null;
 }
@@ -626,8 +634,15 @@ function renderCategoryBar(host, kind) {
         return;
     }
     renderFilterBar(host, kind, PRESET_CAT_FILTERS, _modalCatFilter, (id) => {
-        _modalCatFilter = _modalCatFilter === id ? "all" : id;
+        const next = _modalCatFilter === id ? "all" : id;
+        _modalCatFilter = next;
+        if (next !== "gu_feng_female") _modalSubCatFilter = "all";
     });
+    if (_modalCatFilter === "gu_feng_female") {
+        renderFilterBar(host, kind, GU_FENG_FEMALE_SUB_FILTERS, _modalSubCatFilter, (id) => {
+            _modalSubCatFilter = _modalSubCatFilter === id ? "all" : id;
+        });
+    }
     renderFilterBar(host, kind, HISTORY_STAR_FILTERS, _modalStarFilter, (id) => {
         _modalStarFilter = _modalStarFilter === id ? "all" : id;
     });
@@ -698,6 +713,7 @@ function renderList(body, kind) {
         list = filterHistoryByStars(list, _modalStarFilter);
     } else {
         list = filterPresetsByCategory(list, _modalCatFilter);
+        list = filterPresetsBySubCategory(list, _modalCatFilter, _modalSubCatFilter);
         list = filterHistoryByStars(list, _modalStarFilter);
     }
 
@@ -962,6 +978,7 @@ function buildModal(initialKind = "history") {
     const switchKind = (kind) => {
         _modalKind = normalizeKind(kind);
         _modalCatFilter = "all";
+        _modalSubCatFilter = "all";
         _modalStarFilter = "all";
         setActiveTab(tabs, _modalKind);
         renderToolbar(toolbar, body, _modalKind);
