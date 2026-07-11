@@ -41,7 +41,9 @@ export class Track extends EventEmitter {
 
     const icon = document.createElement('span');
     icon.className = 'tl-track-icon';
-    icon.innerHTML = ICONS.trackType[this.type] || ICONS.trackType.video;
+    icon.innerHTML = this.type === 'image'
+        ? ICONS.clapperboard
+        : (ICONS[this.type] || ICONS.video);
 
     // Icon-only header — no visible name/type text (hover the row for its
     // name via the title tooltip). This spacer just pushes the action

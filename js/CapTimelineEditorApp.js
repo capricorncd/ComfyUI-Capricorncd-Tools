@@ -3,11 +3,15 @@ import { Timeline, ICONS } from "./timeline/index.js";
 import { parseTimecode, formatTimecode } from "./timecode.js";
 import { attachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 import { loadExtensionCss } from "./cap_ui.js";
+import { iconHtml } from "./cap_icons.js";
 
 /** Right-side empty margin as a fraction of the timeline viewport width. */
 const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
 /** All tracks (main/overlay/audio) share one row height. */
 const TRACK_HEIGHT = 78;
+const STORAGE_MEDIA_STARS = "capricorncd.timeline.media_stars";
+const MEDIA_TAB_ICONS = { image: "image", video: "video", audio: "audio" };
+const MEDIA_TAB_TITLES = { image: "图片", video: "视频", audio: "音频" };
 
 function loadEditorCss() {
     loadExtensionCss("cap_timeline_editor.css", "cat-te-styles");
@@ -58,6 +62,8 @@ export class CapTimelineEditorApp {
         this._projectResources = [];
         this._videoThumbCache = new Map();
         this._mediaTab = "image";
+        this._mediaStarFilter = "all";
+        this._mediaStarsByDir = {};
         this._overlay = null;
         this._timeline = null;
         this._mainTrack = null;
@@ -141,6 +147,7 @@ export class CapTimelineEditorApp {
             ["fps", "width", "height", "global_prompt"].map(name => [name, this._w(name)?.value]),
         );
         await this._initTimelineFromWidgets();
+        this._loadMediaStarsForDir();
         await Promise.all([this._loadMediaList(), this._loadVideoFileList(), this._loadAudioFileList()]);
         await this._syncProjectMedia();
         this._refreshTimelineDuration();
@@ -304,11 +311,12 @@ export class CapTimelineEditorApp {
           <div class="cat-te-main">
             <aside class="cat-te-media">
               <div class="cat-te-media-tabs">
-                <button type="button" class="cat-te-tab active" data-tab="image">图片</button>
-                <button type="button" class="cat-te-tab" data-tab="video">视频</button>
-                <button type="button" class="cat-te-tab" data-tab="audio">音频</button>
-                <button type="button" class="cat-te-media-refresh" title="刷新素材列表">⟳</button>
+                <button type="button" class="cat-te-tab active" data-tab="image" title="图片"></button>
+                <button type="button" class="cat-te-tab" data-tab="video" title="视频"></button>
+                <button type="button" class="cat-te-tab" data-tab="audio" title="音频"></button>
+                <button type="button" class="cat-te-media-refresh" title="刷新素材列表"></button>
               </div>
+              <div class="cat-te-media-filters"></div>
               <div class="cat-te-media-grid"></div>
             </aside>
             <div class="cat-te-center">
@@ -412,6 +420,7 @@ export class CapTimelineEditorApp {
         document.body.appendChild(el);
         this._overlay = el;
         this.projectNameInput = el.querySelector(".cat-te-title");
+        this.mediaStarFilterHost = el.querySelector(".cat-te-media-filters");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
         this.tlHost = el.querySelector(".cat-te-timeline-host");
         this.promptInput = el.querySelector(".cat-te-prompt-input");
@@ -478,6 +487,10 @@ export class CapTimelineEditorApp {
         });
 
         el.querySelectorAll(".cat-te-tab").forEach(btn => {
+            const tab = btn.dataset.tab;
+            const iconName = MEDIA_TAB_ICONS[tab];
+            if (iconName) btn.innerHTML = iconHtml(iconName, 14);
+            btn.title = MEDIA_TAB_TITLES[tab] || tab;
             btn.addEventListener("click", () => {
                 el.querySelectorAll(".cat-te-tab").forEach(b => b.classList.remove("active"));
                 btn.classList.add("active");
@@ -485,7 +498,11 @@ export class CapTimelineEditorApp {
                 this._renderMediaGrid();
             });
         });
-        el.querySelector(".cat-te-media-refresh")?.addEventListener("click", () => this._refreshMediaLists());
+        const mediaRefreshBtn = el.querySelector(".cat-te-media-refresh");
+        if (mediaRefreshBtn) {
+            mediaRefreshBtn.innerHTML = iconHtml("refresh", 14);
+            mediaRefreshBtn.addEventListener("click", () => this._refreshMediaLists());
+        }
 
         this.promptInput.addEventListener("focus", () => { this._promptUndoArmed = true; });
         this.promptInput.addEventListener("blur", () => { this._promptUndoArmed = false; });
@@ -642,10 +659,10 @@ export class CapTimelineEditorApp {
         }
         if (kind === "lock") {
             const render = () => {
-                btn.innerHTML = ICONS.lock;
+                btn.innerHTML = track.locked ? ICONS.lock : ICONS.lockOpen;
                 btn.classList.toggle("active", track.locked);
+                btn.title = track.locked ? "解锁轨道" : "锁定轨道";
             };
-            btn.title = "锁定轨道";
             btn.addEventListener("click", e => {
                 e.stopPropagation();
                 this._recordUndo();
@@ -803,6 +820,7 @@ export class CapTimelineEditorApp {
         const btn = this._overlay?.querySelector(".cat-te-media-refresh");
         btn?.classList.add("spinning");
         this._videoThumbCache.clear();
+        this._loadMediaStarsForDir();
         try {
             await Promise.all([
                 this._loadMediaList(),
@@ -816,7 +834,100 @@ export class CapTimelineEditorApp {
         }
     }
 
+    _mediaStarsId(kind, file) {
+        return `${kind}:${file}`;
+    }
+
+    _loadMediaStarsForDir() {
+        const dir = this._dir();
+        if (!dir) {
+            this._mediaStarsByDir = {};
+            return;
+        }
+        try {
+            const all = JSON.parse(localStorage.getItem(STORAGE_MEDIA_STARS) || "{}");
+            const bucket = all[dir];
+            this._mediaStarsByDir = bucket && typeof bucket === "object" ? { ...bucket } : {};
+        } catch {
+            this._mediaStarsByDir = {};
+        }
+    }
+
+    _saveMediaStarsForDir() {
+        const dir = this._dir();
+        if (!dir) return;
+        try {
+            const all = JSON.parse(localStorage.getItem(STORAGE_MEDIA_STARS) || "{}");
+            if (!Object.keys(this._mediaStarsByDir).length) delete all[dir];
+            else all[dir] = this._mediaStarsByDir;
+            localStorage.setItem(STORAGE_MEDIA_STARS, JSON.stringify(all));
+        } catch { /* ignore */ }
+    }
+
+    _getMediaStars(kind, file) {
+        const n = Number(this._mediaStarsByDir?.[this._mediaStarsId(kind, file)]);
+        return Number.isFinite(n) && n >= 1 && n <= 5 ? n : undefined;
+    }
+
+    _setMediaStars(kind, file, stars) {
+        const id = this._mediaStarsId(kind, file);
+        const n = Number(stars);
+        if (Number.isFinite(n) && n >= 1 && n <= 5) this._mediaStarsByDir[id] = n;
+        else delete this._mediaStarsByDir[id];
+        this._saveMediaStarsForDir();
+    }
+
+    _filterFilesByStars(files, kind) {
+        if (!this._mediaStarFilter || this._mediaStarFilter === "all") return files;
+        const stars = parseInt(this._mediaStarFilter, 10);
+        if (!Number.isFinite(stars)) return files;
+        return files.filter(file => this._getMediaStars(kind, file) === stars);
+    }
+
+    _renderMediaStarFilter() {
+        if (!this.mediaStarFilterHost) return;
+        this.mediaStarFilterHost.replaceChildren();
+        const bar = document.createElement("div");
+        bar.className = "cat-te-media-star-bar";
+
+        const resetBtn = document.createElement("button");
+        resetBtn.type = "button";
+        resetBtn.className = "cat-te-media-star-reset";
+        resetBtn.textContent = "重置";
+        resetBtn.title = "清除星级筛选";
+        resetBtn.disabled = this._mediaStarFilter === "all";
+        resetBtn.addEventListener("click", () => {
+            if (this._mediaStarFilter === "all") return;
+            this._mediaStarFilter = "all";
+            this._renderMediaGrid();
+        });
+        bar.appendChild(resetBtn);
+
+        const group = document.createElement("div");
+        group.className = "cat-te-media-star-filter-group";
+        const activeStars = this._mediaStarFilter === "all"
+            ? 0
+            : parseInt(this._mediaStarFilter, 10) || 0;
+        for (let i = 1; i <= 5; i++) {
+            const starBtn = document.createElement("button");
+            starBtn.type = "button";
+            starBtn.className = "cat-te-media-star-filter-star";
+            starBtn.innerHTML = iconHtml("star", 12);
+            starBtn.title = `筛选 ${i} 星素材`;
+            if (i <= activeStars) starBtn.classList.add("on");
+            if (String(i) === this._mediaStarFilter) starBtn.classList.add("active");
+            starBtn.addEventListener("click", () => {
+                this._mediaStarFilter = String(i);
+                this._renderMediaGrid();
+            });
+            group.appendChild(starBtn);
+        }
+        bar.appendChild(group);
+        this.mediaStarFilterHost.appendChild(bar);
+    }
+
     _renderMediaGrid() {
+        this._renderMediaStarFilter();
         this.mediaGrid.replaceChildren();
         if (this._mediaTab === "audio") {
             this._renderAudioMediaGrid();
@@ -843,7 +954,15 @@ export class CapTimelineEditorApp {
             this.mediaGrid.appendChild(msg);
             return;
         }
-        for (const file of this._imgFiles) {
+        const files = this._filterFilesByStars(this._imgFiles, "image");
+        if (!files.length) {
+            const msg = document.createElement("div");
+            msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
+            msg.textContent = "没有符合筛选条件的素材";
+            this.mediaGrid.appendChild(msg);
+            return;
+        }
+        for (const file of files) {
             this.mediaGrid.appendChild(this._makeMediaItem(file, "image"));
         }
     }
@@ -864,7 +983,15 @@ export class CapTimelineEditorApp {
             this.mediaGrid.appendChild(msg);
             return;
         }
-        for (const file of this._audioFiles) {
+        const files = this._filterFilesByStars(this._audioFiles, "audio");
+        if (!files.length) {
+            const msg = document.createElement("div");
+            msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
+            msg.textContent = "没有符合筛选条件的素材";
+            this.mediaGrid.appendChild(msg);
+            return;
+        }
+        for (const file of files) {
             this.mediaGrid.appendChild(this._makeMediaItem(file, "audio"));
         }
     }
@@ -885,7 +1012,15 @@ export class CapTimelineEditorApp {
             this.mediaGrid.appendChild(msg);
             return;
         }
-        for (const file of this._videoFiles) {
+        const files = this._filterFilesByStars(this._videoFiles, "video");
+        if (!files.length) {
+            const msg = document.createElement("div");
+            msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
+            msg.textContent = "没有符合筛选条件的素材";
+            this.mediaGrid.appendChild(msg);
+            return;
+        }
+        for (const file of files) {
             this.mediaGrid.appendChild(this._makeMediaItem(file, "video"));
         }
     }
@@ -945,10 +1080,28 @@ export class CapTimelineEditorApp {
         const nm = document.createElement("div");
         nm.className = "cat-te-media-name";
         nm.textContent = file.split(/[\\/]/).pop();
+        const starsWrap = document.createElement("div");
+        starsWrap.className = "cat-te-media-stars";
+        const current = this._getMediaStars(kind, file) ?? 0;
+        for (let i = 1; i <= 5; i++) {
+            const starBtn = document.createElement("button");
+            starBtn.type = "button";
+            starBtn.className = "cat-te-media-star-btn";
+            starBtn.innerHTML = iconHtml("star", 10);
+            starBtn.title = `${i} 星`;
+            if (i <= current) starBtn.classList.add("on");
+            starBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const cur = this._getMediaStars(kind, file) ?? 0;
+                this._setMediaStars(kind, file, cur === i ? undefined : i);
+                this._renderMediaGrid();
+            });
+            starsWrap.appendChild(starBtn);
+        }
         const dragHint = document.createElement("div");
         dragHint.className = "cat-te-media-drag-hint";
         dragHint.textContent = "⋮⋮";
-        item.append(nm, dragHint);
+        item.append(nm, starsWrap, dragHint);
         if (status.location === "input") {
             const warning = document.createElement("div");
             warning.className = "cat-te-media-warning";
