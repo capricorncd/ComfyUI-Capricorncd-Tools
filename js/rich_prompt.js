@@ -59,7 +59,17 @@ function syncMirrorLayout(ta) {
         "textIndent", "tabSize", "whiteSpace", "wordBreak", "overflowWrap",
     ];
     for (const key of copy) m.style[key] = cs[key];
-    m.style.boxSizing = cs.boxSizing;
+    // Keep mirror borderless: border-box + copied border would shrink wrap width vs textarea.
+    m.style.boxSizing = "border-box";
+    m.style.border = "none";
+    m.style.margin = "0";
+    m.style.outline = "none";
+    if (!cs.whiteSpace || cs.whiteSpace === "normal") {
+        m.style.whiteSpace = "pre-wrap";
+    }
+    if (!cs.overflowWrap || cs.overflowWrap === "normal") {
+        m.style.overflowWrap = "break-word";
+    }
     refreshMirrorColors(ta);
 
     if (ta._capRichMode === "overlay" || ta._capRichMode === "widget") {
@@ -97,7 +107,7 @@ function applyMirrorSurface(mirror, cs, mode) {
     const bg = cs.backgroundColor;
     const isTransparentBg = !bg || bg === "transparent" || bg === "rgba(0, 0, 0, 0)";
     mirror.style.background = (mode === "overlay" || isTransparentBg) ? "transparent" : bg;
-    mirror.style.border = mode === "overlay" ? "none" : cs.border;
+    mirror.style.border = "none";
     mirror.style.borderRadius = mode === "overlay" ? "0" : cs.borderRadius;
 }
 
@@ -109,16 +119,19 @@ function ensureMirror(ta, mode) {
     const cs = getComputedStyle(ta);
     const textColor = resolveTextColor(cs);
 
-    const mirror = document.createElement(mode === "widget" ? "pre" : "div");
+    const mirror = document.createElement("div");
     mirror.className = "cap-rich-prompt-mirror";
     Object.assign(mirror.style, {
         margin: "0",
+        border: "none",
         overflow: "hidden",
         pointerEvents: "none",
         color: textColor,
         whiteSpace: "pre-wrap",
         wordWrap: "break-word",
+        overflowWrap: "break-word",
         wordBreak: "break-word",
+        boxSizing: "border-box",
     });
     applyMirrorSurface(mirror, cs, mode);
 
@@ -162,7 +175,12 @@ function ensureMirror(ta, mode) {
             syncMirrorLayout(ta);
             updateRichPromptMirror(ta);
         });
-        ta._capMirrorResizeObs.observe(ta);
+        // content-box: scrollbar show/hide changes wrap width without border-box resize.
+        try {
+            ta._capMirrorResizeObs.observe(ta, { box: "content-box" });
+        } catch {
+            ta._capMirrorResizeObs.observe(ta);
+        }
     }
     updateRichPromptMirror(ta);
     return true;
