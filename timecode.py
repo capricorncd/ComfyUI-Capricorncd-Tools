@@ -84,6 +84,54 @@ def resolve_assets_dir(path: str) -> str:
     return os.path.normpath(os.path.join(folder_paths.get_input_directory(), path))
 
 
+def _safe_join(base: str, rel: str) -> str | None:
+    import os
+
+    rel = (rel or "").strip().replace("\\", "/")
+    if not rel or rel.startswith("/") or ".." in rel.split("/"):
+        return None
+    base_real = os.path.realpath(base)
+    candidate_real = os.path.realpath(os.path.join(base_real, rel.replace("/", os.sep)))
+    if candidate_real != base_real and not candidate_real.startswith(base_real + os.sep):
+        return None
+    return candidate_real
+
+
+def resolve_media_path(name: str, *, assets_dir: str = "", location: str = "assets") -> str:
+    """Resolve a timeline media reference to an absolute file path."""
+    import folder_paths
+    import os
+
+    name = str(name or "").strip()
+    if not name:
+        return ""
+    if os.path.isfile(name):
+        return os.path.normpath(name)
+
+    if location == "input":
+        if folder_paths.exists_annotated_filepath(name):
+            return folder_paths.get_annotated_filepath(name)
+        candidate = os.path.join(folder_paths.get_input_directory(), name.replace("/", os.sep))
+        return os.path.normpath(candidate) if os.path.isfile(candidate) else os.path.normpath(candidate)
+
+    resolved = resolve_assets_dir(assets_dir)
+    if resolved:
+        path = _safe_join(resolved, name)
+        if path and os.path.isfile(path):
+            return path
+
+    input_candidate = os.path.join(folder_paths.get_input_directory(), name.replace("/", os.sep))
+    if os.path.isfile(input_candidate):
+        return os.path.normpath(input_candidate)
+
+    if folder_paths.exists_annotated_filepath(name):
+        return folder_paths.get_annotated_filepath(name)
+
+    if resolved:
+        return os.path.normpath(os.path.join(resolved, name.replace("/", os.sep)))
+    return name
+
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}

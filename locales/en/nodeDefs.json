@@ -107,6 +107,23 @@
     }
   },
 
+  "CAP_SaveImages": {
+    "display_name": "Save Images",
+    "inputs": {
+      "images":          { "name": "Images" },
+      "filename_prefix": { "name": "Filename Prefix" },
+      "filename":        { "name": "Filename" },
+      "quality":         { "name": "Quality" },
+      "dpi":             { "name": "DPI" },
+      "save_as_zip":     { "name": "Save As Zip" },
+      "metadata":        { "name": "Metadata" }
+    },
+    "outputs": {
+      "image_dir":   { "name": "Image Dir" },
+      "image_paths": { "name": "Image Paths" }
+    }
+  },
+
   "CAP_LoadImagesFromDir": {
     "display_name": "Load Images From Dir",
     "inputs": {

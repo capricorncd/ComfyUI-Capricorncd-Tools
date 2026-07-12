@@ -56,7 +56,11 @@ body.cat-te-col-resize * {
 
 .cat-te-header-close {
     color: #aaa;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
+.cat-te-header-close svg { display: block; }
 .cat-te-header-close:hover { color: #fff; background: rgba(255, 80, 80, 0.2); border-color: rgba(255, 80, 80, 0.45); }
 
 .cat-te-trim {
@@ -178,7 +182,11 @@ body.cat-te-col-resize * {
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
+.cat-te-modal-close svg { display: block; }
 .cat-te-modal-close:hover { background: rgba(255,255,255,0.08); color: #fff; }
 
 .cat-te-modal-body {
@@ -318,6 +326,20 @@ body.cat-te-col-resize * {
 
 .cat-te-media-preview-insert {
     flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.cat-te-media-preview-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.cat-te-media-preview-replace,
+.cat-te-media-preview-end-frame {
     white-space: nowrap;
 }
 

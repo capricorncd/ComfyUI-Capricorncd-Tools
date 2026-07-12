@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from PIL import Image
 
+from .timecode import resolve_media_path
+
 
 class CAP_DataJsonClipParser:
     """Parse data_json from CAP_AudioTimeline or CAP_TimelineEditor and extract a clip by index."""
@@ -35,12 +37,13 @@ class CAP_DataJsonClipParser:
         return (data_json, index, trim_offset)
 
     def _load_waveform(self, audio_path: str):
+        audio_path = os.path.normpath(str(audio_path or ""))
+        from comfy_extras.nodes_audio import load
         try:
+            return load(audio_path)
+        except Exception:
             import torchaudio
             return torchaudio.load(audio_path)
-        except Exception:
-            from comfy_extras.nodes_audio import load
-            return load(audio_path)
 
     def _pack(self, waveform, sample_rate):
         if waveform.dim() == 2:
@@ -116,24 +119,8 @@ class CAP_DataJsonClipParser:
             return 1
         return max(1, int(round(duration_ms * fps / 1000)))
 
-    def _resolve_file_path(self, file_ref, location: str = "assets") -> str:
-        name = str(file_ref or "").strip()
-        if not name:
-            return ""
-        if os.path.isfile(name):
-            return name
-        try:
-            import folder_paths
-            if folder_paths.exists_annotated_filepath(name):
-                return folder_paths.get_annotated_filepath(name)
-            candidate = os.path.join(folder_paths.get_input_directory(), name)
-            if os.path.isfile(candidate):
-                return candidate
-            if location == "input":
-                return candidate
-        except Exception:
-            pass
-        return name
+    def _resolve_file_path(self, file_ref, location: str = "assets", assets_dir: str = "") -> str:
+        return resolve_media_path(str(file_ref or ""), assets_dir=assets_dir, location=location)
 
     def _uses_master_audio(self, data: dict, clip: dict) -> bool:
         if clip.get("audios") is not None:
@@ -171,7 +158,7 @@ class CAP_DataJsonClipParser:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            path = self._resolve_file_path(row.get("file"), str(row.get("location") or "assets"))
+            path = os.path.normpath(self._resolve_file_path(row.get("file"), str(row.get("location") or "assets")))
             if not path or not os.path.isfile(path):
                 continue
 
@@ -182,7 +169,10 @@ class CAP_DataJsonClipParser:
             if trim_offset and offset_ms + slice_ms >= clip_duration_ms - 1:
                 src_end += int(trim_offset) * 1000
 
-            waveform, sr = self._load_waveform(path)
+            try:
+                waveform, sr = self._load_waveform(path)
+            except Exception:
+                continue
             if sr != sample_rate:
                 waveform = self._resample_waveform(waveform, sr, sample_rate)
             seg = self._trim(waveform, sample_rate, src_start, src_end)["waveform"]

@@ -360,7 +360,7 @@ export class CapTimelineEditorApp {
             <button type="button" class="cat-te-btn cat-te-import">导入</button>
             <button type="button" class="cat-te-btn cat-te-export">导出</button>
             <button type="button" class="cat-te-btn cat-te-settings">⚙ 设置</button>
-            <button type="button" class="cat-te-btn cat-te-header-close" title="关闭">✕</button>
+            <button type="button" class="cat-te-btn cat-te-header-close" title="关闭">${iconHtml("close", 16)}</button>
             <input class="cat-te-import-file" type="file" accept="application/json,.json" hidden />
           </header>
           <div class="cat-te-main">
@@ -429,7 +429,7 @@ export class CapTimelineEditorApp {
               <div class="cat-te-modal-header cat-te-media-preview-header">
                 <span class="cat-te-media-preview-title">素材预览</span>
                 <div class="cat-te-media-preview-stars"></div>
-                <button type="button" class="cat-te-modal-close cat-te-media-preview-close" title="关闭">×</button>
+                <button type="button" class="cat-te-modal-close cat-te-media-preview-close" title="关闭">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-media-preview-body">
                 <button type="button" class="cat-te-media-preview-nav prev" title="上一张（右键）" aria-label="上一张">‹</button>
@@ -438,7 +438,11 @@ export class CapTimelineEditorApp {
               </div>
               <div class="cat-te-media-preview-footer">
                 <span class="cat-te-media-preview-hint">← → 切换 · 左键下一张 · 右键上一张 · 点击星星设置评级</span>
-                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-media-preview-insert">插入到当前位置</button>
+                <div class="cat-te-media-preview-actions">
+                  <button type="button" class="cat-te-btn cat-te-media-preview-replace" hidden>替换</button>
+                  <button type="button" class="cat-te-btn cat-te-media-preview-end-frame" hidden>设为尾帧</button>
+                  <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-media-preview-insert">插入到当前位置</button>
+                </div>
               </div>
             </div>
           </div>
@@ -446,7 +450,7 @@ export class CapTimelineEditorApp {
             <div class="cat-te-modal cat-te-add-material-dialog">
               <div class="cat-te-modal-header">
                 <span class="cat-te-add-material-title">添加素材</span>
-                <button type="button" class="cat-te-modal-close cat-te-add-material-close" title="取消">×</button>
+                <button type="button" class="cat-te-modal-close cat-te-add-material-close" title="取消">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-add-material-preview"></div>
               <div class="cat-te-add-material-options">
@@ -463,7 +467,7 @@ export class CapTimelineEditorApp {
             <div class="cat-te-modal">
               <div class="cat-te-modal-header">
                 <span>设置</span>
-                <button type="button" class="cat-te-modal-close" title="关闭">✕</button>
+                <button type="button" class="cat-te-modal-close" title="关闭">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-modal-body">
                 <label class="cat-te-modal-row">
@@ -512,6 +516,8 @@ export class CapTimelineEditorApp {
         this.mediaPreviewPrevBtn = el.querySelector(".cat-te-media-preview-nav.prev");
         this.mediaPreviewNextBtn = el.querySelector(".cat-te-media-preview-nav.next");
         this.mediaPreviewInsertBtn = el.querySelector(".cat-te-media-preview-insert");
+        this.mediaPreviewReplaceBtn = el.querySelector(".cat-te-media-preview-replace");
+        this.mediaPreviewEndFrameBtn = el.querySelector(".cat-te-media-preview-end-frame");
         this.mediaPreviewFooter = el.querySelector(".cat-te-media-preview-footer");
         this.mediaPreviewHint = el.querySelector(".cat-te-media-preview-hint");
         this.addMaterialModal = el.querySelector(".cat-te-add-material-modal");
@@ -551,11 +557,19 @@ export class CapTimelineEditorApp {
             e.stopPropagation();
             void this._insertMediaPreviewAtSeek();
         });
+        this.mediaPreviewReplaceBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this._replaceSelectedClipFromPreview();
+        });
+        this.mediaPreviewEndFrameBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this._setEndFrameFromPreview();
+        });
         this.mediaPreviewBody?.addEventListener("mousedown", (e) => {
             if (this.mediaPreviewModal.hidden) return;
             if (this._mediaPreviewState?.browse === false) return;
             if (e.button !== 0) return;
-            if (e.target.closest(".cat-te-media-preview-stars, .cat-te-media-preview-nav, .cat-te-modal-close")) return;
+            if (e.target.closest(".cat-te-media-preview-stars, .cat-te-media-preview-nav, .cat-te-modal-close, .cat-te-media-preview-actions")) return;
             if (e.target.closest("video, audio")) return;
             e.preventDefault();
             this._stepMediaPreview(1);
@@ -563,7 +577,7 @@ export class CapTimelineEditorApp {
         this.mediaPreviewBody?.addEventListener("contextmenu", (e) => {
             if (this.mediaPreviewModal.hidden) return;
             if (this._mediaPreviewState?.browse === false) return;
-            if (e.target.closest(".cat-te-media-preview-stars, .cat-te-media-preview-nav, .cat-te-modal-close")) return;
+            if (e.target.closest(".cat-te-media-preview-stars, .cat-te-media-preview-nav, .cat-te-modal-close, .cat-te-media-preview-actions")) return;
             e.preventDefault();
             e.stopPropagation();
             this._stepMediaPreview(-1);
@@ -2431,7 +2445,95 @@ export class CapTimelineEditorApp {
         if (this.mediaPreviewHint) this.mediaPreviewHint.hidden = !browse;
         if (this.mediaPreviewInsertBtn) this.mediaPreviewInsertBtn.hidden = !browse;
 
-        if (browse) this._updateMediaPreviewInsertBtn();
+        if (browse) {
+            this._updateMediaPreviewInsertBtn();
+            this._updateMediaPreviewClipActions();
+        } else {
+            if (this.mediaPreviewReplaceBtn) this.mediaPreviewReplaceBtn.hidden = true;
+            if (this.mediaPreviewEndFrameBtn) this.mediaPreviewEndFrameBtn.hidden = true;
+        }
+    }
+
+    _previewMediaKindForFile(file) {
+        if (this._audioFiles.includes(file)) return "audio";
+        if (this._videoFiles.includes(file)) return "video";
+        return "image";
+    }
+
+    _clipAcceptsPreviewMedia(clip, kind) {
+        if (!clip) return false;
+        if (clip.track?.type === "audio") return kind === "audio";
+        const m = this._meta.get(clip.id);
+        if (m?.mediaKind === "package") return false;
+        if (m?.mediaKind === "video") return kind === "video";
+        if (kind === "audio") return false;
+        return kind === "image" || kind === "video";
+    }
+
+    _canSetEndFrameFromPreview(clip, kind) {
+        if (kind !== "image" || !clip || clip.track?.type === "audio") return false;
+        const m = this._meta.get(clip.id);
+        if (m?.mediaKind === "package" || m?.mediaKind === "video") return false;
+        return true;
+    }
+
+    _updateMediaPreviewClipActions() {
+        const state = this._mediaPreviewState;
+        const replaceBtn = this.mediaPreviewReplaceBtn;
+        const endFrameBtn = this.mediaPreviewEndFrameBtn;
+        if (!replaceBtn || !endFrameBtn || state?.browse === false) return;
+
+        const clip = this.getSelectedClip();
+        if (!clip || !state?.files?.length) {
+            replaceBtn.hidden = true;
+            endFrameBtn.hidden = true;
+            return;
+        }
+
+        const file = state.files[state.index];
+        const kind = state.kind;
+        const status = this._mediaStatus.get(`${kind}:${file}`);
+        const missing = status?.location === "missing";
+        const canReplace = this._clipAcceptsPreviewMedia(clip, kind);
+
+        replaceBtn.hidden = !canReplace;
+        replaceBtn.disabled = missing || !canReplace;
+        replaceBtn.title = missing ? "素材文件缺失" : "用当前预览素材替换选中片段";
+
+        const canEndFrame = this._canSetEndFrameFromPreview(clip, kind);
+        endFrameBtn.hidden = !canEndFrame;
+        endFrameBtn.disabled = missing || !canEndFrame;
+        endFrameBtn.title = missing ? "素材文件缺失" : "将当前预览图片设为选中片段的尾帧";
+    }
+
+    _replaceSelectedClipFromPreview() {
+        const state = this._mediaPreviewState;
+        const clip = this.getSelectedClip();
+        if (!state?.files?.length || !clip) return;
+        const file = state.files[state.index];
+        const kind = state.kind;
+        if (!this._clipAcceptsPreviewMedia(clip, kind)) return;
+        const status = this._mediaStatus.get(`${kind}:${file}`);
+        if (status?.location === "missing") {
+            alert("素材文件缺失，无法替换");
+            return;
+        }
+        this._replaceClipMedia(clip, file, kind);
+    }
+
+    _setEndFrameFromPreview() {
+        const state = this._mediaPreviewState;
+        const clip = this.getSelectedClip();
+        if (!state?.files?.length || !clip) return;
+        const file = state.files[state.index];
+        const kind = state.kind;
+        if (!this._canSetEndFrameFromPreview(clip, kind)) return;
+        const status = this._mediaStatus.get(`${kind}:${file}`);
+        if (status?.location === "missing") {
+            alert("素材文件缺失，无法设为尾帧");
+            return;
+        }
+        this._setEndImage(clip, file);
     }
 
     _updateMediaPreviewInsertBtn() {
@@ -2508,6 +2610,7 @@ export class CapTimelineEditorApp {
         media.className = `cat-te-media-preview-content cat-te-media-preview-${kind}`;
         this.mediaPreviewStage.appendChild(media);
         this.mediaPreviewModal.hidden = false;
+        this._updateMediaPreviewClipActions();
     }
 
     _stepMediaPreview(delta) {
@@ -2806,7 +2909,7 @@ export class CapTimelineEditorApp {
     _showDropActionMenu(file, clip, x, y) {
         this._timeline.selectClip(clip);
         this._buildCtxMenu([
-            { label: "替换素材", fn: () => this._replaceClipImage(clip, file) },
+            { label: "替换素材", fn: () => this._replaceClipMedia(clip, file, this._previewMediaKindForFile(file)) },
             { label: "设置为尾帧", fn: () => this._setEndImage(clip, file) },
         ], x, y);
     }
@@ -2890,12 +2993,62 @@ export class CapTimelineEditorApp {
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
     }
 
-    _replaceClipImage(clip, filename) {
+    _replaceClipMedia(clip, filename, kind) {
+        if (!clip || !filename) return;
         this._recordUndo();
         clip.src = filename;
-        clip.name = filename.split(/[\\/]/).pop();
-        clip.thumbnail = this._imgUrl(filename);
-        this._refreshClipAppearance(clip);
+        clip.name = filename.split(/[\\/]/).pop() || clip.name;
+
+        if (clip.track?.type === "audio" || kind === "audio") {
+            void this._fetchPeaks(this._audioUrl(filename)).then(r => {
+                clip.waveformPeaks = r.peaks[0];
+                clip._audioBuffer = r.buffer;
+                clip.sourceDuration = r.duration;
+                const m = this._meta.get(clip.id) ?? defaultAudioMeta();
+                m.sourceDuration = r.duration;
+                this._meta.set(clip.id, m);
+                this._refreshClipAppearance(clip);
+            }).catch(() => this._refreshClipAppearance(clip));
+            this._refreshClipAppearance(clip);
+        } else if (kind === "video") {
+            const m = this._meta.get(clip.id) ?? defaultImageMeta();
+            m.mediaKind = "video";
+            clip.hasAudio = false;
+            clip._audioBuffer = null;
+            clip.waveformPeaks = null;
+            const url = this._videoUrl(filename);
+            void this._grabVideoThumbnail(url).then(thumb => {
+                clip.thumbnail = thumb;
+                this._refreshClipAppearance(clip);
+            }).catch(() => this._refreshClipAppearance(clip));
+            void this._fetchPeaks(url).then(r => {
+                clip.waveformPeaks = r.peaks[0];
+                clip.hasAudio = true;
+                clip._audioBuffer = r.buffer;
+                this._refreshClipAppearance(clip);
+            }).catch(() => {
+                clip.hasAudio = false;
+                this._refreshClipAppearance(clip);
+            });
+            void this._probeVideoDuration(url).then(d => {
+                if (!Number.isFinite(d)) return;
+                clip.sourceDuration = d;
+                m.sourceDuration = d;
+                this._meta.set(clip.id, m);
+            }).catch(() => { /* keep existing */ });
+            this._meta.set(clip.id, m);
+            this._refreshClipAppearance(clip);
+        } else {
+            const m = this._meta.get(clip.id) ?? defaultImageMeta();
+            m.mediaKind = "image";
+            clip.thumbnail = this._imgUrl(filename);
+            clip.hasAudio = false;
+            clip._audioBuffer = null;
+            clip.waveformPeaks = null;
+            this._meta.set(clip.id, m);
+            this._refreshClipAppearance(clip);
+        }
+
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         this._renderMediaGrid();
     }
@@ -3079,6 +3232,7 @@ export class CapTimelineEditorApp {
             this._selClips = selected ?? tl.getSelectedClips();
             this._syncSelectedClip();
             this._updatePromptPanel();
+            this._updateMediaPreviewClipActions();
             this._overlay?.focus();
         });
         tl.on("clip:add", ({ clip }) => {
@@ -3089,6 +3243,7 @@ export class CapTimelineEditorApp {
             this._selClip = null;
             this._selClips = [];
             this._updatePromptPanel();
+            this._updateMediaPreviewClipActions();
         });
         tl.on("clip:remove", ({ clipId, trackId }) => {
             this._meta.delete(clipId);

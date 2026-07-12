@@ -594,10 +594,13 @@
     border: none;
     color: #666;
     cursor: pointer;
-    font-size: 13px;
     padding: 0 3px;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
+.cat-picker-x svg { display: block; }
 .cat-picker-x:hover { color: #ccc; }
 .cat-picker-refresh {
     background: none;

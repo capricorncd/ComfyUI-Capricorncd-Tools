@@ -1,8 +1,31 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 
 const NODE_CLASS = "CAP_TimelineEditor";
 const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt", "ignore_occluded"];
+
+function flushOpenTimelineEditors() {
+    for (const node of app.graph?._nodes ?? []) {
+        if (node.comfyClass === NODE_CLASS && node._teApp?._timeline) {
+            node._teApp._saveToWidgets();
+        }
+    }
+}
+
+function hookQueuePrompt() {
+    const wrap = (target, key) => {
+        if (!target || typeof target[key] !== "function" || target[key]._capTeHooked) return;
+        const orig = target[key];
+        target[key] = function (...args) {
+            flushOpenTimelineEditors();
+            return orig.apply(this, args);
+        };
+        target[key]._capTeHooked = true;
+    };
+    wrap(app, "queuePrompt");
+    wrap(api, "queuePrompt");
+}
 
 function hookScalarWidgets(node) {
     for (const name of SCALAR_WIDGETS) {
@@ -55,6 +78,7 @@ app.registerExtension({
         // matter which DOM node or registration order that uses — otherwise
         // its undo can fire first and e.g. close the director's console.
         window.addEventListener("keydown", onTeGlobalKeyDown, true);
+        hookQueuePrompt();
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData) {

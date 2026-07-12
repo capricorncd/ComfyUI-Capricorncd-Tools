@@ -107,6 +107,23 @@
     }
   },
 
+  "CAP_SaveImages": {
+    "display_name": "保存图像",
+    "inputs": {
+      "images":          { "name": "图像" },
+      "filename_prefix": { "name": "文件名前缀" },
+      "filename":        { "name": "文件名" },
+      "quality":         { "name": "质量" },
+      "dpi":             { "name": "DPI" },
+      "save_as_zip":     { "name": "打包 ZIP" },
+      "metadata":        { "name": "元数据" }
+    },
+    "outputs": {
+      "image_dir":   { "name": "图像目录" },
+      "image_paths": { "name": "图像路径" }
+    }
+  },
+
   "CAP_LoadImagesFromDir": {
     "display_name": "从目录加载图像",
     "inputs": {

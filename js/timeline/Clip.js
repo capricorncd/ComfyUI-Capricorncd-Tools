@@ -1,5 +1,5 @@
 import { EventEmitter } from './EventEmitter.js';
-import { generateId, clamp, generateWaveform } from './utils.js';
+import { generateId, clamp, generateWaveform, bindDragSession } from './utils.js';
 
 const MIN_DURATION = 0.05; // seconds
 
@@ -241,13 +241,9 @@ export class Clip extends EventEmitter {
       }
       this._applyPosition();
       tl.emit('clip:moveend', { clip: this, track: liveTrack, moved: this.startTime !== startTime || liveTrack !== origTrack });
-
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
     };
 
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    bindDragSession(e, { onMove, onEnd: onUp });
   }
 
   _dragTrim(e, side) {
@@ -316,12 +312,9 @@ export class Clip extends EventEmitter {
         track: this.track,
         moved: this.startTime !== origStart || this.duration !== origDur,
       });
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
     };
 
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    bindDragSession(e, { onMove, onEnd: onUp });
   }
 
   _applyPosition() {

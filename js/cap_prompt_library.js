@@ -955,7 +955,7 @@ function buildModal(initialKind = "history") {
         <div class="cap-ui-hd cap-ui-drag">
           <h3 class="cap-ui-hd-title">历史记录 / 预设</h3>
           <span class="cap-ui-target-hint"></span>
-          <button type="button" class="cap-ui-close" title="关闭">${iconHtml("close")}</button>
+          <button type="button" class="cap-ui-close" title="关闭">${iconHtml("close", 16)}</button>
         </div>
         <div class="cap-ui-tabs">
           <div class="cap-ui-tab-list">

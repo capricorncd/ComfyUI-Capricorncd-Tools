@@ -62,3 +62,51 @@ export function generateWaveform(seed, len = 80) {
     return (a + v * 2 + b) / 4;
   });
 }
+
+/**
+ * Bind a drag session that ends reliably even when the pointer is released
+ * over overlays (sidebar, media panel, etc.) outside the timeline.
+ */
+export function bindDragSession(startEvent, { onMove, onEnd }) {
+  let ended = false;
+  const captureTarget = startEvent.currentTarget ?? startEvent.target;
+
+  const finish = (ev) => {
+    if (ended) return;
+    ended = true;
+    teardown();
+    onEnd(ev);
+  };
+
+  const move = (ev) => {
+    if (!ended) onMove(ev);
+  };
+
+  const teardown = () => {
+    window.removeEventListener('mousemove', move, true);
+    window.removeEventListener('mouseup', finish, true);
+    window.removeEventListener('pointermove', move, true);
+    window.removeEventListener('pointerup', finish, true);
+    window.removeEventListener('pointercancel', finish, true);
+    window.removeEventListener('blur', finish);
+    document.removeEventListener('mouseleave', finish, true);
+    if (captureTarget?.releasePointerCapture && startEvent.pointerId != null) {
+      try { captureTarget.releasePointerCapture(startEvent.pointerId); } catch { /* ignore */ }
+    }
+  };
+
+  if (startEvent.pointerId != null && captureTarget?.setPointerCapture) {
+    try { captureTarget.setPointerCapture(startEvent.pointerId); } catch { /* ignore */ }
+    captureTarget.addEventListener('lostpointercapture', finish, { once: true });
+  }
+
+  window.addEventListener('mousemove', move, true);
+  window.addEventListener('mouseup', finish, true);
+  window.addEventListener('pointermove', move, true);
+  window.addEventListener('pointerup', finish, true);
+  window.addEventListener('pointercancel', finish, true);
+  window.addEventListener('blur', finish);
+  document.addEventListener('mouseleave', finish, true);
+
+  return finish;
+}

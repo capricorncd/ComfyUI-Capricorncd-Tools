@@ -4,6 +4,7 @@ import { clamp, formatTimecode, parseTimecode, segmentFrameCount } from "./timec
 import { attachRichPromptHandler, detachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
 import { loadExtensionCss } from "./cap_ui.js";
+import { iconHtml } from "./cap_icons.js";
 
 function loadCss() {
     loadExtensionCss("cap_audio_timeline.css", "cat-styles");
@@ -161,7 +162,7 @@ _buildDom() {
         <div class="cat-picker-hd">
           <span class="cat-picker-title">Select Image</span>
           <button class="cat-picker-refresh" title="Refresh image list">↻</button>
-          <button class="cat-picker-x">✕</button>
+          <button class="cat-picker-x" title="关闭">${iconHtml("close", 14)}</button>
         </div>
         <div class="cat-picker-grid"></div>
       </div>
