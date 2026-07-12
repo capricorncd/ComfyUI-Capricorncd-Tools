@@ -118,7 +118,7 @@ export function positionOverlayFixedToHeader(node, el) {
     const rect = header.getBoundingClientRect();
     el.style.position = "fixed";
     el.style.height = "auto";
-    el.style.zIndex = "10000";
+    el.style.zIndex = "1";
     el.style.pointerEvents = "none";
     for (const child of el.children) {
         child.style.pointerEvents = "auto";
@@ -153,7 +153,7 @@ export function positionOverlayOnCanvasTitle(node, el, { insetRight = 6, insetTo
     el.classList.remove("cap-ui-node-btn-wrap--hoisted");
     el.style.position = "fixed";
     el.style.height = "auto";
-    el.style.zIndex = "10000";
+    el.style.zIndex = "1";
     el.style.pointerEvents = "none";
     for (const child of el.children) {
         child.style.pointerEvents = "auto";
