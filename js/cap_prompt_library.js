@@ -26,14 +26,6 @@ const STORAGE_HIDDEN_BUILTIN = "capricorncd.rich_prompt.hidden_builtin_presets";
 const STORAGE_PRESET_META = "capricorncd.rich_prompt.preset_meta";
 const HISTORY_MAX = 80;
 const NODE_CLASS = "CAP_RichPromptInput";
-const HISTORY_STAR_FILTERS = [
-    { id: "all", label: "全部" },
-    { id: "1", label: "★" },
-    { id: "2", label: "★★" },
-    { id: "3", label: "★★★" },
-    { id: "4", label: "★★★★" },
-    { id: "5", label: "★★★★★" },
-];
 const PRESET_CAT_FILTERS = [
     { id: "all", label: "全部" },
     ...PRESET_FILTER_ORDER.map((id) => ({ id, label: PRESET_CATEGORIES[id].label })),
@@ -626,11 +618,34 @@ function renderFilterBar(host, kind, filters, activeId, onToggle) {
     host.appendChild(bar);
 }
 
+/** Star filter: first click selects, second click on same star clears (same as item rating). */
+function renderStarFilterBar(host, kind) {
+    const bar = document.createElement("div");
+    bar.className = "cap-ui-cat-bar";
+    const wrap = document.createElement("div");
+    wrap.className = "cap-ui-history-stars cap-ui-star-filter";
+    const current = _modalStarFilter === "all" ? 0 : (parseInt(_modalStarFilter, 10) || 0);
+    for (let i = 1; i <= 5; i++) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cap-ui-star-btn";
+        btn.innerHTML = iconHtml("star", 14);
+        btn.title = `${i} 星`;
+        if (i <= current) btn.classList.add("on");
+        btn.addEventListener("click", () => {
+            _modalStarFilter = _modalStarFilter === String(i) ? "all" : String(i);
+            const listBody = resolveListBody(host);
+            if (listBody) renderList(listBody, kind);
+        });
+        wrap.appendChild(btn);
+    }
+    bar.appendChild(wrap);
+    host.appendChild(bar);
+}
+
 function renderCategoryBar(host, kind) {
     if (kind === "history") {
-        renderFilterBar(host, kind, HISTORY_STAR_FILTERS, _modalStarFilter, (id) => {
-            _modalStarFilter = _modalStarFilter === id ? "all" : id;
-        });
+        renderStarFilterBar(host, kind);
         return;
     }
     renderFilterBar(host, kind, PRESET_CAT_FILTERS, _modalCatFilter, (id) => {
@@ -643,9 +658,7 @@ function renderCategoryBar(host, kind) {
             _modalSubCatFilter = _modalSubCatFilter === id ? "all" : id;
         });
     }
-    renderFilterBar(host, kind, HISTORY_STAR_FILTERS, _modalStarFilter, (id) => {
-        _modalStarFilter = _modalStarFilter === id ? "all" : id;
-    });
+    renderStarFilterBar(host, kind);
 }
 
 function makeItemStars(item, kind, onChange) {
@@ -656,7 +669,7 @@ function makeItemStars(item, kind, onChange) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "cap-ui-star-btn";
-        btn.textContent = "★";
+        btn.innerHTML = iconHtml("star", 12);
         btn.title = `${i} 星`;
         if (i <= current) btn.classList.add("on");
         btn.addEventListener("click", (e) => {
@@ -853,8 +866,9 @@ function renderToolbar(toolbar, body, kind) {
         });
         toolbar.appendChild(btnSave);
     } else if (kind === "history") {
-        const btnSave = mkUiBtn("保存当前到历史", {
+        const btnSave = mkUiIconBtn(iconHtml("save", 14), {
             variant: "primary",
+            title: "保存当前到历史",
             needTarget: true,
             onClick: () => {
                 const target = requireTarget();

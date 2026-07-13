@@ -326,10 +326,28 @@
     cursor: pointer;
     font-size: 12px;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
+}
+
+.cap-ui-star-btn svg {
+    display: block;
+    width: 12px;
+    height: 12px;
+    pointer-events: none;
+}
+
+.cap-ui-star-filter .cap-ui-star-btn svg {
+    width: 14px;
+    height: 14px;
 }
 
 .cap-ui-star-btn.on {
     color: #e6b422;
+}
+
+.cap-ui-star-btn.on svg {
+    fill: currentColor;
 }
 
 .cap-ui-star-btn:hover {
