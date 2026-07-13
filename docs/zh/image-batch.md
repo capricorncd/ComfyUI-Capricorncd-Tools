@@ -6,36 +6,42 @@
 
 ---
 
-## 图像批次计数（Image Batch Count）
+<!-- AUTO:API:begin -->
+### Image Batch Count
 
-返回批次中的图片数量。
+Return the number of images in an IMAGE batch.
 
-| 输入 | 类型 | 说明 |
-|------|------|------|
-| `images` | IMAGE | 输入批次 |
+#### Inputs
 
-| 输出 | 类型 | 说明 |
-|------|------|------|
-| `count` | INT | `images.shape[0]` |
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `images` | IMAGE | — | Input IMAGE batch |
 
----
+#### Outputs
 
-## 按索引取图（Image From Batch Index）
+| Name | Type | Description |
+|------|------|-------------|
+| `count` | INT | Number of images in the batch (images.shape[0]) |
 
-按索引从批次中取单张图片。
+### Image From Batch Index
 
-| 输入 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `images` | IMAGE | — | 输入批次 |
-| `index` | INT | `0` | 批次索引。负值从末尾计数（`-1` = 最后一帧） |
+Return a single image from an IMAGE batch by index, along with the resolved index and default filename img_{index:05d}.png.
 
-| 输出 | 类型 | 说明 |
-|------|------|------|
-| `image` | IMAGE | 单张图像批次（`shape[0] == 1`） |
-| `index` | INT | 经负索引换算与钳制后的实际索引 |
-| `filename` | STRING | 按解析后索引生成的默认文件名 `img_{index:05d}.png` |
+#### Inputs
 
----
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `images` | IMAGE | — | Input IMAGE batch |
+| `index` | INT | `0` | Batch index; negative values count from the end (-1 = last) |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| `image` | IMAGE | Single-image batch (shape[0] == 1) |
+| `index` | INT | Resolved index after negative normalization and clamping |
+| `filename` | STRING | Default filename img_{index:05d}.png for the resolved index |
+<!-- AUTO:API:end -->
 
 ## 说明
 

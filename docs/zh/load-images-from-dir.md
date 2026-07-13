@@ -6,27 +6,7 @@
 
 ---
 
-## 输入参数
 
-| 名称 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `directory` | STRING | `""` | 要扫描的目录。相对路径会依次在 ComfyUI `input`、`output`、当前工作目录下解析 |
-| `deep` | BOOLEAN | `false` | 开启后包含子目录中的图片 |
-| `start_index` | INT | `0` | 起始文件索引（从 0 开始） |
-| `max_count` | INT | `-1` | 最多加载的图片数量。`-1` 表示从 `start_index` 起加载全部 |
-
----
-
-## 输出参数
-
-| 名称 | 类型 | 说明 |
-|------|------|------|
-| `images` | IMAGE | 加载后的图像批次 |
-| `directory` | STRING | 解析后的绝对目录路径 |
-| `total_count` | INT | 目录中匹配图片的总数 |
-| `count` | INT | 经 `start_index` / `max_count` 筛选后实际输出的数量 |
-
----
 
 ## 支持格式
 
@@ -42,6 +22,28 @@
 - `IS_CHANGED` 会跟踪文件修改时间，目录内容变化时节点会重新执行。
 
 ---
+
+<!-- AUTO:API:begin -->
+Load images from a directory into an IMAGE batch. When deep is enabled, subdirectories are included. Use start_index and max_count to limit which files are loaded.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `directory` | STRING | `""` | Directory containing images (absolute or under assets) |
+| `deep` | BOOLEAN | false | When enabled, include images from subdirectories |
+| `start_index` | INT | `0` | Zero-based index of the first image to load |
+| `max_count` | INT | `-1` | -1 loads all images from start_index onward |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| `images` | IMAGE | Loaded IMAGE batch (all frames must share the same size) |
+| `directory` | STRING | Resolved absolute directory path |
+| `total_count` | INT | Total image files found before start_index / max_count slicing |
+| `count` | INT | Number of images actually loaded into the batch |
+<!-- AUTO:API:end -->
 
 ## 示例
 

@@ -34,7 +34,7 @@
 
 ### Timeline Editor
 
-顶层包含 `project_version`、`schema_version`，**无** `audio_path`。每个运行时 clip 可带 `audios` 数组，描述与该视觉片段重叠的音频切片：
+顶层包含 `project_version`、`schema_version`，**无** `audio_path`。每个运行时 clip 可带 `audios` 数组，描述与该视觉片段重叠的音频切片。详见 [Timeline Editor — `data_json` 数据结构](timeline-editor.md#data_json-数据结构运行时)。
 
 ```json
 {

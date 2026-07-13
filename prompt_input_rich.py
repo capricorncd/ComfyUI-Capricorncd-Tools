@@ -1,4 +1,10 @@
 class CAP_RichPromptInput:
+    """Prompt editor with # comments, history/presets, and live highlighting."""
+
+    DOC_SLUG = "prompt-input"
+    OUTPUT_TOOLTIPS = {
+        "prompt": "Active lines with # comment markers removed",
+    }
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -25,6 +31,10 @@ class CAP_RichPromptInput:
     RETURN_NAMES = ("prompt",)
     FUNCTION = "process"
     CATEGORY = "Capricorncd"
+    DESCRIPTION = (
+        "Rich prompt editor with # line comments (stripped from output), "
+        "Ctrl+/ toggle, plain-text paste, and history/preset library."
+    )
 
     def process(self, prompt: str, add_blank_line_start: bool = False, add_blank_line_end: bool = False):
         lines = prompt.split("\n")

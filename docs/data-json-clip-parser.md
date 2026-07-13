@@ -34,7 +34,7 @@ Top-level fields include `audio_path`, `trim_start_ms`, and `trim_end_ms`. Each 
 
 ### Timeline Editor
 
-Top-level fields include `project_version`, `schema_version`, and no `audio_path`. Each runtime clip may include an `audios` array describing overlapping audio slices for that visual segment:
+Top-level fields include `project_version`, `schema_version`, and no `audio_path`. Each runtime clip may include an `audios` array describing overlapping audio slices for that visual segment. See [Timeline Editor — `data_json` structure](timeline-editor.md#data_json-structure-runtime).
 
 ```json
 {

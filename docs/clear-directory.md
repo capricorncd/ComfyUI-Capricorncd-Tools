@@ -8,27 +8,7 @@ Filesystem root directories (`C:\`, `D:\`, `/`, etc.) are blocked and raise an e
 
 ---
 
-## Inputs
 
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `directory` | STRING | `""` | Target directory. Relative paths are resolved the same way as other Capricorncd nodes (`input`, `output`, then cwd) |
-| `delete_subdirs` | BOOLEAN | `false` | When enabled, matching files inside subdirectories are also deleted |
-| `delete_images` | BOOLEAN | `true` | Delete image files |
-| `delete_videos` | BOOLEAN | `true` | Delete video files |
-| `delete_audio` | BOOLEAN | `true` | Delete audio files |
-| `to_recycle_bin` | BOOLEAN | `true` | On Windows, send deleted files to the Recycle Bin instead of permanently removing them |
-
----
-
-## Outputs
-
-| Name | Type | Description |
-|------|------|-------------|
-| `directory` | STRING | Resolved absolute directory path |
-| `deleted_count` | INT | Number of files deleted |
-
----
 
 ## Supported extensions
 
@@ -39,6 +19,28 @@ Filesystem root directories (`C:\`, `D:\`, `/`, etc.) are blocked and raise an e
 | Audio | `.wav` `.mp3` `.flac` `.ogg` `.m4a` `.aac` |
 
 ---
+
+<!-- AUTO:API:begin -->
+Delete image, video, and/or audio files in a directory. Filesystem root directories are blocked. On Windows, deleted files can be sent to the Recycle Bin.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `directory` | STRING | `""` | Target directory (filesystem roots are blocked) |
+| `delete_subdirs` | BOOLEAN | false | When enabled, also delete matching files in subdirectories |
+| `delete_images` | BOOLEAN | true | Delete image files |
+| `delete_videos` | BOOLEAN | true | Delete video files |
+| `delete_audio` | BOOLEAN | true | Delete audio files |
+| `to_recycle_bin` | BOOLEAN | true | On Windows, send files to Recycle Bin; otherwise permanent delete |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| `directory` | STRING | Resolved absolute directory path that was cleaned |
+| `deleted_count` | INT | Number of files deleted (or moved to Recycle Bin) |
+<!-- AUTO:API:end -->
 
 ## Notes
 

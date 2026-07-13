@@ -17,12 +17,26 @@
 
 | 操作 | 行为 |
 |------|------|
-| Tab | 历史记录 / 风格 / 质量 / 其他预设 |
+| Tab | 历史记录 / 预设 |
 | 历史记录 | 最近提示词（节点成功执行后自动保存；也可手动保存） |
 | 内置预设 | 风格 / 质量 / 其他，数据在 `js/cap_prompt_presets.js` |
 | 插入 / 替换 | `#标题` + 正文写入**当前选中的**富文本提示词节点 |
-| 导出 / 导入 | 历史与「其他预设」里的用户自定义条目支持 JSON 往返 |
+| 导出 / 导入 | 历史与用户自定义预设支持 JSON 往返 |
 
-| 输出 | 类型 | 说明 |
-|------|------|------|
-| `prompt` | STRING | 移除 `#` 注释行后的有效文本 |
+<!-- AUTO:API:begin -->
+Rich prompt editor with # line comments (stripped from output), Ctrl+/ toggle, plain-text paste, and history/preset library.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `prompt` | STRING | `""` | 富文本提示词输入：Ctrl+/ 注释切换，粘贴时仅保留纯文本。输出会过滤注释行。 |
+| `add_blank_line_start` | BOOLEAN | false | 在输出字符串开头插入一个空行。 |
+| `add_blank_line_end` | BOOLEAN | false | 在输出字符串末尾插入一个空行。 |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| `prompt` | STRING | Active lines with # comment markers removed |
+<!-- AUTO:API:end -->

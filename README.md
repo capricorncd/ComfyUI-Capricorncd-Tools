@@ -14,7 +14,7 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 |------|-------------|-----|
 | **Rich Prompt Input** | Prompt editor with live syntax highlighting, `#` comments, and history/presets | [→](docs/prompt-input.md) · [中文](docs/zh/prompt-input.md) |
 | **Audio Timeline** | Waveform trim + image keyframe clip track + per-clip prompts | [→](docs/audio-timeline.md) · [中文](docs/zh/audio-timeline.md) |
-| **Timeline Editor** | Fullscreen multi-track timeline editor; outputs `frame_seq_dir` for downstream frame workflows | [→](docs/audio-timeline.md) · [中文](docs/zh/audio-timeline.md) |
+| **Timeline Editor** | Fullscreen multi-track timeline editor; outputs `data_json` and `frame_seq_dir` | [→](docs/timeline-editor.md) · [中文](docs/zh/timeline-editor.md) |
 | **Data Json Clip Parser** | Extracts a single clip from Audio Timeline / Timeline Editor `data_json` output | [→](docs/data-json-clip-parser.md) · [中文](docs/zh/data-json-clip-parser.md) |
 | **Save Images** | Saves an `IMAGE` batch to disk; returns directory path and comma-separated file paths | [→](docs/save-images.md) · [中文](docs/zh/save-images.md) |
 | **Load Images From Dir** | Loads images from a directory into an `IMAGE` batch | [→](docs/load-images-from-dir.md) · [中文](docs/zh/load-images-from-dir.md) |
@@ -22,6 +22,8 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 | **Image From Batch Index** | Extracts one image from a batch by index | [→](docs/image-batch.md) · [中文](docs/zh/image-batch.md) |
 | **Seq To Video** | Composes frames + optional audio into MP4 via ffmpeg | [→](docs/seq-to-video.md) · [中文](docs/zh/seq-to-video.md) |
 | **Clear Directory** | Deletes selected media files in a directory; supports Recycle Bin on Windows | [→](docs/clear-directory.md) · [中文](docs/zh/clear-directory.md) |
+| **Size Settings** | Aspect ratio / resolution / orientation → `width`, `height`, `count` | [→](docs/size-settings.md) · [中文](docs/zh/size-settings.md) |
+| **Format JSON** | Pretty-print a JSON string in the graph UI | [→](docs/format-json.md) · [中文](docs/zh/format-json.md) |
 
 ---
 
@@ -45,7 +47,7 @@ Timeline Editor / Audio Timeline
 2. `image_paths` — comma-separated paths from **Save Images**
 3. `frames_dir` — numbered sequence scan from a directory
 
-The **Disable / Enable** feature in Audio Timeline lets you re-generate a single segment without touching the rest of the timeline. See the [Audio Timeline doc](docs/audio-timeline.md#clip-disable--enable) for details.
+The **Disable / Enable** feature in Audio Timeline / Timeline Editor lets you re-generate a single segment without touching the rest of the timeline. See [Audio Timeline](docs/audio-timeline.md#clip-disable--enable) and [Timeline Editor](docs/timeline-editor.md#clip-disable--enable).
 
 ---
 
@@ -64,26 +66,30 @@ Restart ComfyUI. No additional Python packages are required beyond a standard Co
 
 ## Documentation
 
+Hand-written guides live under `docs/`. Input/output tables marked with `<!-- AUTO:API -->` can be regenerated from node metadata:
+
+```bash
+python scripts/gen_node_docs.py
+```
+
 ```
 docs/
 ├── prompt-input.md
 ├── audio-timeline.md
+├── timeline-editor.md
 ├── data-json-clip-parser.md
 ├── save-images.md
 ├── load-images-from-dir.md
 ├── image-batch.md
 ├── seq-to-video.md
 ├── clear-directory.md
+├── size-settings.md
+├── format-json.md
 └── zh/                  # 简体中文文档
-    ├── prompt-input.md
-    ├── audio-timeline.md
-    ├── data-json-clip-parser.md
-    ├── save-images.md
-    ├── load-images-from-dir.md
-    ├── image-batch.md
-    ├── seq-to-video.md
-    └── clear-directory.md
+    └── (same set)
 ```
+
+Node API fields are defined in code (`DESCRIPTION`, input `tooltip`, `OUTPUT_TOOLTIPS`) so the graph UI and docs stay aligned.
 
 ---
 

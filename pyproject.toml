@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-Capricorncd-Tools"
 description = "A collection of custom nodes for ComfyUI focused on prompt editing, audio/image keyframe timeline editing, and video compositing."
-version = "0.3.1"
+version = "0.3.2"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 

@@ -64,16 +64,52 @@ def _size_from_ratio(aspect_ratio: str, resolution: str, orientation: str) -> tu
 
 
 class CAP_SizeSettings:
+    """Compute width/height from ratio presets or custom dimensions."""
+
+    DOC_SLUG = "size-settings"
+    OUTPUT_TOOLTIPS = {
+        "width": "Final width aligned to a multiple of 8",
+        "height": "Final height aligned to a multiple of 8",
+        "count": "Pass-through integer (batch size, loop count, etc.)",
+    }
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "aspect_ratio": (ASPECT_RATIOS, {"default": "9:16"}),
-                "resolution": (RESOLUTIONS, {"default": "1K"}),
-                "orientation": (ORIENTATIONS, {"default": "竖屏"}),
-                "custom_width": ("INT", {"default": 1080, "min": 64, "max": 16384, "step": 8}),
-                "custom_height": ("INT", {"default": 1920, "min": 64, "max": 16384, "step": 8}),
-                "count": ("INT", {"default": 1, "min": 1, "max": 4096, "step": 1}),
+                "aspect_ratio": (ASPECT_RATIOS, {
+                    "default": "9:16",
+                    "tooltip": "Aspect ratio preset used by the UI size calculator",
+                }),
+                "resolution": (RESOLUTIONS, {
+                    "default": "1K",
+                    "tooltip": "Resolution tier (long-edge or square-edge target)",
+                }),
+                "orientation": (ORIENTATIONS, {
+                    "default": "竖屏",
+                    "tooltip": "Portrait or landscape; swaps non-square ratios",
+                }),
+                "custom_width": ("INT", {
+                    "default": 1080,
+                    "min": 64,
+                    "max": 16384,
+                    "step": 8,
+                    "tooltip": "Width used at run time (aligned to multiples of 8)",
+                }),
+                "custom_height": ("INT", {
+                    "default": 1920,
+                    "min": 64,
+                    "max": 16384,
+                    "step": 8,
+                    "tooltip": "Height used at run time (aligned to multiples of 8)",
+                }),
+                "count": ("INT", {
+                    "default": 1,
+                    "min": 1,
+                    "max": 4096,
+                    "step": 1,
+                    "tooltip": "Reusable integer output (e.g. batch size or loop count)",
+                }),
             },
         }
 

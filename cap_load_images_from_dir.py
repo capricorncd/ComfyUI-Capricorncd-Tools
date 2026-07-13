@@ -17,20 +17,41 @@ def _load_rgb_image(path: str) -> torch.Tensor:
 
 
 class CAP_LoadImagesFromDir:
+    """Load images from a directory into an IMAGE batch."""
+
+    DOC_SLUG = "load-images-from-dir"
+    OUTPUT_TOOLTIPS = {
+        "images": "Loaded IMAGE batch (all frames must share the same size)",
+        "directory": "Resolved absolute directory path",
+        "total_count": "Total image files found before start_index / max_count slicing",
+        "count": "Number of images actually loaded into the batch",
+    }
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "directory": ("STRING", {"default": ""}),
-                "deep": ("BOOLEAN", {"default": False}),
-                "start_index": ("INT", {"default": 0, "min": 0, "max": 999999}),
+                "directory": ("STRING", {
+                    "default": "",
+                    "tooltip": "Directory containing images (absolute or under assets)",
+                }),
+                "deep": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "When enabled, include images from subdirectories",
+                }),
+                "start_index": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 999999,
+                    "tooltip": "Zero-based index of the first image to load",
+                }),
                 "max_count": (
                     "INT",
                     {
                         "default": -1,
                         "min": -1,
                         "max": 999999,
-                        "tooltip": "-1 outputs all images from start_index onward.",
+                        "tooltip": "-1 loads all images from start_index onward",
                     },
                 ),
             },

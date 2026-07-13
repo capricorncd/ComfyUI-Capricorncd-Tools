@@ -9,11 +9,21 @@ def _resolve_batch_index(batch_size: int, index: int) -> int:
 
 
 class CAP_ImageBatchCount:
+    """Return how many images are in an IMAGE batch."""
+
+    DOC_SLUG = "image-batch"
+    DOC_SECTION = "Image Batch Count"
+    OUTPUT_TOOLTIPS = {
+        "count": "Number of images in the batch (images.shape[0])",
+    }
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
+                "images": ("IMAGE", {
+                    "tooltip": "Input IMAGE batch",
+                }),
             },
         }
 
@@ -28,12 +38,29 @@ class CAP_ImageBatchCount:
 
 
 class CAP_ImageFromBatchIndex:
+    """Extract one image from an IMAGE batch by index."""
+
+    DOC_SLUG = "image-batch"
+    DOC_SECTION = "Image From Batch Index"
+    OUTPUT_TOOLTIPS = {
+        "image": "Single-image batch (shape[0] == 1)",
+        "index": "Resolved index after negative normalization and clamping",
+        "filename": "Default filename img_{index:05d}.png for the resolved index",
+    }
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
-                "index": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+                "images": ("IMAGE", {
+                    "tooltip": "Input IMAGE batch",
+                }),
+                "index": ("INT", {
+                    "default": 0,
+                    "min": -4096,
+                    "max": 4096,
+                    "tooltip": "Batch index; negative values count from the end (-1 = last)",
+                }),
             },
         }
 

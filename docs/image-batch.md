@@ -6,36 +6,42 @@ Small utility nodes for working with `IMAGE` batches.
 
 ---
 
-## Image Batch Count
+<!-- AUTO:API:begin -->
+### Image Batch Count
 
-Returns the number of images in a batch.
+Return the number of images in an IMAGE batch.
 
-| Input | Type | Description |
-|-------|------|-------------|
-| `images` | IMAGE | Input batch |
+#### Inputs
 
-| Output | Type | Description |
-|--------|------|-------------|
-| `count` | INT | `images.shape[0]` |
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `images` | IMAGE | — | Input IMAGE batch |
 
----
+#### Outputs
 
-## Image From Batch Index
+| Name | Type | Description |
+|------|------|-------------|
+| `count` | INT | Number of images in the batch (images.shape[0]) |
 
-Extracts a single image from a batch by index.
+### Image From Batch Index
 
-| Input | Type | Default | Description |
-|-------|------|---------|-------------|
-| `images` | IMAGE | — | Input batch |
-| `index` | INT | `0` | Batch index. Negative values count from the end (`-1` = last image) |
+Return a single image from an IMAGE batch by index, along with the resolved index and default filename img_{index:05d}.png.
 
-| Output | Type | Description |
-|--------|------|-------------|
-| `image` | IMAGE | Single-image batch (`shape[0] == 1`) |
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `images` | IMAGE | — | Input IMAGE batch |
+| `index` | INT | `0` | Batch index; negative values count from the end (-1 = last) |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| `image` | IMAGE | Single-image batch (shape[0] == 1) |
 | `index` | INT | Resolved index after negative normalization and clamping |
-| `filename` | STRING | Default filename `img_{index:05d}.png` for the resolved index |
-
----
+| `filename` | STRING | Default filename img_{index:05d}.png for the resolved index |
+<!-- AUTO:API:end -->
 
 ## Notes
 

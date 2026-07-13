@@ -6,33 +6,35 @@ Loads image files from a directory into an `IMAGE` batch. Files are ordered natu
 
 ---
 
-## Inputs
 
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `directory` | STRING | `""` | Directory to scan. Relative paths are resolved under ComfyUI `input`, `output`, or cwd |
-| `deep` | BOOLEAN | `false` | Include images in subdirectories when enabled |
-| `start_index` | INT | `0` | Zero-based index of the first file to load |
-| `max_count` | INT | `-1` | Maximum number of images to load. `-1` loads all files from `start_index` onward |
-
----
-
-## Outputs
-
-| Name | Type | Description |
-|------|------|-------------|
-| `images` | IMAGE | Loaded image batch |
-| `directory` | STRING | Resolved absolute directory path |
-| `total_count` | INT | Total number of matching images found in the directory |
-| `count` | INT | Number of images actually returned after `start_index` / `max_count` |
-
----
 
 ## Supported formats
 
 `.png` `.jpg` `.jpeg` `.webp` `.gif` `.bmp`
 
 ---
+
+<!-- AUTO:API:begin -->
+Load images from a directory into an IMAGE batch. When deep is enabled, subdirectories are included. Use start_index and max_count to limit which files are loaded.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `directory` | STRING | `""` | Directory containing images (absolute or under assets) |
+| `deep` | BOOLEAN | false | When enabled, include images from subdirectories |
+| `start_index` | INT | `0` | Zero-based index of the first image to load |
+| `max_count` | INT | `-1` | -1 loads all images from start_index onward |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| `images` | IMAGE | Loaded IMAGE batch (all frames must share the same size) |
+| `directory` | STRING | Resolved absolute directory path |
+| `total_count` | INT | Total image files found before start_index / max_count slicing |
+| `count` | INT | Number of images actually loaded into the batch |
+<!-- AUTO:API:end -->
 
 ## Notes
 

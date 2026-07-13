@@ -10,21 +10,58 @@ from PIL import Image
 
 
 class CAP_SaveImages:
+    """Save an IMAGE batch under ComfyUI's output directory."""
+
+    DOC_SLUG = "save-images"
+    OUTPUT_TOOLTIPS = {
+        "image_dir": "Absolute path of the directory where images were saved",
+        "image_paths": "Comma-separated list of saved file paths",
+    }
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
+                "images": ("IMAGE", {
+                    "tooltip": "Batch of images to save",
+                }),
                 "filename_prefix": ("STRING", {
                     "default": "temp/cap-save-images/%Y%m%d_%H%M%S/CSI",
+                    "tooltip": (
+                        "Path relative to ComfyUI output: earlier segments are subfolders, "
+                        "last segment is the file prefix. Supports strftime."
+                    ),
                 }),
-                "filename": ("STRING", {"default": "{prefix}_{index}.png"}),
-                "quality": ("INT", {"default": 80, "min": 1, "max": 100, "step": 1}),
-                "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1}),
-                "save_as_zip": ("BOOLEAN", {"default": False, "label_on": "打包 zip", "label_off": "仅图片"}),
+                "filename": ("STRING", {
+                    "default": "{prefix}_{index}.png",
+                    "tooltip": "File name template with {prefix} and {index} (zero-padded to 5 digits)",
+                }),
+                "quality": ("INT", {
+                    "default": 80,
+                    "min": 1,
+                    "max": 100,
+                    "step": 1,
+                    "tooltip": "JPEG quality (1–100); for PNG mapped to zlib compression",
+                }),
+                "dpi": ("INT", {
+                    "default": 300,
+                    "min": 1,
+                    "max": 2400,
+                    "step": 1,
+                    "tooltip": "DPI metadata written to the image file",
+                }),
+                "save_as_zip": ("BOOLEAN", {
+                    "default": False,
+                    "label_on": "打包 zip",
+                    "label_off": "仅图片",
+                    "tooltip": "Also pack saved images into a zip next to the folder",
+                }),
             },
             "optional": {
-                "metadata": ("STRING", {"default": ""}),
+                "metadata": ("STRING", {
+                    "default": "",
+                    "tooltip": "String written to the file comment metadata field",
+                }),
             },
         }
 

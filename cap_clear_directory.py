@@ -91,16 +91,42 @@ def _delete_file(path: str, *, to_recycle_bin: bool) -> None:
 
 
 class CAP_ClearDirectory:
+    """Delete selected media files in a directory."""
+
+    DOC_SLUG = "clear-directory"
+    OUTPUT_TOOLTIPS = {
+        "directory": "Resolved absolute directory path that was cleaned",
+        "deleted_count": "Number of files deleted (or moved to Recycle Bin)",
+    }
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "directory": ("STRING", {"default": ""}),
-                "delete_subdirs": ("BOOLEAN", {"default": False}),
-                "delete_images": ("BOOLEAN", {"default": True}),
-                "delete_videos": ("BOOLEAN", {"default": True}),
-                "delete_audio": ("BOOLEAN", {"default": True}),
-                "to_recycle_bin": ("BOOLEAN", {"default": True}),
+                "directory": ("STRING", {
+                    "default": "",
+                    "tooltip": "Target directory (filesystem roots are blocked)",
+                }),
+                "delete_subdirs": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "When enabled, also delete matching files in subdirectories",
+                }),
+                "delete_images": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Delete image files",
+                }),
+                "delete_videos": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Delete video files",
+                }),
+                "delete_audio": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Delete audio files",
+                }),
+                "to_recycle_bin": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "On Windows, send files to Recycle Bin; otherwise permanent delete",
+                }),
             },
         }
 

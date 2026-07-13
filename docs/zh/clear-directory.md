@@ -8,27 +8,7 @@
 
 ---
 
-## 输入参数
 
-| 名称 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `directory` | STRING | `""` | 目标目录。相对路径的解析方式与其他 Capricorncd 节点一致（依次尝试 `input`、`output`、当前工作目录） |
-| `delete_subdirs` | BOOLEAN | `false` | 开启后，会递归删除子目录中的匹配文件 |
-| `delete_images` | BOOLEAN | `true` | 删除图片文件 |
-| `delete_videos` | BOOLEAN | `true` | 删除视频文件 |
-| `delete_audio` | BOOLEAN | `true` | 删除音频文件 |
-| `to_recycle_bin` | BOOLEAN | `true` | Windows 下将文件移入回收站，而非永久删除 |
-
----
-
-## 输出参数
-
-| 名称 | 类型 | 说明 |
-|------|------|------|
-| `directory` | STRING | 解析后的绝对目录路径 |
-| `deleted_count` | INT | 实际删除的文件数量 |
-
----
 
 ## 支持的扩展名
 
@@ -48,6 +28,28 @@
 - `to_recycle_bin = false` 时，通过 `os.unlink` 永久删除。
 
 ---
+
+<!-- AUTO:API:begin -->
+Delete image, video, and/or audio files in a directory. Filesystem root directories are blocked. On Windows, deleted files can be sent to the Recycle Bin.
+
+#### Inputs
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `directory` | STRING | `""` | Target directory (filesystem roots are blocked) |
+| `delete_subdirs` | BOOLEAN | false | When enabled, also delete matching files in subdirectories |
+| `delete_images` | BOOLEAN | true | Delete image files |
+| `delete_videos` | BOOLEAN | true | Delete video files |
+| `delete_audio` | BOOLEAN | true | Delete audio files |
+| `to_recycle_bin` | BOOLEAN | true | On Windows, send files to Recycle Bin; otherwise permanent delete |
+
+#### Outputs
+
+| Name | Type | Description |
+|------|------|-------------|
+| `directory` | STRING | Resolved absolute directory path that was cleaned |
+| `deleted_count` | INT | Number of files deleted (or moved to Recycle Bin) |
+<!-- AUTO:API:end -->
 
 ## 示例
 
