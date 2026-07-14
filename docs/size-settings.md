@@ -2,24 +2,24 @@
 
 **Category:** `Capricorncd`
 
-Computes `width` / `height` from aspect ratio, resolution tier, and orientation, or from manually edited custom dimensions. Also outputs a reusable `count` integer (e.g. batch size or loop count).
-
-The node UI keeps ratio / resolution / orientation in sync with `custom_width` and `custom_height`. At execution time the node returns the (8-aligned) custom dimensions and `count`.
+Computes `width` / `height` from a size preset, scale multiplier, and orientation, with optional aspect-ratio lock while editing custom dimensions. Also outputs `count` and `fps`.
 
 ---
 
 <!-- AUTO:API:begin -->
-Output width and height from aspect ratio, resolution tier, orientation, or manually edited custom dimensions.
+Output width, height, count, and fps (float + int) from size presets, scale, orientation, and optionally locked custom dimensions.
 
 #### Inputs
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `aspect_ratio` | ENUM | `9:16` | Aspect ratio preset used by the UI size calculator |
-| `resolution` | ENUM | `1K` | Resolution tier (long-edge or square-edge target) |
-| `orientation` | ENUM | `竖屏` | Portrait or landscape; swaps non-square ratios |
-| `custom_width` | INT | `1080` | Width used at run time (aligned to multiples of 8) |
-| `custom_height` | INT | `1920` | Height used at run time (aligned to multiples of 8) |
+| `size` | ENUM | `720x1280 (9:16)` | Base canvas size preset (portrait dimensions shown) |
+| `scale` | FLOAT | `1.0` | Multiplier applied to the size preset |
+| `lock_aspect` | BOOLEAN | true | When locked, editing width updates height (and vice versa) to keep the aspect ratio |
+| `orientation` | ENUM | `纵向` | 纵向 keeps preset WxH; 横向 swaps width and height |
+| `custom_width` | INT | `720` | Width used at run time (aligned to multiples of 8) |
+| `custom_height` | INT | `1280` | Height used at run time (aligned to multiples of 8) |
+| `fps` | FLOAT | `24.0` | Frames per second |
 | `count` | INT | `1` | Reusable integer output (e.g. batch size or loop count) |
 
 #### Outputs
@@ -29,9 +29,13 @@ Output width and height from aspect ratio, resolution tier, orientation, or manu
 | `width` | INT | Final width aligned to a multiple of 8 |
 | `height` | INT | Final height aligned to a multiple of 8 |
 | `count` | INT | Pass-through integer (batch size, loop count, etc.) |
+| `fps` | FLOAT | Frames per second (float) |
+| `fps_int` | INT | Frames per second rounded to int |
 <!-- AUTO:API:end -->
 
 ## Notes
 
-- Connect `width` / `height` into **Timeline Editor**, **Audio Timeline**, or any node that needs canvas size.
-- Changing aspect ratio / resolution / orientation in the UI recalculates the custom size fields; you can still override them manually before queueing.
+- Changing **Size**, **Scale**, or **Orientation** recalculates Width / Height.
+- With **Lock Aspect** on, editing Width updates Height (and vice versa) to keep the current ratio.
+- Orientation **纵向** keeps the preset as shown; **横向** swaps width and height (no-op for 1:1).
+- Connect `width` / `height` / `fps` into **Timeline Editor**, **Audio Timeline**, or any node that needs canvas size and frame rate.

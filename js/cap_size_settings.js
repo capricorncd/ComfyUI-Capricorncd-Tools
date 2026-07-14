@@ -1,51 +1,32 @@
 import { app } from "../../scripts/app.js";
-import { ensureCapUiCss } from "./cap_ui.js";
 import {
-    appendDomWidgetLast,
     applyWidgetValuesByNames,
     captureWidgetValues,
-    positionOverlayAboveWidget,
     restoreWidgetValues,
 } from "./cap_widget_persist.js";
 
 const NODE_CLASS = "CAP_SizeSettings";
-const ORIENT_DOM = "cap_size_orient";
-const DEFAULT_ORIENTATION = "竖屏";
+const DEFAULT_SIZE = "720x1280 (9:16)";
+const DEFAULT_ORIENTATION = "纵向";
 const WIDGET_NAMES = [
-    "aspect_ratio",
-    "resolution",
+    "size",
+    "scale",
+    "lock_aspect",
     "orientation",
     "custom_width",
     "custom_height",
+    "fps",
     "count",
 ];
 
-const RATIO_PARTS = {
-    "1:1": [1, 1],
-    "2:3": [2, 3],
-    "3:4": [3, 4],
-    "3:5": [3, 5],
-    "4:7": [4, 7],
-    "9:16": [9, 16],
-    "9:21": [9, 21],
-};
-
-const LONG_EDGE = {
-    "480P": 854,
-    "720P": 1280,
-    "1K": 1920,
-    "2K": 2560,
-    "4K": 3840,
-    "8K": 7680,
-};
-
-const SQUARE_EDGE = {
-    "480P": 512,
-    "720P": 720,
-    "1K": 1024,
-    "2K": 2048,
-    "4K": 4096,
-    "8K": 8192,
+const SIZE_BASE = {
+    "704x1280 (11:20)": [704, 1280],
+    "720x1280 (9:16)": [720, 1280],
+    "768x1024 (3:4)": [768, 1024],
+    "768x1280 (3:5)": [768, 1280],
+    "768x1344 (4:7)": [768, 1344],
+    "1024x1024 (1:1)": [1024, 1024],
+    "1080x2560 (9:21)": [1080, 2560],
 };
 
 function getWidget(node, name) {
@@ -53,57 +34,16 @@ function getWidget(node, name) {
 }
 
 function align8(value) {
-    return Math.max(8, Math.round(value / 8) * 8);
+    return Math.max(8, Math.round(Number(value) / 8) * 8);
 }
 
-function effectiveRatio(aspectRatio, orientation) {
-    const parts = RATIO_PARTS[aspectRatio] ?? [9, 16];
-    let [rw, rh] = parts;
-    if (aspectRatio === "1:1") return [1, 1];
-    if (orientation === "横屏") return [rh, rw];
-    return [rw, rh];
-}
-
-function sizeFromRatio(aspectRatio, resolution, orientation) {
-    const [rw, rh] = effectiveRatio(aspectRatio, orientation);
-    if (rw === 1 && rh === 1) {
-        const edge = align8(SQUARE_EDGE[resolution] ?? 1024);
-        return [edge, edge];
+function sizeFromPreset(size, scale, orientation) {
+    let [width, height] = SIZE_BASE[size] ?? SIZE_BASE[DEFAULT_SIZE];
+    if (orientation === "横向" && width !== height) {
+        [width, height] = [height, width];
     }
-
-    const longEdge = LONG_EDGE[resolution] ?? 1920;
-    if (rw > rh) {
-        const width = longEdge;
-        const height = align8((width * rh) / rw);
-        return [align8(width), height];
-    }
-
-    const height = longEdge;
-    const width = align8((height * rw) / rh);
-    return [width, align8(height)];
-}
-
-function collapseFloatingWidget(w) {
-    if (!w) return;
-    w.serialize = false;
-    w.serializeValue = () => undefined;
-    w.computedHeight = 0;
-    w.computeSize = () => [0, -4];
-    if (w.options) {
-        w.options.getMinHeight = () => 0;
-        w.options.getHeight = () => 0;
-    }
-}
-
-function hideWidgetRow(w) {
-    if (!w) return;
-    const row = w.inputEl?.closest?.(".comfyui-widget") ?? w.inputEl?.parentElement;
-    if (row) row.style.display = "none";
-    w.computeSize = () => [0, -4];
-    if (w.options) {
-        w.options.getMinHeight = () => 0;
-        w.options.getHeight = () => 0;
-    }
+    const s = Math.max(0.01, Number(scale) || 1);
+    return [align8(width * s), align8(height * s)];
 }
 
 function chainCallback(widget, fn) {
@@ -123,146 +63,157 @@ function setWidgetValue(widget, value) {
     widget.value = value;
 }
 
+function isLocked(node) {
+    return getWidget(node, "lock_aspect")?.value !== false;
+}
+
+function currentRatio(node) {
+    const w = Math.max(1, Number(getWidget(node, "custom_width")?.value) || 1);
+    const h = Math.max(1, Number(getWidget(node, "custom_height")?.value) || 1);
+    return w / h;
+}
+
 function hasValidSizeWidgets(node) {
     const w = getWidget(node, "custom_width");
     const h = getWidget(node, "custom_height");
     const c = getWidget(node, "count");
+    const fps = getWidget(node, "fps");
     return Number.isFinite(Number(w?.value))
         && Number.isFinite(Number(h?.value))
         && Number.isFinite(Number(c?.value))
+        && Number.isFinite(Number(fps?.value))
         && Number(c.value) <= 256;
+}
+
+function normalizeOrientation(value) {
+    if (value === "横向" || value === "横屏" || value === "水平") return "横向";
+    return "纵向";
 }
 
 function repairLegacySizeValues(node, info) {
     const values = info?.widgets_values;
     if (!Array.isArray(values) || hasValidSizeWidgets(node)) return;
-    if (values.length >= 7) {
-        applyWidgetValuesByNames(node, WIDGET_NAMES, values.slice(1));
+
+    // New order: size, scale, lock_aspect, orientation, width, height, fps, count
+    if (values.length >= 8 && typeof values[0] === "string" && String(values[0]).includes("x")) {
+        applyWidgetValuesByNames(node, WIDGET_NAMES, values);
         if (hasValidSizeWidgets(node)) return;
     }
-    applyWidgetValuesByNames(node, WIDGET_NAMES, values);
-}
 
-function ensureDefaultOrientation(node) {
-    const w = getWidget(node, "orientation");
-    if (!w) return;
-    if (w.value !== "竖屏" && w.value !== "横屏") {
-        w.value = DEFAULT_ORIENTATION;
+    // Old order: aspect_ratio, resolution, orientation, width, height, count
+    if (values.length >= 6) {
+        const orient = normalizeOrientation(values[2]);
+        const width = values[3];
+        const height = values[4];
+        const count = values[5];
+        applyWidgetValuesByNames(node, WIDGET_NAMES, [
+            DEFAULT_SIZE,
+            1.0,
+            true,
+            orient,
+            width,
+            height,
+            24.0,
+            count,
+        ]);
     }
 }
 
 function applyComputedSize(node) {
-    ensureDefaultOrientation(node);
-    const aspect = getWidget(node, "aspect_ratio")?.value ?? "9:16";
-    const resolution = getWidget(node, "resolution")?.value ?? "1K";
-    const orientation = getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION;
-    const [width, height] = sizeFromRatio(aspect, resolution, orientation);
+    const size = getWidget(node, "size")?.value ?? DEFAULT_SIZE;
+    const scale = getWidget(node, "scale")?.value ?? 1.0;
+    const orientation = normalizeOrientation(
+        getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION,
+    );
+    setWidgetValue(getWidget(node, "orientation"), orientation);
+    const [width, height] = sizeFromPreset(size, scale, orientation);
     setWidgetValue(getWidget(node, "custom_width"), width);
     setWidgetValue(getWidget(node, "custom_height"), height);
+    node._capSizeRatio = width / Math.max(1, height);
     node.setDirtyCanvas?.(true, true);
 }
 
-function updateOrientationSwitch(node, orientation) {
-    const wrap = node._capSizeOrientWrap;
-    if (!wrap) return;
-    for (const btn of wrap.querySelectorAll(".cap-size-orient-opt")) {
-        btn.classList.toggle("active", btn.dataset.orient === orientation);
+function onWidthChanged(node) {
+    if (node._capSizeSyncing || !isLocked(node)) return;
+    node._capSizeSyncing = true;
+    try {
+        const width = align8(getWidget(node, "custom_width")?.value ?? 720);
+        setWidgetValue(getWidget(node, "custom_width"), width);
+        const ratio = node._capSizeRatio || currentRatio(node);
+        const height = align8(width / Math.max(1e-6, ratio));
+        setWidgetValue(getWidget(node, "custom_height"), height);
+        node._capSizeRatio = width / Math.max(1, height);
+        node.setDirtyCanvas?.(true, true);
+    } finally {
+        node._capSizeSyncing = false;
     }
 }
 
-function setOrientation(node, orientation) {
-    const w = getWidget(node, "orientation");
-    if (!w) return;
-    setWidgetValue(w, orientation);
-    updateOrientationSwitch(node, orientation);
-    applyComputedSize(node);
-}
-
-function layoutOrientSwitch(node) {
-    const domWidget = getWidget(node, ORIENT_DOM);
-    const wrap = node._capSizeOrientWrap ?? domWidget?.element;
-    if (!wrap) return;
-    positionOverlayAboveWidget(node, wrap, "aspect_ratio", { offsetY: -26, left: 6 });
-}
-
-function ensureOrientationSwitch(node) {
-    const aspectWidget = getWidget(node, "aspect_ratio");
-    if (!aspectWidget) return;
-
-    hideWidgetRow(getWidget(node, "orientation"));
-
-    let domWidget = getWidget(node, ORIENT_DOM);
-    if (!domWidget) {
-        ensureCapUiCss();
-
-        const wrap = document.createElement("div");
-        wrap.className = "cap-size-orient-wrap";
-
-        const group = document.createElement("div");
-        group.className = "cap-size-orient-switch";
-        group.setAttribute("role", "group");
-        group.setAttribute("aria-label", "方向");
-
-        for (const [label, icon, title] of [
-            ["竖屏", "↕", "竖屏"],
-            ["横屏", "↔", "横屏"],
-        ]) {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "cap-size-orient-opt";
-            btn.dataset.orient = label;
-            btn.title = title;
-            btn.textContent = icon;
-            btn.addEventListener("click", () => setOrientation(node, label));
-            group.appendChild(btn);
-        }
-
-        wrap.appendChild(group);
-        node._capSizeOrientWrap = wrap;
-
-        domWidget = node.addDOMWidget(ORIENT_DOM, ORIENT_DOM, wrap, {
-            serialize: false,
-            getMinHeight: () => 0,
-            getHeight: () => 0,
-        });
-        collapseFloatingWidget(domWidget);
+function onHeightChanged(node) {
+    if (node._capSizeSyncing || !isLocked(node)) return;
+    node._capSizeSyncing = true;
+    try {
+        const height = align8(getWidget(node, "custom_height")?.value ?? 1280);
+        setWidgetValue(getWidget(node, "custom_height"), height);
+        const ratio = node._capSizeRatio || currentRatio(node);
+        const width = align8(height * ratio);
+        setWidgetValue(getWidget(node, "custom_width"), width);
+        node._capSizeRatio = Math.max(1, width) / Math.max(1, height);
+        node.setDirtyCanvas?.(true, true);
+    } finally {
+        node._capSizeSyncing = false;
     }
+}
 
-    appendDomWidgetLast(node, domWidget);
-    ensureDefaultOrientation(node);
-    updateOrientationSwitch(node, getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION);
-    requestAnimationFrame(() => layoutOrientSwitch(node));
+function onLockChanged(node) {
+    if (isLocked(node)) {
+        node._capSizeRatio = currentRatio(node);
+    }
+}
+
+function removeLegacyOrientUi(node) {
+    node._capSizeOrientWrap?.remove?.();
+    node._capSizeOrientWrap = null;
+    const dom = getWidget(node, "cap_size_orient");
+    if (dom?.element) {
+        dom.element.remove?.();
+        dom.computedHeight = 0;
+        dom.computeSize = () => [0, -4];
+    }
 }
 
 function hookOptionCallbacks(node) {
     if (node._capSizeHooked) return;
     node._capSizeHooked = true;
 
-    chainCallback(getWidget(node, "aspect_ratio"), () => applyComputedSize(node));
-    chainCallback(getWidget(node, "resolution"), () => applyComputedSize(node));
-    chainCallback(getWidget(node, "orientation"), () => {
-        updateOrientationSwitch(node, getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION);
-        applyComputedSize(node);
-    });
+    chainCallback(getWidget(node, "size"), () => applyComputedSize(node));
+    chainCallback(getWidget(node, "scale"), () => applyComputedSize(node));
+    chainCallback(getWidget(node, "orientation"), () => applyComputedSize(node));
+    chainCallback(getWidget(node, "lock_aspect"), () => onLockChanged(node));
+    chainCallback(getWidget(node, "custom_width"), () => onWidthChanged(node));
+    chainCallback(getWidget(node, "custom_height"), () => onHeightChanged(node));
 }
 
 function setupNode(node, info = null, { initialSync = false } = {}) {
-    const aspectWidget = getWidget(node, "aspect_ratio");
-    if (!aspectWidget) return false;
+    if (!getWidget(node, "size") && !getWidget(node, "aspect_ratio")) return false;
+    if (!getWidget(node, "custom_width")) return false;
+
     if (info) repairLegacySizeValues(node, info);
     const snapshot = captureWidgetValues(node);
-    ensureDefaultOrientation(node);
-    ensureOrientationSwitch(node);
+    removeLegacyOrientUi(node);
     restoreWidgetValues(node, snapshot);
     hookOptionCallbacks(node);
+
+    const orient = getWidget(node, "orientation");
+    if (orient) setWidgetValue(orient, normalizeOrientation(orient.value));
+
     if (initialSync) {
         applyComputedSize(node);
     } else if (!hasValidSizeWidgets(node)) {
         applyComputedSize(node);
     } else {
-        updateOrientationSwitch(node, getWidget(node, "orientation")?.value ?? DEFAULT_ORIENTATION);
+        node._capSizeRatio = currentRatio(node);
     }
-    layoutOrientSwitch(node);
     return true;
 }
 

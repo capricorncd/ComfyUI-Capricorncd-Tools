@@ -2,31 +2,24 @@
 
 **分类：** `Capricorncd`
 
-根据宽高比、分辨率档位与方向计算 `width` / `height`，也可直接使用手动编辑的自定义尺寸。同时输出可复用的整数 `count`（例如批次大小或循环次数）。
-
-节点 UI 会将比例 / 分辨率 / 方向与 `custom_width`、`custom_height` 保持同步。执行时返回（按 8 对齐的）自定义尺寸和 `count`。
+根据尺寸预设、倍数与方向计算 `width` / `height`，编辑自定义宽高时可锁定比例。同时输出 `count` 与 `fps`。
 
 ---
 
-
-
-## 说明
-
-- 可将 `width` / `height` 接到 **Timeline Editor**、**Audio Timeline** 或其他需要画布尺寸的节点。
-- 在 UI 中改比例 / 分辨率 / 方向会重算自定义尺寸字段；排队前仍可手动覆盖。
-
 <!-- AUTO:API:begin -->
-Output width and height from aspect ratio, resolution tier, orientation, or manually edited custom dimensions.
+Output width, height, count, and fps (float + int) from size presets, scale, orientation, and optionally locked custom dimensions.
 
 #### Inputs
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `aspect_ratio` | ENUM | `9:16` | Aspect ratio preset used by the UI size calculator |
-| `resolution` | ENUM | `1K` | Resolution tier (long-edge or square-edge target) |
-| `orientation` | ENUM | `竖屏` | Portrait or landscape; swaps non-square ratios |
-| `custom_width` | INT | `1080` | Width used at run time (aligned to multiples of 8) |
-| `custom_height` | INT | `1920` | Height used at run time (aligned to multiples of 8) |
+| `size` | ENUM | `720x1280 (9:16)` | Base canvas size preset (portrait dimensions shown) |
+| `scale` | FLOAT | `1.0` | Multiplier applied to the size preset |
+| `lock_aspect` | BOOLEAN | true | When locked, editing width updates height (and vice versa) to keep the aspect ratio |
+| `orientation` | ENUM | `纵向` | 纵向 keeps preset WxH; 横向 swaps width and height |
+| `custom_width` | INT | `720` | Width used at run time (aligned to multiples of 8) |
+| `custom_height` | INT | `1280` | Height used at run time (aligned to multiples of 8) |
+| `fps` | FLOAT | `24.0` | Frames per second |
 | `count` | INT | `1` | Reusable integer output (e.g. batch size or loop count) |
 
 #### Outputs
@@ -36,4 +29,13 @@ Output width and height from aspect ratio, resolution tier, orientation, or manu
 | `width` | INT | Final width aligned to a multiple of 8 |
 | `height` | INT | Final height aligned to a multiple of 8 |
 | `count` | INT | Pass-through integer (batch size, loop count, etc.) |
+| `fps` | FLOAT | Frames per second (float) |
+| `fps_int` | INT | Frames per second rounded to int |
 <!-- AUTO:API:end -->
+
+## 说明
+
+- 修改 **尺寸**、**倍数** 或 **方向** 会重新计算宽度 / 高度。
+- 开启 **锁定比例** 时，改宽度会按比例更新高度（改高度同理）。
+- **纵向** 保持预设宽高；**横向** 交换宽高（1:1 无变化）。
+- 可将 `width` / `height` / `fps` 接到 **Timeline Editor**、**Audio Timeline** 或其他需要画布尺寸与帧率的节点。

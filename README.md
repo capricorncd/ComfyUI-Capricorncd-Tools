@@ -22,7 +22,7 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 | **Image From Batch Index** | Extracts one image from a batch by index | [→](docs/image-batch.md) · [中文](docs/zh/image-batch.md) |
 | **Seq To Video** | Composes frames + optional audio into MP4 via ffmpeg | [→](docs/seq-to-video.md) · [中文](docs/zh/seq-to-video.md) |
 | **Clear Directory** | Deletes selected media files in a directory; supports Recycle Bin on Windows | [→](docs/clear-directory.md) · [中文](docs/zh/clear-directory.md) |
-| **Size Settings** | Aspect ratio / resolution / orientation → `width`, `height`, `count` | [→](docs/size-settings.md) · [中文](docs/zh/size-settings.md) |
+| **Size Settings** | Size preset / scale / lock aspect / orientation → `width`, `height`, `count`, `fps` | [→](docs/size-settings.md) · [中文](docs/zh/size-settings.md) |
 | **Format JSON** | Pretty-print a JSON string in the graph UI | [→](docs/format-json.md) · [中文](docs/zh/format-json.md) |
 
 ---

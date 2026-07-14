@@ -174,17 +174,21 @@
   "CAP_SizeSettings": {
     "display_name": "尺寸设置",
     "inputs": {
-      "aspect_ratio":  { "name": "比例" },
-      "resolution":    { "name": "分辨率" },
+      "size":          { "name": "尺寸" },
+      "scale":         { "name": "倍数" },
+      "lock_aspect":   { "name": "锁定比例" },
       "orientation":   { "name": "方向" },
       "custom_width":  { "name": "宽度" },
       "custom_height": { "name": "高度" },
+      "fps":           { "name": "帧率" },
       "count":         { "name": "数量" }
     },
     "outputs": {
-      "width":  { "name": "宽度" },
-      "height": { "name": "高度" },
-      "count":  { "name": "数量" }
+      "width":   { "name": "宽度" },
+      "height":  { "name": "高度" },
+      "count":   { "name": "数量" },
+      "fps":     { "name": "帧率" },
+      "fps_int": { "name": "帧率(整型)" }
     }
   }
 }

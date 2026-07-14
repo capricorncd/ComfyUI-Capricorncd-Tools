@@ -1,107 +1,100 @@
 from __future__ import annotations
 
-ASPECT_RATIOS = ("1:1", "2:3", "3:4", "3:5", "4:7", "9:16", "9:21")
-RESOLUTIONS = ("480P", "720P", "1K", "2K", "4K", "8K")
-ORIENTATIONS = ("竖屏", "横屏")
+SIZE_PRESETS = (
+    "704x1280 (11:20)",
+    "720x1280 (9:16)",
+    "768x1024 (3:4)",
+    "768x1280 (3:5)",
+    "768x1344 (4:7)",
+    "1024x1024 (1:1)",
+    "1080x2560 (9:21)",
+)
 
-_RATIO_PARTS = {
-    "1:1": (1, 1),
-    "2:3": (2, 3),
-    "3:4": (3, 4),
-    "3:5": (3, 5),
-    "4:7": (4, 7),
-    "9:16": (9, 16),
-    "9:21": (9, 21),
+ORIENTATIONS = ("纵向", "横向")
+
+# Portrait (纵向) base sizes for each preset label.
+_SIZE_BASE = {
+    "704x1280 (11:20)": (704, 1280),
+    "720x1280 (9:16)": (720, 1280),
+    "768x1024 (3:4)": (768, 1024),
+    "768x1280 (3:5)": (768, 1280),
+    "768x1344 (4:7)": (768, 1344),
+    "1024x1024 (1:1)": (1024, 1024),
+    "1080x2560 (9:21)": (1080, 2560),
 }
 
-_LONG_EDGE = {
-    "480P": 854,
-    "720P": 1280,
-    "1K": 1920,
-    "2K": 2560,
-    "4K": 3840,
-    "8K": 7680,
-}
-
-_SQUARE_EDGE = {
-    "480P": 512,
-    "720P": 720,
-    "1K": 1024,
-    "2K": 2048,
-    "4K": 4096,
-    "8K": 8192,
-}
+DEFAULT_SIZE = "720x1280 (9:16)"
 
 
 def _align8(value: int) -> int:
     return max(8, int(round(value / 8)) * 8)
 
 
-def _effective_ratio(aspect_ratio: str, orientation: str) -> tuple[int, int]:
-    rw, rh = _RATIO_PARTS[aspect_ratio]
-    if aspect_ratio == "1:1":
-        return 1, 1
-    if orientation == "横屏":
-        return rh, rw
-    return rw, rh
-
-
-def _size_from_ratio(aspect_ratio: str, resolution: str, orientation: str) -> tuple[int, int]:
-    rw, rh = _effective_ratio(aspect_ratio, orientation)
-    if rw == rh == 1:
-        edge = _align8(_SQUARE_EDGE[resolution])
-        return edge, edge
-
-    long_edge = _LONG_EDGE[resolution]
-    if rw > rh:
-        width = long_edge
-        height = _align8(width * rh / rw)
-        return _align8(width), height
-
-    height = long_edge
-    width = _align8(height * rw / rh)
-    return width, _align8(height)
+def size_from_preset(size: str, scale: float, orientation: str) -> tuple[int, int]:
+    width, height = _SIZE_BASE.get(size, _SIZE_BASE[DEFAULT_SIZE])
+    if orientation == "横向" and width != height:
+        width, height = height, width
+    scale = max(0.01, float(scale))
+    return _align8(width * scale), _align8(height * scale)
 
 
 class CAP_SizeSettings:
-    """Compute width/height from ratio presets or custom dimensions."""
+    """Output canvas size, count, and fps from size presets and custom dimensions."""
 
     DOC_SLUG = "size-settings"
     OUTPUT_TOOLTIPS = {
         "width": "Final width aligned to a multiple of 8",
         "height": "Final height aligned to a multiple of 8",
         "count": "Pass-through integer (batch size, loop count, etc.)",
+        "fps": "Frames per second (float)",
+        "fps_int": "Frames per second rounded to int",
     }
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "aspect_ratio": (ASPECT_RATIOS, {
-                    "default": "9:16",
-                    "tooltip": "Aspect ratio preset used by the UI size calculator",
+                "size": (SIZE_PRESETS, {
+                    "default": "720x1280 (9:16)",
+                    "tooltip": "Base canvas size preset (portrait dimensions shown)",
                 }),
-                "resolution": (RESOLUTIONS, {
-                    "default": "1K",
-                    "tooltip": "Resolution tier (long-edge or square-edge target)",
+                "scale": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.01,
+                    "max": 8.0,
+                    "step": 0.01,
+                    "tooltip": "Multiplier applied to the size preset",
+                }),
+                "lock_aspect": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "锁定",
+                    "label_off": "自由",
+                    "tooltip": "When locked, editing width updates height (and vice versa) to keep the aspect ratio",
                 }),
                 "orientation": (ORIENTATIONS, {
-                    "default": "竖屏",
-                    "tooltip": "Portrait or landscape; swaps non-square ratios",
+                    "default": "纵向",
+                    "tooltip": "纵向 keeps preset WxH; 横向 swaps width and height",
                 }),
                 "custom_width": ("INT", {
-                    "default": 1080,
+                    "default": 720,
                     "min": 64,
                     "max": 16384,
                     "step": 8,
                     "tooltip": "Width used at run time (aligned to multiples of 8)",
                 }),
                 "custom_height": ("INT", {
-                    "default": 1920,
+                    "default": 1280,
                     "min": 64,
                     "max": 16384,
                     "step": 8,
                     "tooltip": "Height used at run time (aligned to multiples of 8)",
+                }),
+                "fps": ("FLOAT", {
+                    "default": 24.0,
+                    "min": 1.0,
+                    "max": 240.0,
+                    "step": 0.01,
+                    "tooltip": "Frames per second",
                 }),
                 "count": ("INT", {
                     "default": 1,
@@ -113,26 +106,35 @@ class CAP_SizeSettings:
             },
         }
 
-    RETURN_TYPES = ("INT", "INT", "INT")
-    RETURN_NAMES = ("width", "height", "count")
+    RETURN_TYPES = ("INT", "INT", "INT", "FLOAT", "INT")
+    RETURN_NAMES = ("width", "height", "count", "fps", "fps_int")
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
-        "Output width and height from aspect ratio, resolution tier, orientation, "
-        "or manually edited custom dimensions."
+        "Output width, height, count, and fps (float + int) from size presets, "
+        "scale, orientation, and optionally locked custom dimensions."
     )
 
     def execute(
         self,
-        aspect_ratio: str,
-        resolution: str,
+        size: str,
+        scale: float,
+        lock_aspect: bool,
         orientation: str,
         custom_width: int,
         custom_height: int,
+        fps: float,
         count: int,
     ):
-        del aspect_ratio, resolution, orientation
-        return _align8(int(custom_width)), _align8(int(custom_height)), max(1, int(count))
+        del size, scale, lock_aspect, orientation
+        fps_f = max(1.0, float(fps))
+        return (
+            _align8(int(custom_width)),
+            _align8(int(custom_height)),
+            max(1, int(count)),
+            fps_f,
+            max(1, int(round(fps_f))),
+        )
 
 
 NODE_CLASS_MAPPINGS = {

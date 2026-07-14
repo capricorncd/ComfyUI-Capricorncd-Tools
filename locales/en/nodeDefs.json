@@ -174,17 +174,21 @@
   "CAP_SizeSettings": {
     "display_name": "Size Settings",
     "inputs": {
-      "aspect_ratio":  { "name": "Aspect Ratio" },
-      "resolution":    { "name": "Resolution" },
+      "size":          { "name": "Size" },
+      "scale":         { "name": "Scale" },
+      "lock_aspect":   { "name": "Lock Aspect" },
       "orientation":   { "name": "Orientation" },
       "custom_width":  { "name": "Width" },
       "custom_height": { "name": "Height" },
+      "fps":           { "name": "FPS" },
       "count":         { "name": "Count" }
     },
     "outputs": {
-      "width":  { "name": "Width" },
-      "height": { "name": "Height" },
-      "count":  { "name": "Count" }
+      "width":   { "name": "Width" },
+      "height":  { "name": "Height" },
+      "count":   { "name": "Count" },
+      "fps":     { "name": "FPS" },
+      "fps_int": { "name": "FPS Int" }
     }
   }
 }
