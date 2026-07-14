@@ -10,7 +10,7 @@ from PIL import Image
 
 
 class CAP_SaveImages:
-    """Save an IMAGE batch under ComfyUI's output directory."""
+    """Save an IMAGE batch to disk (relative under output, or absolute anywhere)."""
 
     DOC_SLUG = "save-images"
     OUTPUT_TOOLTIPS = {
@@ -28,8 +28,10 @@ class CAP_SaveImages:
                 "filename_prefix": ("STRING", {
                     "default": "temp/cap-save-images/%Y%m%d_%H%M%S/CSI",
                     "tooltip": (
-                        "Path relative to ComfyUI output: earlier segments are subfolders, "
-                        "last segment is the file prefix. Supports strftime."
+                        "Relative to ComfyUI output: earlier segments are subfolders, "
+                        "last segment is the file prefix. "
+                        "An absolute path is the save directory anywhere on disk "
+                        "(prefix defaults to CSI). Supports strftime."
                     ),
                 }),
                 "filename": ("STRING", {
@@ -71,17 +73,25 @@ class CAP_SaveImages:
     OUTPUT_NODE = True
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
-        "Save a batch of images under ComfyUI's output directory. "
-        "filename_prefix is relative to output and supports strftime "
-        "(e.g. temp/cap-save-images/%Y%m%d_%H%M%S/CSI). "
-        "The last path segment is the file name prefix; earlier segments are subfolders. "
+        "Save a batch of images to disk. "
+        "Relative filename_prefix is under ComfyUI output (last segment = file prefix). "
+        "Absolute filename_prefix is the save directory anywhere on disk "
+        "(file prefix defaults to CSI). Supports strftime. "
         "filename supports {prefix} and {index} (zero-padded to 5 digits). "
         "When save_as_zip is true, also pack the saved images into a zip next to the folder."
     )
 
     def _resolve_save_dir(self, filename_prefix: str) -> tuple[str, str]:
         output_dir = os.path.abspath(folder_paths.get_output_directory())
-        resolved = datetime.now().strftime((filename_prefix or "CSI").strip())
+        raw = datetime.now().strftime((filename_prefix or "CSI").strip())
+
+        if os.path.isabs(raw):
+            # Absolute path = save directory anywhere on disk.
+            save_dir = os.path.abspath(os.path.normpath(raw))
+            name_prefix = "CSI"
+            return save_dir, name_prefix
+
+        resolved = raw
         for lead in ("output/", "output\\", "./output/", "./output\\"):
             if resolved.startswith(lead):
                 resolved = resolved[len(lead):]
@@ -96,9 +106,13 @@ class CAP_SaveImages:
         save_dir = os.path.join(output_dir, subfolder) if subfolder else output_dir
         save_dir = os.path.abspath(save_dir)
 
-        if os.path.commonpath((output_dir, save_dir)) != output_dir:
+        try:
+            under_output = os.path.commonpath((output_dir, save_dir)) == output_dir
+        except ValueError:
+            under_output = False
+        if not under_output:
             raise Exception(
-                "Saving image outside the output folder is not allowed.\n"
+                "Relative filename_prefix must resolve under the ComfyUI output folder.\n"
                 f" save_dir: {save_dir}\n"
                 f" output_dir: {output_dir}"
             )
