@@ -11,6 +11,16 @@ export function markNonSerializableWidget(w) {
     w.serializeValue = () => undefined;
 }
 
+/** True when the node lives in the graph the canvas is currently showing.
+ * When a subgraph is opened, canvas.graph is the subgraph, so nodes from an
+ * outer graph must hide their DOM overlays. */
+function isNodeOnDisplayedGraph(node) {
+    const active = app.canvas?.graph;
+    const owner = node?.graph;
+    if (!active || !owner) return true;
+    return owner === active;
+}
+
 function resolveNodeHost(node, el) {
     if (node?.id != null) {
         const vueNode = document.querySelector(`[data-node-id="${node.id}"]`);
@@ -86,8 +96,13 @@ export function applyWidgetValuesByNames(node, names, values) {
 
 export function positionOverlayInNodeHeader(node, el, { right = 40, top = 0 } = {}) {
     if (!el) return null;
+    if (!isNodeOnDisplayedGraph(node)) {
+        el.style.display = "none";
+        return null;
+    }
     const header = resolveNodeHeader(node, el);
     if (!header) return null;
+    el.style.display = "";
     if (getComputedStyle(header).position === "static") {
         header.style.position = "relative";
     }
@@ -110,8 +125,13 @@ export function positionOverlayInNodeHeader(node, el, { right = 40, top = 0 } = 
 
 export function positionOverlayFixedToHeader(node, el) {
     if (!el || node?.id == null) return null;
+    if (!isNodeOnDisplayedGraph(node)) {
+        el.style.display = "none";
+        return null;
+    }
     const header = resolveNodeHeader(node, el);
     if (!header) return null;
+    el.style.display = "";
     if (el.parentElement !== document.body) document.body.appendChild(el);
     el.classList.add("cap-ui-node-btn-wrap--header", "cap-ui-node-btn-wrap--fixed");
     el.classList.remove("cap-ui-node-btn-wrap--hoisted");
@@ -138,6 +158,10 @@ export function positionOverlayFixedToHeader(node, el) {
 export function positionOverlayOnCanvasTitle(node, el, { insetRight = 6, insetTop = 4 } = {}) {
     const canvas = app.canvas;
     if (!el || !canvas?.canvas || !node?.pos || !node?.size) return null;
+    if (!isNodeOnDisplayedGraph(node)) {
+        el.style.display = "none";
+        return canvas.canvas;
+    }
     if (node.flags?.collapsed) {
         el.style.display = "none";
         return canvas.canvas;
