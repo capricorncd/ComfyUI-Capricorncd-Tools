@@ -13,6 +13,8 @@
 | 节点 | 说明 | 文档 |
 |------|------|------|
 | **Rich Prompt Input** | 带实时语法高亮、`#` 注释与历史/预设的提示词编辑器 | [→](docs/zh/prompt-input.md) |
+| **Prompt Group** | 全局 / 场景 / 负面提示词输入；统计场景提示词有效条数 | [→](docs/zh/prompt-group.md) |
+| **Prompt From Batch** | 按索引/长度截取场景提示词；可选合并全局提示词 | [→](docs/zh/prompt-from-batch.md) |
 | **Audio Timeline** | 波形修剪 + 图像关键帧时间轴 + 每片段提示词 | [→](docs/zh/audio-timeline.md) |
 | **Timeline Editor** | 全屏多轨时间轴编辑器；输出 `data_json` 与 `frame_seq_dir` | [→](docs/zh/timeline-editor.md) |
 | **Data Json Clip Parser** | 从 Audio Timeline / Timeline Editor 的 `data_json` 中提取单个片段 | [→](docs/zh/data-json-clip-parser.md) |

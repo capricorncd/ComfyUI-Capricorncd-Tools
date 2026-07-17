@@ -190,5 +190,35 @@
       "fps":     { "name": "帧率" },
       "fps_int": { "name": "帧率(整型)" }
     }
+  },
+
+  "CAP_PromptGroup": {
+    "display_name": "提示词组合",
+    "inputs": {
+      "global_prompt":   { "name": "全局提示词" },
+      "scene_prompt":    { "name": "场景提示词" },
+      "negative_prompt": { "name": "负面提示词" },
+      "output_scenes":   { "name": "输出场景" }
+    },
+    "outputs": {
+      "global_prompt":     { "name": "全局提示词" },
+      "negative_prompt":   { "name": "负面提示词" },
+      "scene_prompt":      { "name": "场景提示词" },
+      "effective_length":  { "name": "有效提示词长度" }
+    }
+  },
+
+  "CAP_PromptFromBatch": {
+    "display_name": "从批次获取提示词",
+    "inputs": {
+      "global_prompt": { "name": "全局提示词" },
+      "scene_prompt":  { "name": "场景提示词" },
+      "batch_index":   { "name": "批次索引" },
+      "batch_length":  { "name": "批次长度" },
+      "merge_global":  { "name": "合并全局提示词" }
+    },
+    "outputs": {
+      "prompt": { "name": "提示词" }
+    }
   }
 }

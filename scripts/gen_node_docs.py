@@ -33,6 +33,7 @@ SOURCE_FILES = [
     "cap_load_images_from_dir.py",
     "cap_clear_directory.py",
     "prompt_input_rich.py",
+    "cap_prompt_group.py",
 ]
 
 

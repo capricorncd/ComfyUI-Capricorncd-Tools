@@ -13,6 +13,8 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 | Node | Description | Doc |
 |------|-------------|-----|
 | **Rich Prompt Input** | Prompt editor with live syntax highlighting, `#` comments, and history/presets | [→](docs/prompt-input.md) · [中文](docs/zh/prompt-input.md) |
+| **Prompt Group** | Global / scene / negative prompts; counts non-empty scene prompt lines | [→](docs/prompt-group.md) · [中文](docs/zh/prompt-group.md) |
+| **Prompt From Batch** | Slice scene prompts by index/length; optionally merge global prompt | [→](docs/prompt-from-batch.md) · [中文](docs/zh/prompt-from-batch.md) |
 | **Audio Timeline** | Waveform trim + image keyframe clip track + per-clip prompts | [→](docs/audio-timeline.md) · [中文](docs/zh/audio-timeline.md) |
 | **Timeline Editor** | Fullscreen multi-track timeline editor; outputs `data_json` and `frame_seq_dir` | [→](docs/timeline-editor.md) · [中文](docs/zh/timeline-editor.md) |
 | **Data Json Clip Parser** | Extracts a single clip from Audio Timeline / Timeline Editor `data_json` output | [→](docs/data-json-clip-parser.md) · [中文](docs/zh/data-json-clip-parser.md) |

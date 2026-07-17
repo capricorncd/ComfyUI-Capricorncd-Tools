@@ -190,5 +190,35 @@
       "fps":     { "name": "FPS" },
       "fps_int": { "name": "FPS Int" }
     }
+  },
+
+  "CAP_PromptGroup": {
+    "display_name": "Prompt Group",
+    "inputs": {
+      "global_prompt":   { "name": "Global Prompt" },
+      "scene_prompt":    { "name": "Scene Prompt" },
+      "negative_prompt": { "name": "Negative Prompt" },
+      "output_scenes":   { "name": "Output Scenes" }
+    },
+    "outputs": {
+      "global_prompt":     { "name": "Global Prompt" },
+      "negative_prompt":   { "name": "Negative Prompt" },
+      "scene_prompt":      { "name": "Scene Prompt" },
+      "effective_length":  { "name": "Effective Length" }
+    }
+  },
+
+  "CAP_PromptFromBatch": {
+    "display_name": "Prompt From Batch",
+    "inputs": {
+      "global_prompt": { "name": "Global Prompt" },
+      "scene_prompt":  { "name": "Scene Prompt" },
+      "batch_index":   { "name": "Batch Index" },
+      "batch_length":  { "name": "Batch Length" },
+      "merge_global":  { "name": "Merge Global" }
+    },
+    "outputs": {
+      "prompt": { "name": "Prompt" }
+    }
   }
 }

@@ -47,6 +47,10 @@ from .cap_format_json import (
     NODE_CLASS_MAPPINGS as _CFJ_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CFJ_NAMES,
 )
+from .cap_prompt_group import (
+    NODE_CLASS_MAPPINGS as _CPG_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CPG_NAMES,
+)
 from .timecode import (
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -71,6 +75,7 @@ NODE_CLASS_MAPPINGS = {
     **_CCD_CLASS,
     **_CSS_CLASS,
     **_CFJ_CLASS,
+    **_CPG_CLASS,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -85,6 +90,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CCD_NAMES,
     **_CSS_NAMES,
     **_CFJ_NAMES,
+    **_CPG_NAMES,
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
