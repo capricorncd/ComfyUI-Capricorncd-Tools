@@ -118,7 +118,10 @@ app.registerExtension({
         const onExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (output) {
             onExecuted?.apply(this, arguments);
-            const info = output?.video?.[0];
+            // Prefer custom "video" payload; also accept core PreviewVideo shape
+            // (images + animated) so previews still work across frontend versions.
+            const info = output?.video?.[0]
+                || (output?.animated?.find?.(Boolean) ? output?.images?.[0] : null);
             if (!info || !this._stvRoot) return;
             this._stvLastVideoInfo = info;  // persist across refresh
             const url = videoUrl(info);
@@ -149,11 +152,19 @@ function _buildPlayer(node) {
     root.appendChild(holder);
 
     const w = node.addDOMWidget("stv_ui", "stv_player", root, {
+        // Required after ComfyUI frontend Vue-widget migration: without
+        // canvasOnly the player is not rendered on the node canvas.
+        canvasOnly: true,
         hideOnZoom: false,
         getMinHeight: () => node._stvPlayerH,
         getHeight:    () => node._stvPlayerH,
     });
     w.serialize = false;
+    w.computeLayoutSize = () => ({
+        minHeight: node._stvPlayerH,
+        maxHeight: node._stvPlayerH,
+        minWidth: MIN_NODE_WIDTH,
+    });
 
     // Prevent stale widget.width from narrowing the player when node is selected
     Object.defineProperty(w, "width", {

@@ -197,12 +197,28 @@ class CAP_SeqToVideo:
     def IS_CHANGED(cls, frames_dir, fps, filename_prefix, images=None, audio=None, image_paths=""):
         return float("nan")  # always re-run
 
-    def _build_output_path(self, filename_prefix: str) -> tuple[str, str]:
-        output_dir = folder_paths.get_output_directory()
+    def _build_output_path(self, filename_prefix: str) -> tuple[str, str, str]:
+        """Return (filename, subfolder, full_path) for ComfyUI /view API.
+
+        filename_prefix may include subfolders (e.g. ``video/nsfw-audio/STV``).
+        Those must go into ``subfolder``, not ``filename``, otherwise the
+        browser preview URL cannot resolve the file.
+        """
+        output_dir = os.path.abspath(folder_paths.get_output_directory())
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = str(filename_prefix).strip() or "STV"
-        output_filename = f"{prefix}_{stamp}.mp4"
-        return output_filename, os.path.join(output_dir, output_filename)
+        prefix = str(filename_prefix).strip().replace("\\", "/") or "STV"
+        subfolder = os.path.dirname(prefix)
+        base = os.path.basename(prefix) or "STV"
+        output_filename = f"{base}_{stamp}.mp4"
+
+        full_output_folder = os.path.abspath(os.path.join(output_dir, subfolder)) if subfolder else output_dir
+        if os.path.commonpath((output_dir, full_output_folder)) != output_dir:
+            raise ValueError("Saving video outside the output folder is not allowed.")
+        os.makedirs(full_output_folder, exist_ok=True)
+
+        output_path = os.path.join(full_output_folder, output_filename)
+        subfolder_ui = subfolder.replace("\\", "/") if subfolder else ""
+        return output_filename, subfolder_ui, output_path
 
     def _append_encode_args(self, cmd: list, audio_tmp: str | None, video_duration: float) -> list:
         if audio_tmp:
@@ -233,7 +249,7 @@ class CAP_SeqToVideo:
             raise RuntimeError(f"ffmpeg 执行失败:\n{result.stderr[-2000:]}")
 
     def execute(self, frames_dir: str, fps: float, filename_prefix: str, images=None, audio=None, image_paths=""):
-        output_filename, output_path = self._build_output_path(filename_prefix)
+        output_filename, subfolder, output_path = self._build_output_path(filename_prefix)
         fps = float(fps)
 
         audio_tmp = None
@@ -307,12 +323,17 @@ class CAP_SeqToVideo:
                 shutil.rmtree(frames_tmp_dir, ignore_errors=True)
 
         log.info("[CAP_SeqToVideo] 输出: %s", output_path)
+        rel_name = f"{subfolder}/{output_filename}" if subfolder else output_filename
 
         return {
             "ui": {
-                "video": [{"filename": output_filename, "subfolder": "", "type": "output"}]
+                "video": [{
+                    "filename": output_filename,
+                    "subfolder": subfolder,
+                    "type": "output",
+                }]
             },
-            "result": (output_filename,),
+            "result": (rel_name,),
         }
 
 
