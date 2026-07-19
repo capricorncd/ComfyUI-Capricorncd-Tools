@@ -28,6 +28,7 @@
 
 .cap-ui-dialog {
     width: min(780px, 96vw);
+    height: min(72vh, 800px);
     max-height: min(82vh, 900px);
     display: flex;
     flex-direction: column;
@@ -45,6 +46,7 @@
     gap: 8px;
     padding: 10px 12px;
     border-bottom: 1px solid #333;
+    flex-shrink: 0;
 }
 
 .cap-ui-hd.cap-ui-drag {
@@ -116,6 +118,7 @@
     padding: 8px 12px 0;
     border-bottom: 1px solid #333;
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .cap-ui-tab-list {
@@ -443,7 +446,7 @@
     overflow: hidden;
     padding: 0;
     flex: 1;
-    min-height: 120px;
+    min-height: 0;
 }
 
 .cap-ui-list-item {

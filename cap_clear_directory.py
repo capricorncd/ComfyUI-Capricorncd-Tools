@@ -24,13 +24,14 @@ def _is_filesystem_root(path: str) -> bool:
     return path == os.path.abspath(os.sep)
 
 
-def _resolve_directory(directory: str) -> str:
+def _resolve_directory(directory: str) -> str | None:
+    """Return absolute directory path, or None when the path does not exist."""
     resolved = resolve_assets_dir(directory)
     if not resolved:
         raise ValueError("目录路径为空")
     real = os.path.realpath(resolved)
     if not os.path.isdir(real):
-        raise ValueError(f"目录不存在: {directory}")
+        return None
     if _is_filesystem_root(real):
         raise ValueError(f"禁止清空根目录: {real}")
     return real
@@ -154,6 +155,10 @@ class CAP_ClearDirectory:
         to_recycle_bin: bool,
     ):
         resolved = _resolve_directory(directory)
+        if resolved is None:
+            log.info("[CAP_ClearDirectory] 目录不存在，已跳过: %s", directory)
+            return (directory or "", 0)
+
         exts = _allowed_extensions(delete_images, delete_videos, delete_audio)
         deleted = 0
 
