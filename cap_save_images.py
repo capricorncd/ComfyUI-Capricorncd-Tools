@@ -144,7 +144,8 @@ class CAP_SaveImages:
             saved_paths.append(path)
 
         if save_as_zip and saved_paths:
-            zip_path = f"{save_dir.rstrip('/\\')}.zip"
+            save_dir_stripped = save_dir.rstrip("/\\")
+            zip_path = f"{save_dir_stripped}.zip"
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for path in saved_paths:
                     zf.write(path, arcname=os.path.basename(path))
