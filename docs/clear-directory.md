@@ -44,6 +44,7 @@ Delete image, video, and/or audio files in a directory. Filesystem root director
 
 ## Notes
 
+- If `directory` does not exist, the node logs and skips instead of raising an error; it returns the input path unchanged and `deleted_count = 0`.
 - If all three media toggles are off, the node skips deletion and returns `deleted_count = 0`.
 - With `delete_subdirs = false`, only files directly inside `directory` are considered.
 - With `to_recycle_bin = true` on non-Windows systems, the node logs a warning and falls back to permanent deletion.

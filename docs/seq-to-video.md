@@ -46,6 +46,8 @@ Paths may be quoted. Files are encoded in list order via ffmpeg's concat demuxer
 
 Each run produces a unique file; no previous renders are overwritten.
 
+`filename_prefix` may include subfolders, e.g. `video/nsfw-audio/STV` writes to `output/video/nsfw-audio/STV_{yyyyMMdd_HHmmss}.mp4`. The subfolder is created automatically if it does not exist. Paths that would resolve outside the ComfyUI `output` directory (e.g. via `..`) are rejected.
+
 ---
 
 ## Video player
@@ -69,7 +71,7 @@ Output length always follows the frame count: `frame_count / fps`. If the audio 
 |------|------|---------|-------------|
 | `frames_dir` | STRING | `""` | Directory for directory mode (used when `images` and `image_paths` are empty) |
 | `fps` | FLOAT | 24.0 | Frame rate for the output video |
-| `filename_prefix` | STRING | `STV` | Prefix for the output filename |
+| `filename_prefix` | STRING | `STV` | Prefix for the output filename; may include subfolders (e.g. `video/nsfw-audio/STV`) |
 | `images` | IMAGE | *(optional)* | Highest-priority frame source |
 | `image_paths` | STRING | `""` | Comma-separated image file paths |
 | `audio` | AUDIO | *(optional)* | Audio to mix into the video; omit for video-only output |
@@ -78,7 +80,7 @@ Output length always follows the frame count: `frame_count / fps`. If the audio 
 
 | Name | Type | Description |
 |------|------|-------------|
-| `filename` | STRING | Output filename relative to the ComfyUI output directory |
+| `filename` | STRING | Output path relative to the ComfyUI output directory (includes the subfolder, if any) |
 
 ---
 

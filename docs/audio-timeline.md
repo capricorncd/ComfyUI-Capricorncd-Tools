@@ -22,14 +22,22 @@ A full-featured audio waveform editor with an image keyframe clip track, per-cli
 
 Each clip represents one generation segment: a time range, a start keyframe image, an optional end keyframe image, and a per-clip prompt.
 
+There are two tracks:
+
+| Track | `track` value | Layout | Behaviour |
+|-------|----------------|--------|-----------|
+| Main track | `0` | Always contiguous | Clips pack left automatically after any move, resize, or delete; no gaps |
+| Overlay (sub) track | `1` | Free-form, gaps allowed | Clips keep whatever position you place them at; overlapping another overlay clip is rejected |
+
+Overlay-track clips render on top (`z_index 2`) and **occlude** whatever part of the main track (`z_index 1`) they cover — the covered main-track range is cut out of `data_json`/`total_frame_count` at export time, so the timeline behaves like a two-layer composite even though only one video is produced.
+
 **Adding clips**
 
 | Method | Behaviour |
 |--------|-----------|
-| `＋ Add Image` button | Opens the image picker; the selected image is added and a clip is placed at the current playhead position |
-| Double-click the track | Adds a clip at that time position (no image assigned) |
-
-Clips are always contiguous — they pack left automatically after any move, resize, or delete.
+| `＋ Add Image` button | Opens the image picker; inserts into the main track if it's free at the playhead, otherwise the overlay track, otherwise shows an alert (both tracks occupied) |
+| Double-click the main track | Adds a main-track clip at that time position (no image assigned) |
+| Double-click the overlay track | Adds an overlay clip at that time position; alerts if the overlay track already has a clip there |
 
 **Clip thumbnails and badges**
 
@@ -37,7 +45,18 @@ Clips are always contiguous — they pack left automatically after any move, res
 - `[首]` badge: only a start frame is assigned; hover to preview it
 - `[首尾]` badge: both start and end frames are assigned; hover to preview both
 
-**Right-click context menu**
+**Multi-select (Ctrl+Click)**
+
+`Ctrl+Click` a clip to add/remove it from the selection. Right-click any selected clip in a multi-selection to open the multi-select menu:
+
+| Item | Shortcut | Condition | Description |
+|------|----------|-----------|-------------|
+| 合并 (Merge) | — | Selected clips are contiguous on the same track | Keeps the first clip, extends its end time to the last selected clip's end time, and removes the rest |
+| 禁用选中项 / 启用选中项 (Disable/Enable Selected) | `Ctrl+B` | any | Disable all selected clips, or re-enable them if all are already disabled |
+
+The merge option is hidden when the selection is not contiguous or spans both tracks.
+
+**Single-select context menu**
 
 | Item | Shortcut | Description |
 |------|----------|-------------|
@@ -45,6 +64,7 @@ Clips are always contiguous — they pack left automatically after any move, res
 | 选择尾帧图片 | — | Open image picker to assign an end keyframe |
 | 首尾帧交换 | — | Swap start and end keyframe images (visible only when both are set) |
 | 分割素材 | — | Split the clip at the current playhead position into two clips; left clip keeps the start keyframe, right clip keeps the end keyframe (visible only when the playhead is inside the clip) |
+| 移到主轨道 / 移到副轨道 | — | Move the clip to the other track; rejected if the target position on the overlay track is already occupied |
 | Disable / Enable | `Ctrl+B` | Toggle the clip's disabled state |
 | Disable / Enable Others | `Ctrl+G` | Disable all other clips; if all others are already disabled, re-enable them all |
 | 复制 | — | Copy this clip to the internal clipboard |
@@ -108,7 +128,7 @@ Click anywhere on the waveform or clip track to give the timeline focus. `Ctrl+B
 | `W` | Trim the right edge of the selected clip to the playhead |
 | `Delete` / `Backspace` | Delete the selected clip |
 | `Ctrl+C` | Copy the selected clip |
-| `Ctrl+V` | Paste clipboard clip at end of timeline |
+| `Ctrl+V` | Paste the clipboard clip after the last clip on its original track (main or overlay) |
 | `Ctrl+B` | Disable / Enable the selected clip |
 | `Ctrl+G` | Disable / Enable all other clips |
 | `Escape` | Deselect / close picker or context menu |
@@ -166,7 +186,8 @@ Click anywhere on the waveform or clip track to give the timeline focus. `Ctrl+B
       "start_image": "/absolute/path/to/frame_001.jpg",
       "end_image": "/absolute/path/to/frame_010.jpg",
       "prompt": "close up portrait",
-      "use_global_prompt": false
+      "use_global_prompt": false,
+      "z_index": 1
     }
   ]
 }
@@ -180,5 +201,6 @@ Click anywhere on the waveform or clip track to give the timeline focus. `Ctrl+B
 | `end_image` | string | Absolute path to the end keyframe image; in `one_shot` mode, non-last clips use the next clip's `start_image` |
 | `prompt` | string | Per-clip prompt (empty string if not set) |
 | `use_global_prompt` | boolean | `true` if the clip uses the global prompt (either explicitly set or because per-clip prompt is empty) |
+| `z_index` | number | `1` for main-track clips, `2` for overlay-track clips |
 
-Disabled clips are **not** written to `clips`. The `total_frame_count` is the sum of active clip durations only.
+Disabled clips are **not** written to `clips`. The `total_frame_count` is the sum of active clip durations only. Main-track ranges covered by an enabled overlay clip are split around it (or dropped entirely if fully covered), so a single main-track UI clip can produce zero, one, or two entries in `clips`.

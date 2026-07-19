@@ -46,6 +46,8 @@ D:\ComfyUI\output\temp\img_00000.png, D:\ComfyUI\output\temp\img_00001.png
 
 每次运行生成唯一文件，不覆盖历史渲染结果。
 
+`filename_prefix` 可以包含子目录，例如 `video/nsfw-audio/STV` 会写入 `output/video/nsfw-audio/STV_{yyyyMMdd_HHmmss}.mp4`。子目录不存在时会自动创建。若解析后的路径会超出 `output` 目录范围（例如通过 `..`），则会被拒绝。
+
 ---
 
 ## 内嵌播放器
@@ -69,7 +71,7 @@ D:\ComfyUI\output\temp\img_00000.png, D:\ComfyUI\output\temp\img_00001.png
 |------|------|--------|------|
 | `frames_dir` | STRING | `""` | 目录模式使用的路径（`images` 与 `image_paths` 均为空时生效） |
 | `fps` | FLOAT | 24.0 | 输出视频的帧率 |
-| `filename_prefix` | STRING | `STV` | 输出文件名前缀 |
+| `filename_prefix` | STRING | `STV` | 输出文件名前缀；可包含子目录（如 `video/nsfw-audio/STV`） |
 | `images` | IMAGE | *（可选）* | 最高优先级的帧来源 |
 | `image_paths` | STRING | `""` | 逗号分隔的图片文件路径 |
 | `audio` | AUDIO | *（可选）* | 混入视频的音频；省略则输出纯视频 |
@@ -78,7 +80,7 @@ D:\ComfyUI\output\temp\img_00000.png, D:\ComfyUI\output\temp\img_00001.png
 
 | 名称 | 类型 | 说明 |
 |------|------|------|
-| `filename` | STRING | 相对于 ComfyUI output 目录的输出文件名 |
+| `filename` | STRING | 相对于 ComfyUI output 目录的输出路径（含子目录，如有） |
 
 ---
 
