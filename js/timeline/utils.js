@@ -66,6 +66,10 @@ export function generateWaveform(seed, len = 80) {
 /**
  * Bind a drag session that ends reliably even when the pointer is released
  * over overlays (sidebar, media panel, etc.) outside the timeline.
+ *
+ * Do not listen for `mouseleave` in capture on `document`: that event fires
+ * for every element the pointer exits, so the first move off a handle's
+ * inner span would end the gesture before any resize/move can apply.
  */
 export function bindDragSession(startEvent, { onMove, onEnd }) {
   let ended = false;
@@ -82,6 +86,11 @@ export function bindDragSession(startEvent, { onMove, onEnd }) {
     if (!ended) onMove(ev);
   };
 
+  /** End only when the pointer leaves the browser viewport. */
+  const onViewportLeave = (ev) => {
+    if (ev.target === document.documentElement) finish(ev);
+  };
+
   const teardown = () => {
     window.removeEventListener('mousemove', move, true);
     window.removeEventListener('mouseup', finish, true);
@@ -89,7 +98,7 @@ export function bindDragSession(startEvent, { onMove, onEnd }) {
     window.removeEventListener('pointerup', finish, true);
     window.removeEventListener('pointercancel', finish, true);
     window.removeEventListener('blur', finish);
-    document.removeEventListener('mouseleave', finish, true);
+    document.documentElement.removeEventListener('mouseleave', onViewportLeave);
     if (captureTarget?.releasePointerCapture && startEvent.pointerId != null) {
       try { captureTarget.releasePointerCapture(startEvent.pointerId); } catch { /* ignore */ }
     }
@@ -106,7 +115,7 @@ export function bindDragSession(startEvent, { onMove, onEnd }) {
   window.addEventListener('pointerup', finish, true);
   window.addEventListener('pointercancel', finish, true);
   window.addEventListener('blur', finish);
-  document.addEventListener('mouseleave', finish, true);
+  document.documentElement.addEventListener('mouseleave', onViewportLeave);
 
   return finish;
 }
