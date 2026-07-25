@@ -119,7 +119,9 @@ export class Clip extends EventEmitter {
   _applyThumbnail() {
     if (!this._thumbRow) return;
     if (this.thumbnail) {
-      this._thumbRow.style.backgroundImage = `url(${this.thumbnail})`;
+      // Quote the URL — filenames often contain spaces (breaks unquoted css url()).
+      const src = String(this.thumbnail).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      this._thumbRow.style.backgroundImage = `url("${src}")`;
       if (this.track.type === 'image') {
         this._thumbRow.style.backgroundSize = 'auto 100%';
         this._thumbRow.style.backgroundRepeat = 'repeat-x';

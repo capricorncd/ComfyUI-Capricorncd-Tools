@@ -9,7 +9,7 @@ import re
 
 import torch
 
-from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines, _subtract_intervals
+from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines
 from .timecode import resolve_media_path
 
 
@@ -65,7 +65,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "height": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
                 "assets_dir": ("STRING", {"default": "", "multiline": False}),
                 "global_prompt": ("STRING", {"default": "", "multiline": True}),
-                "ignore_occluded": ("BOOLEAN", {"default": True, "label_on": "忽略遮挡", "label_off": "输出全部"}),
                 "project_version": ("STRING", {"default": PROJECT_VERSION}),
                 "project_json": (
                     "STRING",
@@ -88,8 +87,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     @classmethod
     def IS_CHANGED(cls, fps, width, height, assets_dir, global_prompt,
-                   ignore_occluded, project_version, project_json, trim_offset, **_):
-        return fps, width, height, assets_dir, global_prompt, ignore_occluded, project_version, project_json, trim_offset
+                   project_version, project_json, trim_offset, **_):
+        return fps, width, height, assets_dir, global_prompt, project_version, project_json, trim_offset
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -109,6 +108,24 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             waveform, sample_rate = torchaudio.load(path)
             return waveform, int(sample_rate)
 
+    def _resolve_audio_file(self, file_ref, location: str = "assets", assets_dir: str = "") -> str:
+        """Resolve an audio path, retrying basename under assets/input when needed."""
+        raw = str(file_ref or "").strip()
+        if not raw:
+            return ""
+        path = os.path.normpath(raw)
+        if os.path.isfile(path):
+            return path
+        resolved = resolve_media_path(raw, assets_dir=assets_dir, location=location or "assets")
+        if resolved and os.path.isfile(resolved):
+            return os.path.normpath(resolved)
+        base = os.path.basename(raw.replace("\\", "/"))
+        if base and base != raw:
+            again = resolve_media_path(base, assets_dir=assets_dir, location=location or "assets")
+            if again and os.path.isfile(again):
+                return os.path.normpath(again)
+        return os.path.normpath(resolved or path)
+
     def _resample_waveform(self, waveform, sample_rate, target_sample_rate):
         if sample_rate == target_sample_rate:
             return waveform
@@ -122,7 +139,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     @staticmethod
     def _ensure_stereo_batch(waveform):
-        if waveform.dim() == 2:
+        if waveform.dim() == 1:
+            waveform = waveform.unsqueeze(0).unsqueeze(0)
+        elif waveform.dim() == 2:
             waveform = waveform.unsqueeze(0)
         if waveform.shape[1] == 1:
             return waveform.repeat(1, 2, 1)
@@ -130,13 +149,14 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             return waveform[:, :2]
         return waveform
 
-    def _timeline_duration_ms(self, runtime_clips: list[dict], audio_clips: list[dict]) -> int:
-        duration_ms = max((int(c["end_ms"]) for c in runtime_clips), default=0)
-        for clip in audio_clips:
-            duration_ms = max(duration_ms, self._clip_range(clip)[1])
-        return max(duration_ms, 1)
-
-    def _mix_audio_rows(self, rows: list[dict], duration_ms: int, sample_rate: int = 44100, timeline_start_ms: int = 0):
+    def _mix_audio_rows(
+        self,
+        rows: list[dict],
+        duration_ms: int,
+        sample_rate: int = 44100,
+        timeline_start_ms: int = 0,
+        assets_dir: str = "",
+    ):
         n = max(1, int(round(duration_ms / 1000 * sample_rate)))
         mixed = torch.zeros(1, 2, n)
         used = False
@@ -144,23 +164,57 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            path = os.path.normpath(str(row.get("file") or ""))
-            if not path or not os.path.isfile(path):
+            path = self._resolve_audio_file(
+                row.get("file"),
+                str(row.get("location") or "assets"),
+                assets_dir,
+            )
+            if not path:
                 continue
             try:
                 waveform, sr = self._load_audio_path(path)
             except Exception as exc:
                 logging.warning("[CAP_TimelineEditor] failed to load %s: %s", path, exc)
                 continue
+            if sr <= 0:
+                continue
+            file_rate = sr
             if sr != sample_rate:
+                before = waveform.shape[-1]
                 waveform = self._resample_waveform(waveform, sr, sample_rate)
+                if waveform.shape[-1] != before:
+                    file_rate = sample_rate
+            if waveform.shape[-1] == 0:
+                continue
 
             src_start = max(0, int(row.get("source_start_ms", 0) or 0))
-            src_end = max(src_start + 1, int(row.get("source_end_ms", src_start) or src_start))
+            src_end_raw = row.get("source_end_ms", None)
+            try:
+                src_end = int(src_end_raw) if src_end_raw is not None else src_start + 1
+            except (TypeError, ValueError):
+                src_end = src_start + 1
+            src_end = max(src_start + 1, src_end)
+            file_dur_ms = max(1, int(round(waveform.shape[-1] / file_rate * 1000)))
+            if src_start >= file_dur_ms:
+                logging.warning(
+                    "[CAP_TimelineEditor] audio slice past EOF (%s): start=%sms file=%sms",
+                    path, src_start, file_dur_ms,
+                )
+                continue
+            src_end = min(src_end, file_dur_ms)
+
             offset_ms = max(0, int(row.get("clip_offset_ms", 0) or 0))
+            if offset_ms >= duration_ms:
+                offset_ms = 0
             timeline_ms = timeline_start_ms + offset_ms
 
-            seg = self._trim(waveform, sample_rate, src_start, src_end)["waveform"]
+            seg = self._trim(waveform, file_rate, src_start, src_end)["waveform"]
+            # Place into the output clock (sample_rate). If native-rate trim was
+            # used after a failed resample, resample the segment to match.
+            if file_rate != sample_rate:
+                seg_wave = seg if seg.dim() == 2 else seg.squeeze(0)
+                seg_wave = self._resample_waveform(seg_wave, file_rate, sample_rate)
+                seg = self._pack(seg_wave, sample_rate)["waveform"]
             seg = self._ensure_stereo_batch(seg)
             if seg.shape[1] != mixed.shape[1]:
                 seg = seg.repeat(1, mixed.shape[1], 1) if seg.shape[1] == 1 else seg[:, :mixed.shape[1]]
@@ -176,18 +230,60 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             return None
         return self._pack(mixed, sample_rate)
 
-    def _mix_timeline_audio(self, audio_clips: list[dict], duration_ms: int, resolve_media, sample_rate: int = 44100):
-        rows = self._audio_slices(0, duration_ms, audio_clips, resolve_media)
-        mixed = self._mix_audio_rows(rows, duration_ms, sample_rate, timeline_start_ms=0)
-        if mixed is not None:
-            return mixed
-        if audio_clips:
-            logging.warning(
-                "[CAP_TimelineEditor] clips_audio is silent: could not load %d audio slice(s). "
-                "Check assets_dir and source.file paths.",
-                len(rows),
+    def _concat_runtime_clips_audio(
+        self,
+        runtime_clips: list[dict],
+        sample_rate: int = 44100,
+        assets_dir: str = "",
+    ):
+        """Merge per-visual-segment audio in runtime order (gaps without visuals dropped).
+
+        Matches frame-sequence length: each runtime clip contributes
+        (end_ms - start_ms) of audio, using that clip's audios[] slices.
+        """
+        if not runtime_clips:
+            return self._silent_audio(sample_rate, 1000)
+
+        pieces = []
+        for clip in runtime_clips:
+            start = int(clip.get("start_ms", 0) or 0)
+            end = int(clip.get("end_ms", start) or start)
+            dur_ms = max(1, end - start)
+            rows = []
+            for row in clip.get("audios") or []:
+                if not isinstance(row, dict):
+                    continue
+                r = dict(row)
+                off = max(0, int(r.get("clip_offset_ms", 0) or 0))
+                # audios[].clip_offset_ms is segment-relative. If a row still
+                # carries an absolute timeline offset (e.g. 21000 while the
+                # segment is 21000..55000), convert it so mix lands at 0.
+                if start > 0 and off >= start and off < end:
+                    off = off - start
+                if off >= dur_ms:
+                    off = 0
+                r["clip_offset_ms"] = off
+                rows.append(r)
+            mixed = self._mix_audio_rows(
+                rows,
+                dur_ms,
+                sample_rate,
+                timeline_start_ms=0,
+                assets_dir=assets_dir,
             )
-        return self._silent_audio(sample_rate, duration_ms)
+            if mixed is None:
+                if rows:
+                    logging.warning(
+                        "[CAP_TimelineEditor] clips_audio silent for %s..%sms (%s audio row(s))",
+                        start, end, len(rows),
+                    )
+                n = max(1, int(round(dur_ms / 1000 * sample_rate)))
+                pieces.append(torch.zeros(1, 2, n))
+            else:
+                pieces.append(self._ensure_stereo_batch(mixed["waveform"]))
+
+        waveform = torch.cat(pieces, dim=-1)
+        return self._pack(waveform, sample_rate)
 
     @staticmethod
     def _project(raw: str) -> dict:
@@ -212,10 +308,15 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
     @staticmethod
     def _clip_range(clip: dict) -> tuple[int, int]:
         start = max(0, int(clip.get("start_ms", 0) or 0))
-        if "duration_ms" in clip:
-            end = start + max(0, int(clip.get("duration_ms", 0) or 0))
-        else:
-            end = max(start, int(clip.get("end_ms", start) or start))
+        duration = clip.get("duration_ms", None)
+        if duration is not None and duration != "":
+            try:
+                dur = int(duration)
+            except (TypeError, ValueError):
+                dur = 0
+            if dur > 0:
+                return start, start + dur
+        end = max(start, int(clip.get("end_ms", start) or start))
         return start, end
 
     @staticmethod
@@ -227,6 +328,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
     def _track_active(track: dict) -> bool:
         return track.get("enabled", True) is not False and track.get("visible", True) is not False
 
+    @staticmethod
+    def _audio_track_active(track: dict) -> bool:
+        # Match timeline playback: audio export ignores track visibility/eye toggle.
+        return track.get("enabled", True) is not False
+
     def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media) -> list[dict]:
         result = []
         for audio in audio_clips:
@@ -237,10 +343,16 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             source = self._source(audio)
             source_in = max(0, int(source.get("in_ms", 0) or 0))
+            file_name = str(
+                source.get("file")
+                or audio.get("audio_file")
+                or audio.get("start_image")
+                or ""
+            )
             row = {
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
-                "file": resolve_media(str(source.get("file") or ""), str(source.get("location") or "assets")),
+                "file": resolve_media(file_name, str(source.get("location") or "assets")),
                 "location": str(source.get("location") or "assets"),
                 "source_start_ms": source_in + overlap_start - audio_start,
                 "source_end_ms": source_in + overlap_end - audio_start,
@@ -250,31 +362,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 result.append(row)
         return result
 
-    def _visual_segments(self, visual_clips: list[tuple[dict, dict, int]], ignore_occluded: bool) -> list[tuple[dict, int, int, int]]:
-        entries: list[tuple[dict, int, int, int, bool]] = []
+    def _visual_segments(self, visual_clips: list[tuple[dict, dict, int]]) -> list[tuple[dict, int, int, int]]:
+        segments: list[tuple[dict, int, int, int]] = []
         for _track, clip, z_index in visual_clips:
             start, end = self._clip_range(clip)
             if end <= start:
                 continue
-            entries.append((clip, z_index, start, end, clip.get("force_render", False) is True))
-
-        if not ignore_occluded:
-            return [(clip, start, end, z_index) for clip, z_index, start, end, _force in entries]
-
-        segments: list[tuple[dict, int, int, int]] = []
-        for clip, z_index, start, end, force in entries:
-            if force:
-                segments.append((clip, start, end, z_index))
-                continue
-            higher_cuts = [(s, e) for _c, z, s, e, _f in entries if z > z_index]
-            for part_start, part_end in _subtract_intervals(start, end, higher_cuts):
-                if part_end > part_start:
-                    segments.append((clip, part_start, part_end, z_index))
+            segments.append((clip, start, end, z_index))
         segments.sort(key=lambda row: (row[1], row[3]))
         return segments
 
-    def execute(self, fps, width, height, assets_dir, global_prompt, ignore_occluded,
-                project_version, project_json, trim_offset=1):
+    def execute(self, fps, width, height, assets_dir, global_prompt,
+                project_version, project_json, trim_offset=1, **_):
         project = self._project(project_json)
         settings = project["settings"]
         fps = max(1.0, float(fps))
@@ -292,29 +391,34 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             key=lambda t: int(t.get("order", 0) or 0),
         )
         for z_index, track in enumerate(tracks, start=1):
-            if not self._track_active(track):
-                continue
             track_type = str(track.get("type") or "visual").lower()
-            for clip in track.get("clips", []):
-                if (
-                    not isinstance(clip, dict)
-                    or clip.get("enabled", True) is False
-                    or clip.get("visible", True) is False
-                ):
+            is_audio_track = track_type == "audio"
+            if is_audio_track:
+                if not self._audio_track_active(track):
                     continue
-                clip_type = str(clip.get("type") or ("audio" if track_type == "audio" else "image")).lower()
-                if clip_type == "audio" or track_type == "audio":
+            elif not self._track_active(track):
+                continue
+            for clip in track.get("clips", []):
+                if not isinstance(clip, dict) or clip.get("enabled", True) is False:
+                    continue
+                clip_type = str(clip.get("type") or ("audio" if is_audio_track else "image")).lower()
+                is_audio_clip = clip_type == "audio" or is_audio_track
+                # Audio follows mute only (same as editor playback). Visuals also
+                # respect clip/track visibility.
+                if is_audio_clip:
                     if track.get("muted", False) or clip.get("muted", False):
                         continue
                     audio_clips.append(clip)
                 else:
+                    if clip.get("visible", True) is False:
+                        continue
                     visual_clips.append((track, clip, z_index))
                     if clip_type == "video" and clip.get("has_audio", False) and not clip.get("muted", False):
                         embedded = dict(clip)
                         embedded["source"] = dict(self._source(clip), kind="video")
                         audio_clips.append(embedded)
 
-        segments = self._visual_segments(visual_clips, ignore_occluded is not False)
+        segments = self._visual_segments(visual_clips)
 
         def resolve_media(name: str, location: str = "assets") -> str:
             return resolve_media_path(name, assets_dir=assets_dir, location=location)
@@ -341,8 +445,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             int(round((clip["end_ms"] - clip["start_ms"]) * fps / 1000))
             for clip in runtime_clips
         ))
-        duration_ms = self._timeline_duration_ms(runtime_clips, audio_clips)
-        clips_audio_out = self._mix_timeline_audio(audio_clips, duration_ms, resolve_media)
+        # Concatenate audio for each visual runtime segment (no gap filler),
+        # matching the frame sequence / total_frame_count timeline.
+        clips_audio_out = self._concat_runtime_clips_audio(runtime_clips, assets_dir=assets_dir)
         frame_seq_dir = self._prepare_frame_seq_dir()
         data_json = json.dumps({
             "project_version": PROJECT_VERSION,

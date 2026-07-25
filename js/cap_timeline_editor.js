@@ -3,7 +3,8 @@ import { api } from "../../scripts/api.js";
 import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 
 const NODE_CLASS = "CAP_TimelineEditor";
-const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt", "ignore_occluded"];
+const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt"];
+const OBSOLETE_WIDGETS = ["ignore_occluded"];
 
 function flushOpenTimelineEditors() {
     for (const node of app.graph?._nodes ?? []) {
@@ -49,7 +50,17 @@ function onTeGlobalKeyDown(e) {
     te.handleShortcutKey(e);
 }
 
+function removeObsoleteWidgets(node) {
+    if (!node.widgets?.length) return;
+    for (let i = node.widgets.length - 1; i >= 0; i--) {
+        if (OBSOLETE_WIDGETS.includes(node.widgets[i]?.name)) {
+            node.widgets.splice(i, 1);
+        }
+    }
+}
+
 function markNoSerialize(node) {
+    removeObsoleteWidgets(node);
     for (const w of node.widgets ?? []) {
         if (w.name === "te_launcher") {
             w.serialize = false;

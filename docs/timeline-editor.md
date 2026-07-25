@@ -15,7 +15,6 @@ Open the editor from the node launcher (fullscreen shell). Edits sync back into 
 | Layout | Waveform + one clip track | Multi-track visual + audio tracks |
 | Editable document | Widget values + clip list | Track-nested `project_json` |
 | Runtime audio | Trim from one master `audio_path` | Mix overlapping slices into each clip's `audios[]` |
-| Occlusion | Contiguous clips (no stacking) | Higher tracks can occlude lower ones (`ignore_occluded`) |
 
 Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both formats.
 
@@ -44,7 +43,6 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 ### Inspector (right)
 
 - Selected clip thumbnails (start / end frame where applicable)
-- **Force render** — still contribute to generation when covered by a higher track
 - Per-clip **Keyframe Prompt** and **Use Global** checkbox
 - Shortcut reminders
 
@@ -66,14 +64,6 @@ Same idea as Audio Timeline: re-generate one segment without rebuilding the rest
 | `Ctrl+G` | Disable all other clips (toggle) |
 
 Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks that are disabled or invisible are skipped entirely.
-
----
-
-## Occlusion (`ignore_occluded`)
-
-When **忽略遮挡 / ignore occluded** is on (default), a visual clip covered by a higher `z_index` track is split or dropped so only the visible time ranges become runtime clips — unless **强制渲染 (force render)** is set on that clip.
-
-When off, every enabled visual clip is emitted in full (overlaps allowed).
 
 ---
 
@@ -99,7 +89,6 @@ When off, every enabled visual clip is emitted in full (overlaps allowed).
 | `height` | INT | 720 | Output height (written to `data_json`) |
 | `assets_dir` | STRING | — | Media root for resolving relative `source.file` paths |
 | `global_prompt` | STRING | — | Default prompt when a clip uses the global prompt |
-| `ignore_occluded` | BOOLEAN | true | Collapse visually covered ranges (see above) |
 | `project_version` | STRING | package version | Written into project / runtime JSON |
 | `project_json` | STRING | empty project | Full editable timeline document (tracks, clips, resources, settings) |
 | `trim_offset` | INT | 1 | Reserved for audio tail workflows; runtime clip timings in `data_json` are not extended by this field |
@@ -131,8 +120,7 @@ High-level shape:
   "name": "Untitled",
   "resources": [],
   "settings": {
-    "global_prompt": "",
-    "ignore_occluded": true
+    "global_prompt": ""
   },
   "tracks": [
     {
@@ -192,7 +180,7 @@ The fullscreen editor owns this document; you normally do not edit it by hand.
 
 | Field | Description |
 |-------|-------------|
-| `start_ms` / `end_ms` | Visible runtime range after occlusion (ms) |
+| `start_ms` / `end_ms` | Runtime clip time range (ms) |
 | `start_image` / `end_image` | Absolute paths resolved via `assets_dir` |
 | `audios[]` | Audio/video slices overlapping this visual range; mixed by [Data Json Clip Parser](data-json-clip-parser.md) |
 | `z_index` | Track stacking order used when building segments |

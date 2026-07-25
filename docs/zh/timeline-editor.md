@@ -15,7 +15,6 @@
 | 布局 | 波形 + 单条素材轨 | 多轨视觉轨 + 音频轨 |
 | 可编辑文档 | 控件值 + 片段列表 | 按轨道嵌套的 `project_json` |
 | 运行时音频 | 从单一 `audio_path` 裁剪 | 将重叠切片混入每个 clip 的 `audios[]` |
-| 遮挡 | 片段首尾相接（无叠层） | 上层轨道可遮挡下层（`ignore_occluded`） |
 
 下游 [Data Json Clip Parser](data-json-clip-parser.md) 同时支持两种格式。
 
@@ -28,9 +27,9 @@
 - 标签：**图像** / **视频** / **音频**
 - 列出 `assets_dir`（及适用的 ComfyUI input）中的文件
 - 刷新可重新扫描目录
-- 拖到时间轴，或右键 / 在播放头位置插入
+- 拖到时间轴，或右键插入；右键也可 **替换素材**（选文件 → 预览 → 确认替换，时间轴引用同步更新）
 - 素材星级与星级筛选
-- 双击 / 预览弹窗查看素材
+- 点击预览弹窗查看素材
 
 ### 时间轴（中间）
 
@@ -44,7 +43,6 @@
 ### 检视面板（右侧）
 
 - 选中片段缩略图（适用时含首 / 尾帧）
-- **强制渲染** — 被上层遮挡时仍参与生成
 - 每片段 **Keyframe Prompt** 与 **Use Global**
 - 快捷键提示
 
@@ -66,14 +64,6 @@
 | `Ctrl+G` | 禁用其他所有片段（切换） |
 
 禁用 / 隐藏 / 静音的片段不会进入运行时 `data_json`。禁用或不可见的轨道整轨跳过。
-
----
-
-## 遮挡（`ignore_occluded`）
-
-开启 **忽略遮挡**（默认）时，被更高 `z_index` 轨道盖住的视觉片段会被裁切或丢弃，只保留可见时间段作为运行时 clip；若该片段勾选了 **强制渲染**，则仍完整参与。
-
-关闭时，每个启用的视觉片段都会完整输出（允许时间重叠）。
 
 ---
 
@@ -99,7 +89,6 @@
 | `height` | INT | 720 | 输出高度（写入 `data_json`） |
 | `assets_dir` | STRING | — | 解析相对 `source.file` 路径的素材根目录 |
 | `global_prompt` | STRING | — | 片段使用全局提示词时的默认内容 |
-| `ignore_occluded` | BOOLEAN | true | 折叠被遮挡的时间范围（见上文） |
 | `project_version` | STRING | 包版本 | 写入项目 / 运行时 JSON |
 | `project_json` | STRING | 空项目 | 完整可编辑时间轴文档（轨道、片段、资源、设置） |
 | `trim_offset` | INT | 1 | 预留给音频尾部流程；`data_json` 中的运行时时间不会因此延长 |
@@ -131,8 +120,7 @@
   "name": "未命名项目",
   "resources": [],
   "settings": {
-    "global_prompt": "",
-    "ignore_occluded": true
+    "global_prompt": ""
   },
   "tracks": [
     {
@@ -192,12 +180,14 @@
 
 | 字段 | 说明 |
 |------|------|
-| `start_ms` / `end_ms` | 遮挡处理后的可见运行时区间（毫秒） |
+| `start_ms` / `end_ms` | 运行时片段时间区间（毫秒） |
 | `start_image` / `end_image` | 经 `assets_dir` 解析后的绝对路径 |
-| `audios[]` | 与该视觉区间重叠的音/视频切片；由 [Data Json Clip Parser](data-json-clip-parser.md) 混音 |
+| `audios[]` | 与该视觉区间重叠的音/视频切片；由 [Data Json Clip Parser](data-json-clip-parser.md) 混音。非音频轨无素材的时间段内，音频不导出 |
 | `z_index` | 构建片段时使用的轨道叠放顺序 |
 
 没有顶层 `audio_path`（该字段仅属于 Audio Timeline）。
+
+整轨输出 `clips_audio`：按运行时视觉片段顺序，将各段对应音频混音后**首尾拼接**（视觉空档丢弃），时长与 `total_frame_count` / 序列帧对齐。
 
 ---
 
