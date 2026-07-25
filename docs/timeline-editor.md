@@ -25,11 +25,12 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 ### Media library (left)
 
 - Tabs: **Image** / **Video** / **Audio**
-- Lists files under `assets_dir` (and ComfyUI input where applicable)
-- Refresh rescans the directory
+- Lists files uploaded under ComfyUI `input/capricorncd-timeline/`
+- Refresh rescans the upload directory
 - Drag media onto the timeline, or right-click / insert at the playhead
 - Star ratings and star filters for media bookmarks
 - Double-click / preview modal for inspection
+- Add media via the upload dialog (writes into `input`; no assets directory)
 
 ### Timeline (center)
 
@@ -49,7 +50,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 ### Project chrome
 
 - Editable project name
-- **Import** / **Export** project JSON
+- **Import** / **Export**: directory package or ZIP (all media + `project.json`)
 - Close returns to the ComfyUI graph
 
 ---
@@ -87,7 +88,6 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 | `fps` | FLOAT | 24.0 | Frames per second |
 | `width` | INT | 1280 | Output width (written to `data_json`) |
 | `height` | INT | 720 | Output height (written to `data_json`) |
-| `assets_dir` | STRING | — | Media root for resolving relative `source.file` paths |
 | `global_prompt` | STRING | — | Default prompt when a clip uses the global prompt |
 | `project_version` | STRING | package version | Written into project / runtime JSON |
 | `project_json` | STRING | empty project | Full editable timeline document (tracks, clips, resources, settings) |
@@ -167,7 +167,7 @@ The fullscreen editor owns this document; you normally do not edit it by hand.
           "source_clip_id": "audio_1",
           "source_kind": "audio",
           "file": "/absolute/path/to/voice.wav",
-          "location": "assets",
+          "location": "input",
           "source_start_ms": 1000,
           "source_end_ms": 6000,
           "clip_offset_ms": 0
@@ -181,7 +181,7 @@ The fullscreen editor owns this document; you normally do not edit it by hand.
 | Field | Description |
 |-------|-------------|
 | `start_ms` / `end_ms` | Runtime clip time range (ms) |
-| `start_image` / `end_image` | Absolute paths resolved via `assets_dir` |
+| `start_image` / `end_image` | Absolute paths resolved via ComfyUI `input` |
 | `audios[]` | Audio/video slices overlapping this visual range; mixed by [Data Json Clip Parser](data-json-clip-parser.md) |
 | `z_index` | Track stacking order used when building segments |
 

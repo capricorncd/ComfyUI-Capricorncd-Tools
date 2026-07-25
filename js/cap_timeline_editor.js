@@ -4,7 +4,7 @@ import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 
 const NODE_CLASS = "CAP_TimelineEditor";
 const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt"];
-const OBSOLETE_WIDGETS = ["ignore_occluded"];
+const OBSOLETE_WIDGETS = ["ignore_occluded", "assets_dir"];
 
 function flushOpenTimelineEditors() {
     for (const node of app.graph?._nodes ?? []) {

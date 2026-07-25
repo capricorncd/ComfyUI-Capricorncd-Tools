@@ -713,14 +713,9 @@ body.cat-te-col-resize * {
     border: 1px solid #e14b5a;
     background: rgba(190, 35, 55, 0.12);
 }
-.cat-te-media-item.cat-te-media-input { border-color: #d89b36; }
 .cat-te-missing-icon {
     display: flex; align-items: center; justify-content: center;
     height: 72px; min-height: 72px; color: #ff5b6d; font-size: 30px; font-weight: 800;
-}
-.cat-te-media-warning {
-    position: absolute; top: 3px; right: 3px; z-index: 5;
-    color: #ffc04d; font-size: 15px; text-shadow: 0 1px 3px #000;
 }
 .cat-te-media-item img {
     width: 100%;

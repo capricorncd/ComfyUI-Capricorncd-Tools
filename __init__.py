@@ -57,6 +57,7 @@ from .timecode import (
     VIDEO_EXTENSIONS,
     list_audio_files_ordered,
     list_keyframe_files_ordered,
+    list_timeline_uploaded_files,
     list_video_files_ordered,
     resolve_assets_dir,
 )
@@ -117,6 +118,12 @@ def _register_routes():
         return
 
     routes = PromptServer.instance.routes
+
+    @routes.get("/audio_keyframe_timeline/uploaded")
+    async def api_list_uploaded(request: web.Request) -> web.Response:
+        kind = request.rel_url.query.get("kind", "image")
+        files = list_timeline_uploaded_files(kind)
+        return web.json_response({"files": files, "count": len(files)})
 
     @routes.get("/audio_keyframe_timeline/keyframes")
     async def api_list_keyframes(request: web.Request) -> web.Response:
@@ -298,6 +305,67 @@ def _register_routes():
             return web.json_response({"file": result_name, "kind": kind, "location": "assets"})
         except Exception as exc:
             logging.exception("[CapricorncdTools] move_asset error")
+            return web.json_response({"error": str(exc)}, status=500)
+
+    @routes.post("/audio_keyframe_timeline/export_prepare")
+    async def api_export_prepare(request: web.Request) -> web.Response:
+        from .cap_timeline_project_io import build_export_entries
+        try:
+            project = await request.json()
+            if not isinstance(project, dict):
+                return web.json_response({"error": "Invalid project"}, status=400)
+            exported, entries, missing = build_export_entries(project)
+            return web.json_response({
+                "project": exported,
+                "files": [
+                    {"kind": e["kind"], "file": e["file"], "arcname": e["arcname"]}
+                    for e in entries
+                ],
+                "missing": missing,
+            })
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] export_prepare error")
+            return web.json_response({"error": str(exc)}, status=500)
+
+    @routes.post("/audio_keyframe_timeline/export_zip")
+    async def api_export_zip(request: web.Request) -> web.Response:
+        from .cap_timeline_project_io import build_export_zip_bytes
+        try:
+            project = await request.json()
+            if not isinstance(project, dict):
+                return web.json_response({"error": "Invalid project"}, status=400)
+            data, filename, missing = build_export_zip_bytes(project)
+            headers = {
+                "Content-Disposition": 'attachment; filename="timeline-project.zip"',
+                "X-Export-Missing": ",".join(missing) if missing else "",
+                "X-Export-Filename": filename,
+            }
+            return web.Response(body=data, headers=headers, content_type="application/zip")
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] export_zip error")
+            return web.json_response({"error": str(exc)}, status=500)
+
+    @routes.post("/audio_keyframe_timeline/import_project_zip")
+    async def api_import_project_zip(request: web.Request) -> web.Response:
+        from .cap_timeline_project_io import import_project_from_zip_bytes
+        try:
+            reader = await request.multipart()
+            upload = None
+            while field := await reader.next():
+                if field.name == "file":
+                    upload = field
+                    break
+            if not upload:
+                return web.json_response({"error": "Missing file"}, status=400)
+            data = await upload.read()
+            if not data:
+                return web.json_response({"error": "Empty ZIP"}, status=400)
+            project, warnings = import_project_from_zip_bytes(data)
+            return web.json_response({"project": project, "warnings": warnings})
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] import_project_zip error")
             return web.json_response({"error": str(exc)}, status=500)
 
     @routes.get("/cap/ffmpeg_status")

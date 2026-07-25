@@ -25,11 +25,12 @@
 ### 素材库（左侧）
 
 - 标签：**图像** / **视频** / **音频**
-- 列出 `assets_dir`（及适用的 ComfyUI input）中的文件
-- 刷新可重新扫描目录
+- 列出已上传到 ComfyUI `input/capricorncd-timeline/` 的文件
+- 刷新可重新扫描上传目录
 - 拖到时间轴，或右键插入；右键也可 **替换素材**（选文件 → 预览 → 确认替换，时间轴引用同步更新）
 - 素材星级与星级筛选
 - 点击预览弹窗查看素材
+- 通过「添加素材」上传图片 / 视频 / 音频（写入 `input`，不依赖资源目录）
 
 ### 时间轴（中间）
 
@@ -49,7 +50,7 @@
 ### 项目栏
 
 - 可编辑项目名称
-- **导入** / **导出** 项目 JSON
+- **导入** / **导出**：支持目录包与 ZIP（含全部素材 + `project.json`）
 - 关闭后返回 ComfyUI 画布
 
 ---
@@ -87,7 +88,6 @@
 | `fps` | FLOAT | 24.0 | 帧率 |
 | `width` | INT | 1280 | 输出宽度（写入 `data_json`） |
 | `height` | INT | 720 | 输出高度（写入 `data_json`） |
-| `assets_dir` | STRING | — | 解析相对 `source.file` 路径的素材根目录 |
 | `global_prompt` | STRING | — | 片段使用全局提示词时的默认内容 |
 | `project_version` | STRING | 包版本 | 写入项目 / 运行时 JSON |
 | `project_json` | STRING | 空项目 | 完整可编辑时间轴文档（轨道、片段、资源、设置） |
@@ -167,7 +167,7 @@
           "source_clip_id": "audio_1",
           "source_kind": "audio",
           "file": "/absolute/path/to/voice.wav",
-          "location": "assets",
+          "location": "input",
           "source_start_ms": 1000,
           "source_end_ms": 6000,
           "clip_offset_ms": 0
@@ -181,7 +181,7 @@
 | 字段 | 说明 |
 |------|------|
 | `start_ms` / `end_ms` | 运行时片段时间区间（毫秒） |
-| `start_image` / `end_image` | 经 `assets_dir` 解析后的绝对路径 |
+| `start_image` / `end_image` | 经 ComfyUI `input` 解析后的绝对路径 |
 | `audios[]` | 与该视觉区间重叠的音/视频切片；由 [Data Json Clip Parser](data-json-clip-parser.md) 混音。非音频轨无素材的时间段内，音频不导出 |
 | `z_index` | 构建片段时使用的轨道叠放顺序 |
 

@@ -63,7 +63,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
                 "width": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
                 "height": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
-                "assets_dir": ("STRING", {"default": "", "multiline": False}),
                 "global_prompt": ("STRING", {"default": "", "multiline": True}),
                 "project_version": ("STRING", {"default": PROJECT_VERSION}),
                 "project_json": (
@@ -86,9 +85,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         }
 
     @classmethod
-    def IS_CHANGED(cls, fps, width, height, assets_dir, global_prompt,
+    def IS_CHANGED(cls, fps, width, height, global_prompt,
                    project_version, project_json, trim_offset, **_):
-        return fps, width, height, assets_dir, global_prompt, project_version, project_json, trim_offset
+        return fps, width, height, global_prompt, project_version, project_json, trim_offset
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -108,20 +107,20 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             waveform, sample_rate = torchaudio.load(path)
             return waveform, int(sample_rate)
 
-    def _resolve_audio_file(self, file_ref, location: str = "assets", assets_dir: str = "") -> str:
-        """Resolve an audio path, retrying basename under assets/input when needed."""
+    def _resolve_audio_file(self, file_ref, location: str = "input") -> str:
+        """Resolve an audio path under ComfyUI input (uploaded timeline media)."""
         raw = str(file_ref or "").strip()
         if not raw:
             return ""
         path = os.path.normpath(raw)
         if os.path.isfile(path):
             return path
-        resolved = resolve_media_path(raw, assets_dir=assets_dir, location=location or "assets")
+        resolved = resolve_media_path(raw, assets_dir="", location="input")
         if resolved and os.path.isfile(resolved):
             return os.path.normpath(resolved)
         base = os.path.basename(raw.replace("\\", "/"))
         if base and base != raw:
-            again = resolve_media_path(base, assets_dir=assets_dir, location=location or "assets")
+            again = resolve_media_path(base, assets_dir="", location="input")
             if again and os.path.isfile(again):
                 return os.path.normpath(again)
         return os.path.normpath(resolved or path)
@@ -155,7 +154,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         duration_ms: int,
         sample_rate: int = 44100,
         timeline_start_ms: int = 0,
-        assets_dir: str = "",
     ):
         n = max(1, int(round(duration_ms / 1000 * sample_rate)))
         mixed = torch.zeros(1, 2, n)
@@ -166,8 +164,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             path = self._resolve_audio_file(
                 row.get("file"),
-                str(row.get("location") or "assets"),
-                assets_dir,
+                str(row.get("location") or "input"),
             )
             if not path:
                 continue
@@ -234,7 +231,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         self,
         runtime_clips: list[dict],
         sample_rate: int = 44100,
-        assets_dir: str = "",
     ):
         """Merge per-visual-segment audio in runtime order (gaps without visuals dropped).
 
@@ -269,7 +265,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 dur_ms,
                 sample_rate,
                 timeline_start_ms=0,
-                assets_dir=assets_dir,
             )
             if mixed is None:
                 if rows:
@@ -352,8 +347,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             row = {
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
-                "file": resolve_media(file_name, str(source.get("location") or "assets")),
-                "location": str(source.get("location") or "assets"),
+                "file": resolve_media(file_name, str(source.get("location") or "input")),
+                "location": "input",
                 "source_start_ms": source_in + overlap_start - audio_start,
                 "source_end_ms": source_in + overlap_end - audio_start,
                 "clip_offset_ms": overlap_start - start_ms,
@@ -372,7 +367,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         segments.sort(key=lambda row: (row[1], row[3]))
         return segments
 
-    def execute(self, fps, width, height, assets_dir, global_prompt,
+    def execute(self, fps, width, height, global_prompt,
                 project_version, project_json, trim_offset=1, **_):
         project = self._project(project_json)
         settings = project["settings"]
@@ -420,21 +415,22 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
         segments = self._visual_segments(visual_clips)
 
-        def resolve_media(name: str, location: str = "assets") -> str:
-            return resolve_media_path(name, assets_dir=assets_dir, location=location)
+        def resolve_media(name: str, location: str = "input") -> str:
+            return resolve_media_path(name, assets_dir="", location="input")
 
         runtime_clips = []
         for index, (clip, start, end, z_index) in enumerate(segments, start=1):
             source = self._source(clip)
             start_image = str(source.get("file") or clip.get("start_image") or "")
+            end_image = str(clip.get("end_image") or "")
             runtime_clips.append({
                 "id": f"runtime_{index:04d}",
                 "source_clip_id": str(clip.get("id", "")),
                 "clip_type": str(clip.get("type") or "image"),
                 "start_ms": start,
                 "end_ms": end,
-                "start_image": resolve_media(start_image, str(source.get("location") or "assets")),
-                "end_image": resolve_media(str(clip.get("end_image") or "")),
+                "start_image": resolve_media(start_image),
+                "end_image": resolve_media(end_image) if end_image else "",
                 "prompt": _strip_comment_lines(clip.get("prompt") or ""),
                 "use_global_prompt": _clip_use_global_prompt(clip),
                 "z_index": z_index,
@@ -447,7 +443,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         ))
         # Concatenate audio for each visual runtime segment (no gap filler),
         # matching the frame sequence / total_frame_count timeline.
-        clips_audio_out = self._concat_runtime_clips_audio(runtime_clips, assets_dir=assets_dir)
+        clips_audio_out = self._concat_runtime_clips_audio(runtime_clips)
         frame_seq_dir = self._prepare_frame_seq_dir()
         data_json = json.dumps({
             "project_version": PROJECT_VERSION,

@@ -193,6 +193,31 @@ def list_audio_files_ordered(directory: str) -> list[str]:
     return _list_files_ordered(directory, AUDIO_EXTENSIONS)
 
 
+TIMELINE_UPLOAD_ROOT = "capricorncd-timeline"
+
+
+def list_timeline_uploaded_files(kind: str) -> list[str]:
+    """List Timeline Editor uploads under ComfyUI input/capricorncd-timeline/{images|videos|audios}."""
+    import folder_paths
+    import os
+
+    sub = {"image": "images", "video": "videos", "audio": "audios"}.get(str(kind or "").lower())
+    if not sub:
+        return []
+    extensions = {
+        "images": IMAGE_EXTENSIONS,
+        "videos": VIDEO_EXTENSIONS,
+        "audios": AUDIO_EXTENSIONS,
+    }[sub]
+    input_dir = folder_paths.get_input_directory()
+    root = os.path.join(input_dir, TIMELINE_UPLOAD_ROOT, sub)
+    if not os.path.isdir(root):
+        return []
+    rels = _list_files_ordered(root, extensions)
+    prefix = f"{TIMELINE_UPLOAD_ROOT}/{sub}"
+    return [f"{prefix}/{name}" for name in rels]
+
+
 # Backward-compatible alias
 def list_keyframe_images(directory: str) -> dict[int, str]:
     files = list_keyframe_files_ordered(directory)
