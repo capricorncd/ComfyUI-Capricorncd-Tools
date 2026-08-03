@@ -32,8 +32,9 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 - Double-click / preview modal for inspection
 - Add media via the upload dialog (writes into `input`; no assets directory)
 
-### Timeline (center)
+### Preview / Timeline (center)
 
+- **Program monitor** above the timeline: composites the frame under the playhead at the node `width` × `height` aspect ratio (main + overlay layers; image cover; start/end crossfade centered in the clip, ≤1s; video sampled from trim-in); drag the bottom splitter to resize height
 - Multiple tracks (visual and audio); add tracks from the toolbar menu
 - Per-track: lock, visibility, mute (audio)
 - Drag / resize clips; multi-select with `Ctrl+Click`

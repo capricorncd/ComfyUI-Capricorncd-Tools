@@ -8,8 +8,15 @@ body.cat-te-col-resize * {
     user-select: none !important;
 }
 
+body.cat-te-row-resize,
+body.cat-te-row-resize * {
+    cursor: row-resize !important;
+    user-select: none !important;
+}
+
 .cat-te-overlay {
     --cat-te-media-w: 220px;
+    --cat-te-program-h: 240px;
     position: fixed;
     inset: 0;
     z-index: 100000;
@@ -775,49 +782,96 @@ body.cat-te-col-resize * {
     overflow: hidden;
 }
 
-.cat-te-wave {
+.cat-te-program {
+    flex: 0 0 var(--cat-te-program-h, 240px);
+    height: var(--cat-te-program-h, 240px);
+    min-height: 120px;
+    max-height: 70%;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, #0c0c18 0%, #080810 100%);
+    border-bottom: none;
+}
+
+.cat-te-program-split {
     flex-shrink: 0;
-    height: 92px;
-    background: linear-gradient(180deg, #0c0c18 0%, #0a0a12 100%);
-    border-bottom: 1px solid #1c1c30;
+    height: 7px;
+    margin-top: -3px;
+    margin-bottom: -3px;
+    cursor: row-resize;
     position: relative;
+    z-index: 3;
+    touch-action: none;
 }
-.cat-te-wave-inner { position: absolute; inset: 0; z-index: 1; }
-.cat-te-wave-overlay {
+
+.cat-te-program-split::before {
+    content: "";
     position: absolute;
-    inset: 0;
-    z-index: 2;
-    pointer-events: none;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    transform: translateY(-50%);
+    background: #1c1c30;
+    transition: background 0.12s, box-shadow 0.12s;
 }
-.cat-te-shade {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.68);
-    pointer-events: none;
+
+.cat-te-program-split:hover::before,
+.cat-te-program-split.dragging::before {
+    height: 2px;
+    background: rgba(91, 78, 255, 0.75);
+    box-shadow: 0 0 8px rgba(91, 78, 255, 0.35);
 }
-.cat-te-shade-l { left: 0; }
-.cat-te-shade-r { right: 0; }
-.cat-te-sel-region {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    pointer-events: none;
-    background: rgba(90, 159, 216, 0.12);
-    box-shadow:
-        inset 0 2px 0 rgba(255, 209, 102, 0.75),
-        inset 0 -2px 0 rgba(255, 209, 102, 0.75);
-}
-.cat-te-wave-loading {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
+
+.cat-te-program-stage {
+    flex: 1;
+    min-height: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
+    background:
+        linear-gradient(45deg, #12121c 25%, transparent 25%),
+        linear-gradient(-45deg, #12121c 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #12121c 75%),
+        linear-gradient(-45deg, transparent 75%, #12121c 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-color: #0a0a12;
+    overflow: hidden;
+}
+
+.cat-te-program-canvas {
+    display: block;
+    background: #000;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.cat-te-program-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    color: #5a5a7a;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+}
+
+.cat-te-program-empty[hidden] { display: none !important; }
+
+.cat-te-program-meta {
+    flex-shrink: 0;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
     font-size: 11px;
-    color: #666;
-    background: rgba(0, 0, 0, 0.45);
+    color: #6868a0;
+    border-top: 1px solid #161628;
+    background: #0a0a14;
 }
 
 .cat-te-timeline-host {
@@ -1234,6 +1288,9 @@ body.cat-te-media-dnd-over-tl {
     min-width: 0;
     box-sizing: border-box;
     overflow: hidden;
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
 }
 
 .cat-te-open-btn {
@@ -1249,6 +1306,9 @@ body.cat-te-media-dnd-over-tl {
     color: #e8e0ff;
     cursor: pointer;
     transition: background 0.15s, transform 0.1s;
+    pointer-events: auto;
+    position: relative;
+    z-index: 1;
 }
 .cat-te-open-btn:hover {
     background: linear-gradient(135deg, #3a3080, #4a40a0);
