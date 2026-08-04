@@ -288,6 +288,28 @@ def _register_routes():
             logging.exception("[CapricorncdTools] import_asset error")
             return web.json_response({"error": str(exc)}, status=500)
 
+    @routes.post("/audio_keyframe_timeline/delete_asset")
+    async def api_delete_asset(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        try:
+            data = await request.json()
+            name = str(data.get("name", "")).strip().replace("\\", "/")
+            kind = str(data.get("kind", ""))
+            spec = _asset_kind(kind)
+            if not name or not spec or os.path.splitext(name)[1].lower() not in spec[1]:
+                return web.json_response({"error": "Invalid asset"}, status=400)
+            # Only allow deleting Timeline Editor uploads under input/capricorncd-timeline/
+            if not name.startswith("capricorncd-timeline/"):
+                return web.json_response({"error": "Only timeline uploads can be deleted"}, status=400)
+            path = _safe_join(_fp.get_input_directory(), name)
+            if not path or not os.path.isfile(path):
+                return web.json_response({"ok": True, "deleted": False, "missing": True})
+            os.remove(path)
+            return web.json_response({"ok": True, "deleted": True})
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] delete_asset error")
+            return web.json_response({"error": str(exc)}, status=500)
+
     @routes.post("/audio_keyframe_timeline/move_asset")
     async def api_move_asset(request: web.Request) -> web.Response:
         import folder_paths as _fp

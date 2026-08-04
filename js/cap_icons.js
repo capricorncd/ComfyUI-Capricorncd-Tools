@@ -27,6 +27,9 @@ export const ICONS = {
     image: `<svg ${SVG_ATTRS}><rect x="1.5" y="2.5" width="13" height="11" rx="1.4"/><circle cx="5.2" cy="6" r="1.1" fill="currentColor" stroke="none"/><path d="M2 12l4-4 2.5 2.5L11 7l3 5"/></svg>`,
     audio: `<svg ${SVG_ATTRS}><path d="M6 11.5V3.2l7-1.4v8"/><circle cx="4.3" cy="11.7" r="2" fill="currentColor" stroke="none"/><circle cx="11.3" cy="9.8" r="2" fill="currentColor" stroke="none"/></svg>`,
     video: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>`,
+    list: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>`,
+    grid: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`,
+    check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
     text: `<svg ${SVG_ATTRS}><path d="M3 3.5h10M8 3.5v9"/></svg>`,
 };
 

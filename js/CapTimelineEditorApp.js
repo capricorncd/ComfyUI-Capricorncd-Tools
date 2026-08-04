@@ -20,6 +20,7 @@ const STORAGE_PROGRAM_PANEL_H = "cat-te-program-panel-h";
 const MIN_PROGRAM_PANEL_H = 120;
 const DEFAULT_PROGRAM_PANEL_H = 240;
 const MAX_PROGRAM_PANEL_FRAC = 0.7;
+const STORAGE_MEDIA_LIST_VIEW = "cat-te-media-list-view";
 const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
@@ -79,6 +80,9 @@ export class CapTimelineEditorApp {
         this._mediaTab = "image";
         this._mediaStarFilter = "all";
         this._mediaStarsByDir = {};
+        this._mediaBatchMode = false;
+        this._mediaBatchSelected = new Set();
+        this._mediaListView = localStorage.getItem(STORAGE_MEDIA_LIST_VIEW) === "1";
         this._mediaPreviewState = null;
         this._overlay = null;
         this._timeline = null;
@@ -315,6 +319,10 @@ export class CapTimelineEditorApp {
             this._mainTrack = null;
             this._overlayTrack = null;
             this._selClip = null;
+            this._mediaBatchMode = false;
+            this._mediaBatchSelected.clear();
+            this._mediaListResizeObserver?.disconnect();
+            this._mediaListResizeObserver = null;
             this._clearClipInfoQueue();
         } finally {
             this._overlay.classList.remove("open");
@@ -953,6 +961,7 @@ export class CapTimelineEditorApp {
                 el.querySelectorAll(".cat-te-tab").forEach(b => b.classList.remove("active"));
                 btn.classList.add("active");
                 this._mediaTab = btn.dataset.tab;
+                if (this._mediaBatchMode) this._mediaBatchSelected.clear();
                 this._renderMediaGrid();
             });
         });
@@ -1483,6 +1492,141 @@ export class CapTimelineEditorApp {
         });
     }
 
+    _mediaBatchKey(kind, file) {
+        return `${kind}:${file}`;
+    }
+
+    _applyMediaGridView() {
+        this.mediaGrid?.classList.toggle("cat-te-media-grid-list", !!this._mediaListView);
+        this.mediaPanel?.classList.toggle("cat-te-media-batch", !!this._mediaBatchMode);
+        this._ensureMediaListStyle();
+        this._relayoutMediaListThumbs();
+        this._observeMediaListResize();
+    }
+
+    /** Inject high-priority list-view rules (avoids stale/cached extension CSS). */
+    _ensureMediaListStyle() {
+        let style = document.getElementById("cat-te-media-list-style");
+        if (!style) {
+            style = document.createElement("style");
+            style.id = "cat-te-media-list-style";
+            document.head.appendChild(style);
+        }
+        style.textContent = `
+.cat-te-media-grid.cat-te-media-grid-list{
+  display:flex !important;
+  flex-direction:column !important;
+  grid-template-columns:none !important;
+  grid-auto-rows:auto !important;
+  gap:6px !important;
+  align-content:stretch !important;
+}
+.cat-te-media-grid.cat-te-media-grid-list>.cat-te-media-item{
+  width:100% !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  flex:0 0 auto !important;
+  align-self:stretch !important;
+}
+.cat-te-media-grid.cat-te-media-grid-list>.cat-te-media-item>img{
+  width:100% !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  object-fit:contain !important;
+  display:block !important;
+}
+.cat-te-media-grid.cat-te-media-grid-list>.cat-te-media-item>.cat-te-video-icon,
+.cat-te-media-grid.cat-te-media-grid-list>.cat-te-media-item>.cat-te-audio-icon,
+.cat-te-media-grid.cat-te-media-grid-list>.cat-te-media-item>.cat-te-missing-icon{
+  width:100% !important;
+  min-height:120px !important;
+  aspect-ratio:16/9 !important;
+}
+`;
+    }
+
+    /** Force list-view thumbs to keep intrinsic aspect ratio via explicit pixel height. */
+    _bindMediaThumbAspect(img) {
+        if (!img) return;
+        const apply = () => {
+            if (!img.isConnected) return;
+            const item = img.parentElement;
+            if (!this._mediaListView) {
+                img.style.removeProperty("width");
+                img.style.removeProperty("height");
+                img.style.removeProperty("max-height");
+                img.style.removeProperty("min-height");
+                img.style.removeProperty("object-fit");
+                img.style.removeProperty("aspect-ratio");
+                item?.style.removeProperty("height");
+                item?.style.removeProperty("min-height");
+                return;
+            }
+            const nw = img.naturalWidth || 0;
+            const nh = img.naturalHeight || 0;
+            const cw = item?.clientWidth || img.clientWidth || 0;
+            if (nw <= 0 || nh <= 0 || cw <= 0) return;
+            const ph = Math.max(1, Math.round((cw * nh) / nw));
+            img.style.setProperty("width", "100%", "important");
+            img.style.setProperty("height", `${ph}px`, "important");
+            img.style.setProperty("max-height", "none", "important");
+            img.style.setProperty("min-height", "0", "important");
+            img.style.setProperty("object-fit", "fill", "important");
+            item?.style.setProperty("height", "auto", "important");
+            item?.style.setProperty("min-height", "0", "important");
+        };
+        img._catTeAspectApply = apply;
+        if (img.complete && img.naturalWidth > 0) apply();
+        else img.addEventListener("load", apply);
+    }
+
+    _relayoutMediaListThumbs() {
+        if (!this.mediaGrid) return;
+        for (const img of this.mediaGrid.querySelectorAll(".cat-te-media-item > img")) {
+            if (typeof img._catTeAspectApply === "function") img._catTeAspectApply();
+            else this._bindMediaThumbAspect(img);
+        }
+    }
+
+    _observeMediaListResize() {
+        if (!this.mediaGrid) return;
+        if (this._mediaListResizeObserver) return;
+        this._mediaListResizeObserver = new ResizeObserver(() => {
+            if (!this._mediaListView) return;
+            this._relayoutMediaListThumbs();
+        });
+        this._mediaListResizeObserver.observe(this.mediaGrid);
+    }
+
+    _toggleMediaBatchMode() {
+        this._mediaBatchMode = !this._mediaBatchMode;
+        if (!this._mediaBatchMode) this._mediaBatchSelected.clear();
+        this._renderMediaGrid();
+    }
+
+    _toggleMediaListView() {
+        this._mediaListView = !this._mediaListView;
+        try {
+            localStorage.setItem(STORAGE_MEDIA_LIST_VIEW, this._mediaListView ? "1" : "0");
+        } catch { /* ignore */ }
+        this._applyMediaGridView();
+        this._renderMediaStarFilter();
+        requestAnimationFrame(() => {
+            this._relayoutMediaListThumbs();
+            requestAnimationFrame(() => this._relayoutMediaListThumbs());
+        });
+    }
+
+    _toggleMediaBatchSelect(kind, file, itemEl = null) {
+        const key = this._mediaBatchKey(kind, file);
+        if (this._mediaBatchSelected.has(key)) this._mediaBatchSelected.delete(key);
+        else this._mediaBatchSelected.add(key);
+        itemEl?.classList.toggle("cat-te-media-selected", this._mediaBatchSelected.has(key));
+        this._renderMediaStarFilter();
+    }
+
     _renderMediaStarFilter() {
         if (!this.mediaStarFilterHost) return;
         this.mediaStarFilterHost.replaceChildren();
@@ -1509,12 +1653,54 @@ export class CapTimelineEditorApp {
             group.appendChild(starBtn);
         }
         bar.appendChild(group);
+
+        const actions = document.createElement("div");
+        actions.className = "cat-te-media-toolbar-actions";
+
+        const batchBtn = document.createElement("button");
+        batchBtn.type = "button";
+        batchBtn.className = "cat-te-media-tool-btn";
+        batchBtn.classList.toggle("active", this._mediaBatchMode);
+        batchBtn.innerHTML = iconHtml("check", 12);
+        batchBtn.title = this._mediaBatchMode ? "退出批量选择" : "批量选择删除";
+        batchBtn.addEventListener("click", () => this._toggleMediaBatchMode());
+        actions.appendChild(batchBtn);
+
+        if (this._mediaBatchMode) {
+            const count = this._mediaBatchSelected.size;
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "cat-te-media-tool-btn danger";
+            delBtn.innerHTML = iconHtml("trash", 12);
+            delBtn.title = count ? `删除选中的 ${count} 个素材` : "请先选择素材";
+            delBtn.disabled = count === 0;
+            if (count) {
+                const badge = document.createElement("span");
+                badge.className = "cat-te-media-tool-badge";
+                badge.textContent = String(count);
+                delBtn.appendChild(badge);
+            }
+            delBtn.addEventListener("click", () => void this._deleteSelectedLibraryMedia());
+            actions.appendChild(delBtn);
+        }
+
+        const viewBtn = document.createElement("button");
+        viewBtn.type = "button";
+        viewBtn.className = "cat-te-media-tool-btn";
+        viewBtn.classList.toggle("active", this._mediaListView);
+        viewBtn.innerHTML = iconHtml(this._mediaListView ? "grid" : "list", 12);
+        viewBtn.title = this._mediaListView ? "切换为网格视图" : "切换为列表视图（每行一个）";
+        viewBtn.addEventListener("click", () => this._toggleMediaListView());
+        actions.appendChild(viewBtn);
+
+        bar.appendChild(actions);
         this.mediaStarFilterHost.appendChild(bar);
     }
 
     _renderMediaGrid() {
         this._renderMediaStarFilter();
         this.mediaGrid.replaceChildren();
+        this._applyMediaGridView();
         if (this._mediaTab === "audio") {
             this._renderAudioMediaGrid();
         } else if (this._mediaTab === "video") {
@@ -1522,6 +1708,7 @@ export class CapTimelineEditorApp {
         } else {
             this._renderImageMediaGrid();
         }
+        requestAnimationFrame(() => this._relayoutMediaListThumbs());
     }
 
     _renderImageMediaGrid() {
@@ -1604,13 +1791,24 @@ export class CapTimelineEditorApp {
     _makeMediaItem(file, kind) {
         const item = document.createElement("div");
         const status = this._mediaStatus.get(`${kind}:${file}`) || { location: "input" };
+        const batchKey = this._mediaBatchKey(kind, file);
         item.className = `cat-te-media-item cat-te-media-${kind}`;
+        item.dataset.mediaKey = batchKey;
         item.classList.toggle("cat-te-media-missing", status.location === "missing");
-        item.title = `${file}\n点击预览；右键可插入 / 替换；也可拖到时间轴`;
+        item.classList.toggle("cat-te-media-selected", this._mediaBatchSelected.has(batchKey));
+        item.title = this._mediaBatchMode
+            ? `${file}\n点击选择 / 取消选择`
+            : `${file}\n点击预览；右键可插入 / 替换 / 删除；也可拖到时间轴`;
         // Native HTML5 DnD is unreliable in Tauri/WebView2 (no drag ghost /
         // drop disabled). Use pointer-driven drag instead; keep the attribute
         // off so the webview doesn't swallow the gesture.
         item.draggable = false;
+
+        const check = document.createElement("div");
+        check.className = "cat-te-media-check";
+        check.innerHTML = iconHtml("check", 12);
+        item.appendChild(check);
+
         if (this._isMediaOnTimeline(file, kind)) {
             const addedTag = document.createElement("div");
             addedTag.className = "cat-te-media-added-tag";
@@ -1628,6 +1826,7 @@ export class CapTimelineEditorApp {
             img.alt = "";
             img.draggable = false;
             item.appendChild(img);
+            this._bindMediaThumbAspect(img);
         } else if (kind === "video") {
             const icon = document.createElement("div");
             icon.className = "cat-te-video-icon";
@@ -1640,6 +1839,7 @@ export class CapTimelineEditorApp {
                 img.alt = "";
                 img.draggable = false;
                 icon.replaceWith(img);
+                this._bindMediaThumbAspect(img);
             }).catch(() => { /* keep the icon placeholder */ });
         } else {
             const icon = document.createElement("div");
@@ -1650,31 +1850,17 @@ export class CapTimelineEditorApp {
         const nm = document.createElement("div");
         nm.className = "cat-te-media-name";
         nm.textContent = file.split(/[\\/]/).pop();
-        const starsWrap = document.createElement("div");
-        starsWrap.className = "cat-te-media-stars";
-        const current = this._getMediaStars(kind, file) ?? 0;
-        for (let i = 1; i <= 5; i++) {
-            const starBtn = document.createElement("button");
-            starBtn.type = "button";
-            starBtn.className = "cat-te-media-star-btn";
-            starBtn.innerHTML = iconHtml("star", 10);
-            starBtn.title = `${i} 星`;
-            if (i <= current) starBtn.classList.add("on");
-            starBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const cur = this._getMediaStars(kind, file) ?? 0;
-                this._setMediaStars(kind, file, cur === i ? undefined : i);
-                this._renderMediaGrid();
-            });
-            starsWrap.appendChild(starBtn);
-        }
         const dragHint = document.createElement("div");
         dragHint.className = "cat-te-media-drag-hint";
         dragHint.textContent = "⋮⋮";
-        item.append(nm, starsWrap, dragHint);
+        item.append(nm, dragHint);
         item.addEventListener("click", () => {
             if (item._catTeSuppressClick) {
                 item._catTeSuppressClick = false;
+                return;
+            }
+            if (this._mediaBatchMode) {
+                this._toggleMediaBatchSelect(kind, file, item);
                 return;
             }
             if (status.location === "missing") alert("素材文件缺失，请右键选择“重新关联文件”");
@@ -1683,6 +1869,7 @@ export class CapTimelineEditorApp {
         item.addEventListener("contextmenu", (e) => {
             e.preventDefault();
             e.stopPropagation();
+            if (this._mediaBatchMode) return;
             const items = [];
             if (status.location !== "missing") items.push({
                 label: "插入时间轴",
@@ -1700,14 +1887,14 @@ export class CapTimelineEditorApp {
                 label: "重新关联文件",
                 fn: () => this._chooseMaterialFile({ file, kind }),
             });
-            if (status.location === "missing") items.push({
+            items.push({
                 label: "删除",
-                fn: () => this._deleteMissingMedia(file, kind),
+                fn: () => void this._deleteLibraryMedia(file, kind),
                 danger: true,
             });
             this._buildCtxMenu(items, e.clientX, e.clientY);
         });
-        if (status.location !== "missing") {
+        if (status.location !== "missing" && !this._mediaBatchMode) {
             this._bindMediaPointerDrag(item, kind, file);
         }
         return item;
@@ -3507,10 +3694,10 @@ export class CapTimelineEditorApp {
         ).values()];
     }
 
-    _deleteMissingMedia(file, kind) {
-        const label = file.split(/[\\/]/).pop() || file;
-        if (!confirm(`确定删除失联素材「${label}」？相关时间轴素材将一并移除。`)) return;
-        this._recordUndo();
+    /** Remove one library media from project/timeline lists. Returns whether disk delete is needed. */
+    _removeLibraryMediaEntry(file, kind) {
+        const status = this._mediaStatus.get(`${kind}:${file}`) || { location: "input" };
+        const missing = status.location === "missing";
         const removedClipIds = new Set();
         for (const track of this._timeline?.tracks ?? []) {
             for (const clip of [...track.clips]) {
@@ -3534,19 +3721,88 @@ export class CapTimelineEditorApp {
             this._selClip = null;
             this._selClips = [];
             this._timeline.clearSelection();
-        } else {
-            this._syncSelectedClip();
         }
-        this._updatePromptPanel();
         const list = kind === "audio" ? this._audioFiles : kind === "video" ? this._videoFiles : this._imgFiles;
         const index = list.indexOf(file);
         if (index >= 0) list.splice(index, 1);
         this._mediaStatus.delete(`${kind}:${file}`);
+        this._setMediaStars(kind, file, undefined);
         this._projectResources = this._projectResources.filter(
             resource => !(resource.kind === kind && resource.file === file),
         );
+        if (kind === "video") this._videoThumbCache.delete(file);
+        this._mediaBatchSelected.delete(this._mediaBatchKey(kind, file));
+        return { needDisk: !missing, removedClipIds };
+    }
+
+    async _deleteDiskAsset(file, kind) {
+        const response = await fetch(api.apiURL("/audio_keyframe_timeline/delete_asset"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: file, kind }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "删除文件失败");
+    }
+
+    async _deleteLibraryMedia(file, kind) {
+        const label = file.split(/[\\/]/).pop() || file;
+        const onTimeline = this._isMediaOnTimeline(file, kind);
+        const status = this._mediaStatus.get(`${kind}:${file}`) || { location: "input" };
+        const missing = status.location === "missing";
+        const msg = missing
+            ? `确定删除失联素材「${label}」？相关时间轴素材将一并移除。`
+            : onTimeline
+                ? `确定删除素材「${label}」？将从素材库与磁盘移除，相关时间轴素材也会一并删除。`
+                : `确定删除素材「${label}」？将从素材库与磁盘移除。`;
+        if (!confirm(msg)) return;
+
+        this._recordUndo();
+        const { needDisk } = this._removeLibraryMediaEntry(file, kind);
+        this._syncSelectedClip();
+        this._updatePromptPanel();
+        if (needDisk) {
+            try {
+                await this._deleteDiskAsset(file, kind);
+            } catch (error) {
+                alert(`素材已从工程移除，但磁盘文件删除失败：${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
         this._renderMediaGrid();
         this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
+    }
+
+    async _deleteSelectedLibraryMedia() {
+        const entries = [...this._mediaBatchSelected].map((key) => {
+            const i = key.indexOf(":");
+            return { kind: key.slice(0, i), file: key.slice(i + 1) };
+        }).filter((row) => row.kind && row.file);
+        if (!entries.length) return;
+        const onTimeline = entries.some(({ file, kind }) => this._isMediaOnTimeline(file, kind));
+        const msg = onTimeline
+            ? `确定删除选中的 ${entries.length} 个素材？将从素材库与磁盘移除，相关时间轴素材也会一并删除。`
+            : `确定删除选中的 ${entries.length} 个素材？将从素材库与磁盘移除。`;
+        if (!confirm(msg)) return;
+
+        this._recordUndo();
+        const diskJobs = [];
+        for (const { file, kind } of entries) {
+            const { needDisk } = this._removeLibraryMediaEntry(file, kind);
+            if (needDisk) diskJobs.push(this._deleteDiskAsset(file, kind).catch((err) => err));
+        }
+        this._syncSelectedClip();
+        this._updatePromptPanel();
+        const results = await Promise.all(diskJobs);
+        const failed = results.filter((r) => r instanceof Error);
+        this._mediaBatchSelected.clear();
+        this._mediaBatchMode = false;
+        this._renderMediaGrid();
+        this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
+        if (failed.length) {
+            alert(`已从工程移除，但有 ${failed.length} 个磁盘文件删除失败。`);
+        }
     }
 
     _removeCtxMenu() {

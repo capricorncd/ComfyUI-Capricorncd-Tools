@@ -10,14 +10,18 @@ const _loaded = new Set();
  */
 export function loadExtensionCss(filename, id) {
     const linkId = id || `cap-css-${filename.replace(/\W/g, "-")}`;
-    if (_loaded.has(linkId) || document.getElementById(linkId)) {
+    const href = `/extensions/${EXT_PREFIX}/${filename}?v=20260804-media-list2`;
+    const existing = document.getElementById(linkId);
+    if (existing) {
+        if (existing.getAttribute("href") !== href) existing.setAttribute("href", href);
         _loaded.add(linkId);
         return;
     }
+    if (_loaded.has(linkId)) return;
     const link = document.createElement("link");
     link.id = linkId;
     link.rel = "stylesheet";
-    link.href = `/extensions/${EXT_PREFIX}/${filename}`;
+    link.href = href;
     document.head.appendChild(link);
     _loaded.add(linkId);
 }
