@@ -1,3 +1,4 @@
+import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { Timeline, ICONS } from "./timeline/index.js";
 import { parseTimecode, formatTimecode, frameIndexFromSecs, encodeClipTimingMs, decodeClipTimingSecs } from "./timecode.js";
@@ -3956,6 +3957,7 @@ export class CapTimelineEditorApp {
             });
         } else {
             items.push(
+                { label: "运行", fn: () => void this._runClipDownstream(clip) },
                 { label: m.disabled ? "启用  Ctrl+B" : "禁用  Ctrl+B", strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
                 { label: "禁用其他素材  Ctrl+G", fn: () => this._disableOthers(clip) },
                 ...(m.endImage ? [
@@ -3966,6 +3968,73 @@ export class CapTimelineEditorApp {
         }
         items.push({ label: "删除", fn: () => this._deleteClip(clip), danger: true });
         this._buildCtxMenu(items, e.clientX, e.clientY);
+    }
+
+    /**
+     * Queue the workflow so Timeline Editor emits data_json / clips_audio for
+     * only this visual clip (others temporarily disabled for the queue snapshot).
+     */
+    async _runClipDownstream(clip) {
+        if (!clip || !this.node) return;
+        const m = this._meta.get(clip.id) ?? defaultImageMeta();
+        if (clip.track?.type === "audio" || m.clipType === "audio") {
+            alert("音频片段不会进入 data_json，请选择图片/视频片段。");
+            return;
+        }
+        if (typeof app?.queuePrompt !== "function") {
+            alert("无法排队工作流：找不到 queuePrompt。");
+            return;
+        }
+
+        // Snapshot enable/disable so the editor UI is restored after queue.
+        const snapshot = [];
+        for (const track of this._allImageTracks()) {
+            for (const c of track.clips) {
+                const meta = this._meta.get(c.id) ?? defaultImageMeta();
+                snapshot.push({ id: c.id, disabled: !!meta.disabled });
+            }
+        }
+
+        try {
+            for (const track of this._allImageTracks()) {
+                for (const c of track.clips) {
+                    const meta = this._meta.get(c.id) ?? defaultImageMeta();
+                    const next = c.id !== clip.id;
+                    if (meta.disabled !== next) {
+                        meta.disabled = next;
+                        this._meta.set(c.id, meta);
+                        this._decorateClip(c);
+                    }
+                }
+            }
+            // Ensure the chosen clip itself is enabled and its track is usable.
+            const self = this._meta.get(clip.id) ?? defaultImageMeta();
+            self.disabled = false;
+            self.visible = true;
+            this._meta.set(clip.id, self);
+            if (clip.track?.visible === false) clip.track.setVisible?.(true);
+            this._decorateClip(clip);
+            this._saveToWidgets();
+            this._openedProjectJson = JSON.stringify(this._buildProject());
+
+            await app.queuePrompt(0);
+        } catch (error) {
+            alert(`运行失败：${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            for (const row of snapshot) {
+                const c = this._findClipById(row.id);
+                if (!c) continue;
+                const meta = this._meta.get(c.id) ?? defaultImageMeta();
+                if (meta.disabled !== row.disabled) {
+                    meta.disabled = row.disabled;
+                    this._meta.set(c.id, meta);
+                    this._decorateClip(c);
+                }
+            }
+            this._saveToWidgets();
+            this._openedProjectJson = JSON.stringify(this._buildProject());
+            this._updatePromptPanel();
+        }
     }
 
     _showDropActionMenu(file, clip, x, y) {
