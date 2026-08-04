@@ -77,6 +77,8 @@ export class CapTimelineEditorApp {
     static _open = null;
     /** @type {Set<CapTimelineEditorApp>} */
     static _instances = new Set();
+    /** Session clipboard for timeline clips (survives editor close/reopen). */
+    static _clipClipboard = null;
 
     /** Drop body-level classes / orphaned DOM left by a killed editor. */
     static scrubGlobalUi() {
@@ -246,7 +248,7 @@ export class CapTimelineEditorApp {
     }
 
     /**
-     * Ctrl+B / Ctrl+G — only when a clip is selected.
+     * Ctrl+C / Ctrl+V / Ctrl+B / Ctrl+G — when the fullscreen editor is open.
      * @returns {boolean} true if the event was handled
      */
     handleShortcutKey(e) {
@@ -255,6 +257,20 @@ export class CapTimelineEditorApp {
         if (e.target?.closest?.("input, textarea, select")) return false;
         if (!e.ctrlKey || e.shiftKey || e.altKey) return false;
         const key = e.key?.toLowerCase();
+        if (key === "c") {
+            if (!this._copySelectedClips()) return false;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+            return true;
+        }
+        if (key === "v") {
+            if (!this._pasteClips()) return false;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+            return true;
+        }
         if (key !== "b" && key !== "g") return false;
         const clip = this.getSelectedClip();
         if (!clip) return false;
@@ -822,6 +838,7 @@ export class CapTimelineEditorApp {
               </div>
               <div class="cat-te-shortcuts">
                 Ctrl+点击 多选 · Del 删除（确认）<br>
+                Ctrl+C 复制 · Ctrl+V 粘贴<br>
                 选中素材时 Ctrl+B 禁用 · Ctrl+G 禁用其他<br>
                 Ctrl+滚轮 缩放 · Alt+滚轮 左右滚动
               </div>
@@ -3937,7 +3954,10 @@ export class CapTimelineEditorApp {
     }
 
     _showClipCtxMenu(clip, e) {
-        this._timeline.selectClip(clip);
+        const selected = this._timeline.getSelectedClips();
+        if (!selected.some(c => c.id === clip.id)) {
+            this._timeline.selectClip(clip);
+        }
         const m = this._meta.get(clip.id)
             ?? (clip.track.type === "audio" ? defaultAudioMeta() : defaultImageMeta());
         const isAudio = clip.track.type === "audio" || m.clipType === "audio";
@@ -3966,8 +3986,165 @@ export class CapTimelineEditorApp {
                 ] : []),
             );
         }
-        items.push({ label: "删除", fn: () => this._deleteClip(clip), danger: true });
+        items.push(
+            { label: "复制  Ctrl+C", fn: () => this._copySelectedClips() },
+            { label: "粘贴  Ctrl+V", fn: () => this._pasteClips() },
+            { label: "删除", fn: () => this._deleteClip(clip), danger: true },
+        );
         this._buildCtxMenu(items, e.clientX, e.clientY);
+    }
+
+    _cloneClipMeta(meta) {
+        const m = { ...(meta || {}) };
+        if (Array.isArray(meta?.items)) {
+            m.items = meta.items.map((item) => (
+                item && typeof item === "object" ? { ...item } : item
+            ));
+        }
+        return m;
+    }
+
+    _snapshotClip(clip) {
+        const isAudio = clip.track?.type === "audio";
+        const meta = this._meta.get(clip.id)
+            ?? (isAudio ? defaultAudioMeta() : defaultImageMeta());
+        return {
+            trackId: clip.track.id,
+            trackType: isAudio ? "audio" : "image",
+            startTime: clip.startTime,
+            duration: clip.duration,
+            name: clip.name,
+            src: clip.src,
+            thumbnail: clip.thumbnail,
+            color: clip.color,
+            sourceDuration: clip.sourceDuration,
+            sourceOffset: clip.sourceOffset || 0,
+            hasAudio: !!clip.hasAudio,
+            waveformPeaks: clip._waveform?.length ? clip._waveform.slice() : null,
+            audioBuffer: clip._audioBuffer ?? null,
+            meta: this._cloneClipMeta(meta),
+        };
+    }
+
+    /** @returns {boolean} true if anything was copied */
+    _copySelectedClips() {
+        const clips = this._timeline?.getSelectedClips() ?? [];
+        if (!clips.length) return false;
+        const ordered = [...clips].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
+        CapTimelineEditorApp._clipClipboard = ordered.map(c => this._snapshotClip(c));
+        return true;
+    }
+
+    _resolvePasteTrack(snap) {
+        const tl = this._timeline;
+        if (!tl || !snap) return null;
+        const wantAudio = snap.trackType === "audio";
+        const orig = tl.getTrack(snap.trackId);
+        if (orig && !orig.locked && orig.visible !== false) {
+            const ok = wantAudio ? orig.type === "audio" : (orig.type === "image" || orig.type === "video");
+            if (ok) return orig;
+        }
+        if (wantAudio) {
+            return this._allAudioTracks().find(t => !t.locked && t.visible !== false)
+                ?? this._createInsertTrack("audio");
+        }
+        return this._allImageTracks().find(t => !t.locked && t.visible !== false)
+            ?? this._createInsertTrack("image");
+    }
+
+    /** Earliest start on `track` at/after `desired` that fits `duration`. */
+    _findFreeStart(track, desired, duration) {
+        if (!track) return desired;
+        const dur = Math.max(0.05, duration);
+        const eps = 0.5 / Math.max(1, this.getFps());
+        if (this._trackHasRoom(track, desired, dur)) return desired;
+        const sorted = [...track.clips].sort((a, b) => a.startTime - b.startTime);
+        let t = Math.max(0, desired);
+        for (const c of sorted) {
+            if (c.endTime <= t + eps) {
+                t = Math.max(t, c.endTime);
+                continue;
+            }
+            if (t + dur <= c.startTime + eps) return t;
+            t = c.endTime;
+        }
+        return t;
+    }
+
+    /**
+     * Paste clipboard clips after the last clip on the preferred track
+     * (or at the playhead when it is already past that point), keeping
+     * relative offsets within the copied group.
+     * @returns {boolean} true if anything was pasted
+     */
+    _pasteClips() {
+        const snaps = CapTimelineEditorApp._clipClipboard;
+        const tl = this._timeline;
+        if (!snaps?.length || !tl) return false;
+
+        this._recordUndo();
+
+        const minStart = Math.min(...snaps.map(s => s.startTime));
+        const tracks = snaps.map(s => this._resolvePasteTrack(s));
+        if (tracks.some(t => !t)) return false;
+
+        let pasteBase = 0;
+        for (const track of tracks) {
+            for (const c of track.clips) pasteBase = Math.max(pasteBase, c.endTime);
+        }
+        if (tl.currentTime >= pasteBase) pasteBase = tl.currentTime;
+
+        // Shift the whole group forward until every clip fits on its track.
+        for (let guard = 0; guard < 64; guard++) {
+            let bump = null;
+            for (let i = 0; i < snaps.length; i++) {
+                const start = pasteBase + (snaps[i].startTime - minStart);
+                if (!this._trackHasRoom(tracks[i], start, snaps[i].duration)) {
+                    const free = this._findFreeStart(tracks[i], start, snaps[i].duration);
+                    const need = free - (snaps[i].startTime - minStart);
+                    bump = bump == null ? need : Math.max(bump, need);
+                }
+            }
+            if (bump == null) break;
+            pasteBase = Math.max(pasteBase, bump);
+        }
+
+        const created = [];
+        for (let i = 0; i < snaps.length; i++) {
+            const snap = snaps[i];
+            const track = tracks[i];
+            const start = pasteBase + (snap.startTime - minStart);
+            this._ensureTimelineLength(start + snap.duration);
+            const clip = tl.addClip(track.id, {
+                name: snap.name,
+                startTime: start,
+                duration: snap.duration,
+                src: snap.src,
+                thumbnail: snap.thumbnail,
+                color: snap.color ?? track.color,
+                sourceDuration: snap.sourceDuration,
+                sourceOffset: snap.sourceOffset || 0,
+                hasAudio: !!snap.hasAudio,
+                waveformPeaks: snap.waveformPeaks || undefined,
+            });
+            if (!clip) continue;
+            clip._audioBuffer = snap.audioBuffer ?? null;
+            const meta = this._cloneClipMeta(snap.meta);
+            meta.trackIndex = this._trackIndex(track);
+            this._meta.set(clip.id, meta);
+            this._decorateClip(clip);
+            created.push(clip);
+        }
+        if (!created.length) return false;
+
+        tl.selectClip(created[0]);
+        for (let i = 1; i < created.length; i++) {
+            tl.selectClip(created[i], { additive: true });
+        }
+        this._updatePromptPanel();
+        this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
+        return true;
     }
 
     /**
@@ -4514,7 +4691,16 @@ export class CapTimelineEditorApp {
         });
         scroll.addEventListener("contextmenu", (e) => {
             const clipEl = e.target.closest?.(".tl-clip");
-            if (!clipEl) return;
+            if (!clipEl) {
+                if (!CapTimelineEditorApp._clipClipboard?.length) return;
+                e.preventDefault();
+                this._buildCtxMenu(
+                    [{ label: "粘贴  Ctrl+V", fn: () => this._pasteClips() }],
+                    e.clientX,
+                    e.clientY,
+                );
+                return;
+            }
             e.preventDefault();
             const clip = this._findClipById(clipEl.dataset.clipId);
             if (clip) this._showClipCtxMenu(clip, e);
