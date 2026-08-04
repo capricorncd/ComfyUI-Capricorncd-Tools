@@ -1,6 +1,6 @@
 import { api } from "../../scripts/api.js";
 import { Timeline, ICONS } from "./timeline/index.js";
-import { parseTimecode, formatTimecode, frameIndexFromSecs } from "./timecode.js";
+import { parseTimecode, formatTimecode, frameIndexFromSecs, encodeClipTimingMs, decodeClipTimingSecs } from "./timecode.js";
 import { attachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 import { loadExtensionCss } from "./cap_ui.js";
 import { iconHtml } from "./cap_icons.js";
@@ -63,12 +63,72 @@ function defaultAudioMeta(trackIndex = 2) {
     };
 }
 
+const BODY_UI_CLASSES = [
+    "cat-te-noscroll",
+    "cat-te-col-resize",
+    "cat-te-row-resize",
+    "cat-te-media-dnd",
+    "cat-te-media-dnd-over-tl",
+];
+
 /** @timeline/editor fullscreen shell bound to a ComfyUI node. */
 export class CapTimelineEditorApp {
     static _open = null;
+    /** @type {Set<CapTimelineEditorApp>} */
+    static _instances = new Set();
+
+    /** Drop body-level classes / orphaned DOM left by a killed editor. */
+    static scrubGlobalUi() {
+        document.body.classList.remove(...BODY_UI_CLASSES);
+        document.querySelectorAll(".cat-te-media-drag-ghost, .cat-te-ctx-menu")
+            .forEach((el) => el.remove());
+        // Drop overlays that no longer belong to a live instance (or whose
+        // instance was destroyed mid-teardown without removing the node).
+        const live = new Set(
+            [...CapTimelineEditorApp._instances]
+                .filter((te) => !te._destroyed && te._overlay)
+                .map((te) => te._overlay),
+        );
+        document.querySelectorAll(".cat-te-overlay").forEach((el) => {
+            if (!live.has(el)) el.remove();
+        });
+        for (const te of CapTimelineEditorApp._instances) {
+            if (te._overlay && !te._overlay.isConnected) te._overlay = null;
+        }
+        CapTimelineEditorApp._open = null;
+    }
+
+    /** Persist any open editor into its node widgets (for serialize / tab switch). */
+    static flushOpenEditors() {
+        for (const te of CapTimelineEditorApp._instances) {
+            if (te._destroyed || !te._overlay?.classList.contains("open") || !te._timeline) continue;
+            try { te._saveToWidgets(); } catch { /* node may be mid-teardown */ }
+        }
+    }
+
+    /** Close the fullscreen shell without destroying node-bound instances. */
+    static closeOpenEditor() {
+        const open = CapTimelineEditorApp._open;
+        if (open && !open._destroyed) {
+            try { open.close(); } catch { /* ignore */ }
+        }
+        document.body.classList.remove(...BODY_UI_CLASSES);
+        document.querySelectorAll(".cat-te-media-drag-ghost, .cat-te-ctx-menu")
+            .forEach((el) => el.remove());
+        CapTimelineEditorApp._open = null;
+    }
+
+    /** Close every live editor and scrub global UI leftovers. */
+    static forceCloseAll() {
+        for (const te of [...CapTimelineEditorApp._instances]) {
+            try { te.destroy(); } catch { /* continue scrubbing */ }
+        }
+        CapTimelineEditorApp.scrubGlobalUi();
+    }
 
     constructor(node) {
         this.node = node;
+        this._destroyed = false;
         this._meta = new Map();
         this._trackInfo = new Map();
         this._imgFiles = [];
@@ -101,11 +161,13 @@ export class CapTimelineEditorApp {
         /** In-flight media-library HTML5 drag payload (same-document DnD). */
         this._dndMedia = null;
         this._dndHoverClip = null;
+        this._abortMediaDrag = null;
         this._previewImages = new Map();
         this._previewVideos = new Map();
         this._programPreviewRaf = 0;
         this._programStageObserver = null;
         this._openGen = 0;
+        CapTimelineEditorApp._instances.add(this);
         loadEditorCss();
         this._buildLauncher();
     }
@@ -295,26 +357,28 @@ export class CapTimelineEditorApp {
     }
 
     _closeInternal(save) {
-        if (!this._overlay) return;
         // Invalidate any in-flight _openEditor so it won't rebuild after close.
         this._openGen += 1;
         this._historyReady = false;
         try {
+            this._abortMediaDrag?.();
+            this._abortMediaDrag = null;
             this._stopAutoSave();
             this._stopAudioPlayback();
-            this._closeMediaPreview();
-            this._closeAddMaterial();
-            this._closeSettings();
+            try { this._closeMediaPreview(); } catch { /* ignore */ }
+            try { this._closeAddMaterial(); } catch { /* ignore */ }
+            try { this._closeSettings(); } catch { /* ignore */ }
             this._removeCtxMenu();
-            if (save) this._saveToWidgets();
-            else if (this._openedWidgetValues) {
+            if (save) {
+                try { this._saveToWidgets(); } catch { /* node may already be removed */ }
+            } else if (this._openedWidgetValues) {
                 for (const [name, value] of Object.entries(this._openedWidgetValues)) {
                     const widget = this._w(name);
                     if (widget && value !== undefined) widget.value = value;
                 }
             }
             this._disposeProgramPreview();
-            this._timeline?.destroy();
+            try { this._timeline?.destroy(); } catch { /* ignore */ }
             this._timeline = null;
             this._mainTrack = null;
             this._overlayTrack = null;
@@ -323,10 +387,10 @@ export class CapTimelineEditorApp {
             this._mediaBatchSelected.clear();
             this._mediaListResizeObserver?.disconnect();
             this._mediaListResizeObserver = null;
-            this._clearClipInfoQueue();
+            try { this._clearClipInfoQueue(); } catch { /* overlay may be gone */ }
         } finally {
-            this._overlay.classList.remove("open");
-            document.body.classList.remove("cat-te-noscroll");
+            this._overlay?.classList.remove("open");
+            document.body.classList.remove(...BODY_UI_CLASSES);
             if (CapTimelineEditorApp._open === this) CapTimelineEditorApp._open = null;
         }
     }
@@ -657,8 +721,13 @@ export class CapTimelineEditorApp {
     }
 
     destroy() {
+        if (this._destroyed) return;
+        this._destroyed = true;
         this._closeInternal(true);
-        document.removeEventListener("click", this._onDocClick);
+        if (this._onDocClick) {
+            document.removeEventListener("click", this._onDocClick);
+            this._onDocClick = null;
+        }
         if (this._onWinResize) {
             window.removeEventListener("resize", this._onWinResize);
             this._onWinResize = null;
@@ -677,6 +746,9 @@ export class CapTimelineEditorApp {
         }
         this._overlay?.remove();
         this._overlay = null;
+        CapTimelineEditorApp._instances.delete(this);
+        if (CapTimelineEditorApp._open === this) CapTimelineEditorApp._open = null;
+        document.body.classList.remove(...BODY_UI_CLASSES);
     }
 
     _ensureOverlay() {
@@ -1959,6 +2031,7 @@ export class CapTimelineEditorApp {
                 window.removeEventListener("pointermove", onMove, true);
                 window.removeEventListener("pointerup", onUp, true);
                 window.removeEventListener("pointercancel", onUp, true);
+                if (this._abortMediaDrag === abortDrag) this._abortMediaDrag = null;
                 try { item.releasePointerCapture(pointerId); } catch { /* ignore */ }
 
                 const media = started ? this._dndMedia : null;
@@ -1969,6 +2042,17 @@ export class CapTimelineEditorApp {
                 if (!started || !media?.file) return;
                 this._commitMediaDrop(media, dropX, dropY);
             };
+
+            const abortDrag = () => {
+                window.removeEventListener("pointermove", onMove, true);
+                window.removeEventListener("pointerup", onUp, true);
+                window.removeEventListener("pointercancel", onUp, true);
+                try { item.releasePointerCapture(pointerId); } catch { /* ignore */ }
+                this._clearMediaDragVisuals(item, ghost);
+                this._dndMedia = null;
+                this._dndHoverClip = null;
+            };
+            this._abortMediaDrag = abortDrag;
 
             window.addEventListener("pointermove", onMove, true);
             window.addEventListener("pointerup", onUp, true);
@@ -2625,18 +2709,29 @@ export class CapTimelineEditorApp {
                 const source = clip.source && typeof clip.source === "object" ? clip.source : {};
                 if (source.file && source.location) this._mediaStatus.set(`${clip.type}:${source.file}`, { location: source.location });
                 const startMs = Number(clip.start_ms) || 0;
-                const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
+                const durationMs = Number(clip.duration_ms);
+                const legacyEndMs = Number(clip.end_ms);
+                const { startTime, duration } = decodeClipTimingSecs(
+                    startMs,
+                    durationMs,
+                    Number.isFinite(legacyEndMs) ? legacyEndMs : null,
+                    fps,
+                );
+                const startMsOut = Math.round(startTime * 1000);
+                const durationMsOut = Math.max(1, Math.round(duration * 1000));
                 clips.push({
                     ...clip,
                     clip_type: clip.type,
                     track: trackIndex,
-                    end_ms: startMs + durationMs,
+                    start_ms: startMsOut,
+                    duration_ms: durationMsOut,
+                    end_ms: startMsOut + durationMsOut,
                     start_image: source.file || null,
                     audio_file: source.file || null,
                     source_duration: (
                         Number(source.duration_ms) > 0
                             ? Number(source.duration_ms)
-                            : Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms))
+                            : Math.max(durationMsOut, Number(source.out_ms) - Number(source.in_ms))
                     ) / 1000,
                     trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
                     disabled: clip.enabled === false,
@@ -2756,7 +2851,10 @@ export class CapTimelineEditorApp {
 
         const startMs = Number(c.start_ms) || 0;
         const endMs = Number(c.end_ms) || startMs + 1000;
-        const dur = Math.max(0.05, (endMs - startMs) / 1000);
+        const fps = this.getFps();
+        const decoded = decodeClipTimingSecs(startMs, endMs - startMs, endMs, fps);
+        const startTime = decoded.startTime;
+        const dur = Math.max(1 / fps, decoded.duration);
 
         if (clipType === "audio") {
             const af = c.audio_file ?? c.src ?? "";
@@ -2774,7 +2872,7 @@ export class CapTimelineEditorApp {
             const clip = this._timeline.addClip(track.id, {
                 id: c.id || uid(),
                 name: af.split(/[\\/]/).pop() || "音频",
-                startTime: startMs / 1000,
+                startTime,
                 duration: dur,
                 sourceDuration: sourceDur,
                 sourceOffset: trimIn,
@@ -2798,7 +2896,7 @@ export class CapTimelineEditorApp {
             const clip = this._timeline.addClip(track.id, {
                 id: c.id || uid(),
                 name: c.name || "Package",
-                startTime: startMs / 1000,
+                startTime,
                 duration: dur,
                 color: "#d9a441",
             });
@@ -2834,7 +2932,7 @@ export class CapTimelineEditorApp {
             const clip = this._timeline.addClip(track.id, {
                 id: c.id || uid(),
                 name: fname,
-                startTime: startMs / 1000,
+                startTime,
                 duration: dur,
                 sourceDuration: sourceDur,
                 sourceOffset: trimIn,
@@ -2865,7 +2963,7 @@ export class CapTimelineEditorApp {
         const clip = this._timeline.addClip(track.id, {
             id: c.id || uid(),
             name: fname,
-            startTime: startMs / 1000,
+            startTime,
             duration: dur,
             src: img,
             thumbnail: img ? this._imgUrl(img) : null,
@@ -4534,14 +4632,16 @@ export class CapTimelineEditorApp {
 
     /** Build the complete, editable and lossless project document. */
     _buildProject() {
+        const fps = this.getFps();
         const tracks = (this._timeline?.tracks ?? []).map((track, order) => {
             const ti = this._trackIndex(track);
             const clips = track.clips.map(clip => {
                 const m = this._meta.get(clip.id)
                     ?? (track.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti));
-                const startMs = Math.round(clip.startTime * 1000);
-                const durationMs = Math.max(1, Math.round(clip.duration * 1000));
-                const sourceInMs = Math.max(0, Math.round((clip.sourceOffset || 0) * 1000));
+                // Frame-grid ms so abutting clips share boundaries on reload.
+                const { startMs, durationMs } = encodeClipTimingMs(clip.startTime, clip.duration, fps);
+                const sourceInFrames = Math.max(0, Math.round((clip.sourceOffset || 0) * fps));
+                const sourceInMs = Math.round((sourceInFrames * 1000) / fps);
                 const source = {
                     kind: track.type === "audio" ? "audio" : (m.mediaKind || "image"),
                     file: clip.src || "",
@@ -4551,9 +4651,13 @@ export class CapTimelineEditorApp {
                     source.in_ms = sourceInMs;
                     source.out_ms = sourceInMs + durationMs;
                     const fullSec = clip.sourceDuration ?? m.sourceDuration ?? clip.duration;
+                    const fullFrames = Math.max(
+                        sourceInFrames + Math.max(1, Math.round(clip.duration * fps)),
+                        Number.isFinite(fullSec) ? Math.round(Math.max(0, fullSec) * fps) : 0,
+                    );
                     source.duration_ms = Math.max(
                         source.out_ms,
-                        Math.round(Math.max(0, fullSec) * 1000),
+                        Math.round((fullFrames * 1000) / fps),
                     );
                 }
                 const row = {
@@ -4701,24 +4805,36 @@ export class CapTimelineEditorApp {
                 this._createDefaultTracks();
             }
             const clips = [];
+            const fps = this.getFps();
             projectTracks.forEach((track, trackIndex) => {
                 for (const clip of Array.isArray(track.clips) ? track.clips : []) {
                     const source = clip.source && typeof clip.source === "object" ? clip.source : {};
                     if (source.file && source.location) this._mediaStatus.set(`${clip.type}:${source.file}`, { location: source.location });
                     const startMs = Number(clip.start_ms) || 0;
-                    const durationMs = Math.max(0, Number(clip.duration_ms) || 0);
+                    const durationMs = Number(clip.duration_ms);
+                    const legacyEndMs = Number(clip.end_ms);
+                    const { startTime, duration } = decodeClipTimingSecs(
+                        startMs,
+                        durationMs,
+                        Number.isFinite(legacyEndMs) ? legacyEndMs : null,
+                        fps,
+                    );
+                    const startMsOut = Math.round(startTime * 1000);
+                    const durationMsOut = Math.max(1, Math.round(duration * 1000));
                     clips.push({
                         ...clip,
                         clip_type: clip.type,
                         track: trackIndex,
-                        end_ms: startMs + durationMs,
+                        start_ms: startMsOut,
+                        duration_ms: durationMsOut,
+                        end_ms: startMsOut + durationMsOut,
                         start_image: source.file || null,
                         audio_file: source.file || null,
                         source_duration: (
-                        Number(source.duration_ms) > 0
-                            ? Number(source.duration_ms)
-                            : Math.max(durationMs, Number(source.out_ms) - Number(source.in_ms))
-                    ) / 1000,
+                            Number(source.duration_ms) > 0
+                                ? Number(source.duration_ms)
+                                : Math.max(durationMsOut, Number(source.out_ms) - Number(source.in_ms))
+                        ) / 1000,
                         trim_in: Math.max(0, Number(source.in_ms) || 0) / 1000,
                         disabled: clip.enabled === false,
                     });

@@ -113,33 +113,73 @@ export class Track extends EventEmitter {
   /**
    * Find the nearest valid startTime for `clip` on this track so it doesn't
    * overlap any other clip.  Returns null if there is no room at all.
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.homeStart]  startTime before the gesture; when the
+   *   clip's duration is larger than its current gap, prefer staying near
+   *   home instead of teleporting to the track tail.
    */
-  _constrainClip(clip, desiredStart) {
+  _constrainClip(clip, desiredStart, opts = {}) {
     const others = this.clips
       .filter(c => c.id !== clip.id)
       .sort((a, b) => a.startTime - b.startTime);
     const dur = clip.duration;
-    const tMax = this.timeline.duration;
+    const tMax = Math.max(this.timeline.duration, desiredStart + dur, clip.endTime);
+    const homeStart = Number.isFinite(opts.homeStart) ? opts.homeStart : clip.startTime;
+    const fps = Math.max(1, this.timeline.fps || 24);
+    const EPS = 0.5 / fps;
 
-    // Build free intervals on this track
+    // Stay put when the request is effectively "keep current".
+    if (Math.abs(desiredStart - homeStart) <= EPS) {
+      return homeStart;
+    }
+
+    // Build free intervals on this track (including empty/undersized gaps).
     const slots = [];
     let prev = 0;
     for (const c of others) {
-      if (c.startTime > prev) slots.push([prev, c.startTime]);
-      prev = c.endTime;
+      slots.push([prev, c.startTime]);
+      prev = Math.max(prev, c.endTime);
     }
-    if (prev < tMax) slots.push([prev, tMax]);
+    slots.push([prev, Math.max(prev, tMax)]);
 
-    // Keep only slots that are wide enough
-    const fittable = slots.filter(([s, e]) => e - s >= dur);
+    const slotContaining = (t) => {
+      for (const slot of slots) {
+        const [s, e] = slot;
+        if (t >= s - EPS && t <= e + EPS) return slot;
+      }
+      return null;
+    };
+
+    const fittable = slots.filter(([s, e]) => e - s >= dur - EPS);
+
+    // Exact fit in a wide-enough slot
+    for (const [s, e] of fittable) {
+      if (desiredStart >= s - EPS && desiredStart + dur <= e + EPS) {
+        return Math.max(s, Math.min(e - dur, desiredStart));
+      }
+    }
+
+    const homeSlot = slotContaining(homeStart);
+    const targetSlot = slotContaining(desiredStart) ?? homeSlot;
+
+    // Duration longer than the gap the user is aiming for: keep home (or
+    // park at the gap start) instead of jumping to a distant open tail.
+    if (targetSlot) {
+      const [s, e] = targetSlot;
+      if (e - s < dur - EPS) {
+        if (homeSlot && homeSlot[0] === s && homeSlot[1] === e) {
+          return homeStart;
+        }
+        return Math.max(0, s);
+      }
+      const maxStart = e - dur;
+      return Math.max(s, Math.min(maxStart, desiredStart));
+    }
+
     if (fittable.length === 0) return null;
 
-    // If desired position fits directly in a slot, use it
-    for (const [s, e] of fittable) {
-      if (desiredStart >= s && desiredStart + dur <= e) return desiredStart;
-    }
-
-    // Otherwise snap to the nearest slot edge
+    // Nearest fittable slot edge (only when no local gap applies)
     let best = null, bestDist = Infinity;
     for (const [s, e] of fittable) {
       const maxStart = e - dur;

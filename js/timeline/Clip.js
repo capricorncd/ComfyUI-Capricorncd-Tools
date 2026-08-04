@@ -194,21 +194,26 @@ export class Clip extends EventEmitter {
     const tl = this.track.timeline;
     const pps = tl.pixelsPerSecond;
     const startX = e.clientX;
+    const startY = e.clientY;
     const startTime = this.startTime;
     const origTrack = this.track;
     let liveTrack = this.track;
     let lastEvent = e;
     let raf = 0;
-
-    tl.emit('clip:movestart', { clip: this, track: origTrack });
-
-    this.el.classList.add('dragging', 'no-transition');
+    // Click (no real drag) must not run overlap constraint — oversized
+    // durations would otherwise teleport the clip to the track tail.
+    const MOVE_THRESHOLD_PX = 4;
+    let dragging = false;
 
     const apply = () => {
       raf = 0;
+      if (!dragging) return;
       const e = lastEvent;
       let desiredStart = this._snap(startTime + (e.clientX - startX) / pps);
-      desiredStart = Math.max(0, Math.min(tl.duration - this.duration, desiredStart));
+      // Don't pull an already-placed clip backward just because it overhangs
+      // the timeline end (duration longer than remaining timeline length).
+      const maxStart = Math.max(0, tl.duration - this.duration);
+      desiredStart = Math.max(0, Math.min(Math.max(maxStart, startTime), desiredStart));
       const hovered = tl._findTrackAtY(e.clientY, origTrack.type) || liveTrack;
       if (hovered !== liveTrack) {
         liveTrack._setDropTarget(false);
@@ -216,7 +221,7 @@ export class Clip extends EventEmitter {
         if (liveTrack !== origTrack) liveTrack._setDropTarget(true);
         liveTrack.el.appendChild(this.el);
       }
-      const valid = liveTrack._constrainClip(this, desiredStart);
+      const valid = liveTrack._constrainClip(this, desiredStart, { homeStart: startTime });
       if (valid !== null) this.startTime = valid;
       const color = this.color || liveTrack.color;
       this.el.style.cssText =
@@ -226,11 +231,20 @@ export class Clip extends EventEmitter {
 
     const onMove = (ev) => {
       lastEvent = ev;
+      if (!dragging) {
+        const dx = Math.abs(ev.clientX - startX);
+        const dy = Math.abs(ev.clientY - startY);
+        if (dx < MOVE_THRESHOLD_PX && dy < MOVE_THRESHOLD_PX) return;
+        dragging = true;
+        this.el.classList.add('dragging', 'no-transition');
+        tl.emit('clip:movestart', { clip: this, track: origTrack });
+      }
       if (!raf) raf = requestAnimationFrame(apply);
     };
 
     const onUp = () => {
       if (raf) cancelAnimationFrame(raf);
+      if (!dragging) return;
       apply();
       this.el.classList.remove('dragging', 'no-transition');
       liveTrack._setDropTarget(false);
@@ -242,7 +256,11 @@ export class Clip extends EventEmitter {
         tl.emit('clip:trackchange', { clip: this, from: origTrack, to: liveTrack });
       }
       this._applyPosition();
-      tl.emit('clip:moveend', { clip: this, track: liveTrack, moved: this.startTime !== startTime || liveTrack !== origTrack });
+      tl.emit('clip:moveend', {
+        clip: this,
+        track: liveTrack,
+        moved: this.startTime !== startTime || liveTrack !== origTrack,
+      });
     };
 
     bindDragSession(e, { onMove, onEnd: onUp });
@@ -257,19 +275,29 @@ export class Clip extends EventEmitter {
     const origSourceOffset = this.sourceOffset;
     let lastEvent = e;
     let raf = 0;
-
-    this.el.classList.add('resizing', 'no-transition');
-    tl.emit('clip:resizestart', { clip: this, track: this.track });
+    // Pure click on a handle must not resize — snap-after-clamp can otherwise
+    // grow duration past the next clip and force a later relocate-to-tail.
+    const MOVE_THRESHOLD_PX = 3;
+    let resizing = false;
 
     const others = this.track.clips
       .filter(c => c.id !== this.id)
       .sort((a, b) => a.startTime - b.startTime);
 
-    const prevClip = [...others].reverse().find(c => c.endTime <= origStart + 0.001) ?? null;
-    const nextClip = others.find(c => c.startTime >= origStart + origDur - 0.001) ?? null;
+    // Prefer non-overlapping neighbors; if we already slightly overlap (FP /
+    // prior bad snap), still bind to the clip on that side so right-trim
+    // cannot become unbounded for image clips (sourceDuration = Infinity).
+    const EPS = 0.001;
+    const prevClip = [...others].reverse().find(c => c.endTime <= origStart + EPS)
+      ?? [...others].reverse().find(c => c.startTime < origStart - EPS)
+      ?? null;
+    const nextClip = others.find(c => c.startTime >= origStart + origDur - EPS)
+      ?? others.find(c => c.startTime > origStart + EPS)
+      ?? null;
 
     const apply = () => {
       raf = 0;
+      if (!resizing) return;
       const e = lastEvent;
       const dt = (e.clientX - startX) / pps;
       if (side === 'left') {
@@ -281,7 +309,10 @@ export class Clip extends EventEmitter {
           Number.isFinite(this.sourceDuration) ? origStart - origSourceOffset : -Infinity,
           0,
         );
-        let newStart = this._snap(clamp(origStart + dt, minStart, origStart + origDur - MIN_DURATION));
+        const maxStart = origStart + origDur - MIN_DURATION;
+        let newStart = this._snap(clamp(origStart + dt, minStart, maxStart));
+        // Snap can step outside the clamped range — re-clamp.
+        newStart = clamp(newStart, minStart, maxStart);
         this.duration = origDur - (newStart - origStart);
         this.sourceOffset = origSourceOffset + (newStart - origStart);
         this.startTime = newStart;
@@ -290,11 +321,14 @@ export class Clip extends EventEmitter {
         // however much of the source remains after the current offset.
         const sourceMax = origStart + (this.sourceDuration - origSourceOffset);
         const maxEnd = Math.min(
-          nextClip ? nextClip.startTime : Number.POSITIVE_INFINITY,
+          nextClip ? nextClip.startTime : tl.duration,
           sourceMax,
         );
-        const newDur = this._snap(clamp(origDur + dt, MIN_DURATION, maxEnd - origStart));
-        this.duration = Math.max(MIN_DURATION, newDur);
+        const maxDur = Math.max(MIN_DURATION, maxEnd - origStart);
+        let newDur = this._snap(clamp(origDur + dt, MIN_DURATION, maxDur));
+        // Snap can round past the neighbor — re-clamp so we never overlap.
+        newDur = clamp(newDur, MIN_DURATION, maxDur);
+        this.duration = newDur;
       }
       this._applyPosition();
       tl.emit('clip:resize', { clip: this, track: this.track });
@@ -302,11 +336,18 @@ export class Clip extends EventEmitter {
 
     const onMove = (ev) => {
       lastEvent = ev;
+      if (!resizing) {
+        if (Math.abs(ev.clientX - startX) < MOVE_THRESHOLD_PX) return;
+        resizing = true;
+        this.el.classList.add('resizing', 'no-transition');
+        tl.emit('clip:resizestart', { clip: this, track: this.track });
+      }
       if (!raf) raf = requestAnimationFrame(apply);
     };
 
     const onUp = () => {
       if (raf) cancelAnimationFrame(raf);
+      if (!resizing) return;
       apply();
       this.el.classList.remove('resizing', 'no-transition');
       tl.emit('clip:resizeend', {

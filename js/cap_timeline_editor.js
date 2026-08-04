@@ -7,9 +7,10 @@ const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt"];
 const OBSOLETE_WIDGETS = ["ignore_occluded", "assets_dir"];
 
 function flushOpenTimelineEditors() {
+    CapTimelineEditorApp.flushOpenEditors();
     for (const node of app.graph?._nodes ?? []) {
         if (node.comfyClass === NODE_CLASS && node._teApp?._timeline) {
-            node._teApp._saveToWidgets();
+            try { node._teApp._saveToWidgets(); } catch { /* ignore */ }
         }
     }
 }
@@ -26,6 +27,32 @@ function hookQueuePrompt() {
     };
     wrap(app, "queuePrompt");
     wrap(api, "queuePrompt");
+}
+
+/** Flush open editors into widgets before ComfyUI serializes the graph
+ * (workflow tab switch persists the draft via serialize). */
+function hookGraphSerialize() {
+    const proto = app.graph?.constructor?.prototype;
+    if (!proto || typeof proto.serialize !== "function" || proto.serialize._capTeHooked) return;
+    const orig = proto.serialize;
+    proto.serialize = function (...args) {
+        CapTimelineEditorApp.flushOpenEditors();
+        return orig.apply(this, args);
+    };
+    proto.serialize._capTeHooked = true;
+}
+
+/** Close fullscreen UI before nodes are torn down on graph.clear(). */
+function hookGraphClear() {
+    const proto = app.graph?.constructor?.prototype;
+    if (!proto || typeof proto.clear !== "function" || proto.clear._capTeHooked) return;
+    const orig = proto.clear;
+    proto.clear = function (...args) {
+        CapTimelineEditorApp.flushOpenEditors();
+        CapTimelineEditorApp.forceCloseAll();
+        return orig.apply(this, args);
+    };
+    proto.clear._capTeHooked = true;
 }
 
 function hookScalarWidgets(node) {
@@ -79,6 +106,24 @@ function markNoSerialize(node) {
     }
 }
 
+function ensureTimelineApp(node) {
+    if (node._teApp && !node._teApp._destroyed) {
+        if (!node.widgets?.some(w => w.name === "te_launcher")) {
+            node._teApp._buildLauncher();
+        }
+        return node._teApp;
+    }
+    // Node survived a forced teardown (rare) — drop stale launcher widgets
+    // before constructing a fresh app that would add another.
+    if (node.widgets) {
+        for (let i = node.widgets.length - 1; i >= 0; i--) {
+            if (node.widgets[i]?.name === "te_launcher") node.widgets.splice(i, 1);
+        }
+    }
+    node._teApp = new CapTimelineEditorApp(node);
+    return node._teApp;
+}
+
 app.registerExtension({
     name: "Capricorncd.TimelineEditor",
 
@@ -90,6 +135,36 @@ app.registerExtension({
         // its undo can fire first and e.g. close the director's console.
         window.addEventListener("keydown", onTeGlobalKeyDown, true);
         hookQueuePrompt();
+        const bindGraphHooks = () => {
+            hookGraphSerialize();
+            hookGraphClear();
+        };
+        bindGraphHooks();
+
+        // Subgraph open/close swaps the live canvas graph without always
+        // removing parent nodes — only close the fullscreen shell here.
+        const bindSetGraph = () => {
+            const canvasEl = app.canvas?.canvas;
+            if (!canvasEl || canvasEl._capTeSetGraphHooked) return;
+            canvasEl._capTeSetGraphHooked = true;
+            canvasEl.addEventListener("litegraph:set-graph", () => {
+                CapTimelineEditorApp.closeOpenEditor();
+            });
+        };
+        bindSetGraph();
+        // canvas / graph may be created slightly after setup on some builds
+        setTimeout(() => {
+            bindGraphHooks();
+            bindSetGraph();
+        }, 0);
+    },
+
+    async beforeConfigureGraph() {
+        CapTimelineEditorApp.forceCloseAll();
+    },
+
+    async afterConfigureGraph() {
+        CapTimelineEditorApp.scrubGlobalUi();
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -133,11 +208,9 @@ app.registerExtension({
         if (node.comfyClass !== NODE_CLASS) return;
         markNoSerialize(node);
         node.setSize([1280, 720]);
-        if (!node._teApp) {
-            node._teApp = new CapTimelineEditorApp(node);
-        }
+        const te = ensureTimelineApp(node);
         hookScalarWidgets(node);
-        node._teApp._syncScalarsToProjectJson();
+        te._syncScalarsToProjectJson();
     },
 });
 

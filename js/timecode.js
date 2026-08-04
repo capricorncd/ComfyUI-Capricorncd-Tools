@@ -65,6 +65,62 @@ export function frameIndexFromSecs(secs, fps = 24) {
     return sec * fps + frame;
 }
 
+/**
+ * Round seconds to the same frame grid Clip._snap uses
+ * (`Math.round(secs * fps) / fps`).
+ */
+export function secsToSnapFrame(secs, fps = 24) {
+    fps = Math.max(1, Number(fps) || 24);
+    return Math.max(0, Math.round(Math.max(0, Number(secs) || 0) * fps));
+}
+
+export function snapFrameToSecs(frame, fps = 24) {
+    fps = Math.max(1, Number(fps) || 24);
+    return Math.max(0, Math.round(Number(frame) || 0)) / fps;
+}
+
+/**
+ * Encode snapped clip timing into start_ms/duration_ms.
+ * Adjacent frame-abutting clips share the same boundary ms so reload
+ * cannot create a 1ms overlap from independent Math.round(sec*1000).
+ */
+export function encodeClipTimingMs(startSec, durationSec, fps = 24) {
+    fps = Math.max(1, Number(fps) || 24);
+    const startFrame = secsToSnapFrame(startSec, fps);
+    const durFrames = Math.max(1, secsToSnapFrame(durationSec, fps));
+    const startMs = Math.round((startFrame * 1000) / fps);
+    const endMs = Math.round(((startFrame + durFrames) * 1000) / fps);
+    return {
+        startMs,
+        durationMs: Math.max(1, endMs - startMs),
+        endMs,
+        startFrame,
+        durFrames,
+    };
+}
+
+/**
+ * Decode stored ms back onto the snap-frame grid.
+ * Accepts legacy rows that only have end_ms (no duration_ms).
+ */
+export function decodeClipTimingSecs(startMs, durationMs, endMs = null, fps = 24) {
+    fps = Math.max(1, Number(fps) || 24);
+    const start = Math.max(0, Number(startMs) || 0);
+    const dur = Number(durationMs);
+    let end;
+    if (Number.isFinite(dur) && dur > 0) {
+        end = start + dur;
+    } else {
+        end = Math.max(start + 1, Number(endMs) || (start + Math.round(1000 / fps)));
+    }
+    const startFrame = Math.round((start * fps) / 1000);
+    const endFrame = Math.max(startFrame + 1, Math.round((end * fps) / 1000));
+    return {
+        startTime: startFrame / fps,
+        duration: (endFrame - startFrame) / fps,
+    };
+}
+
 /** Frame count between start/end times at given fps (matches displayed m:ss.ff boundaries). */
 export function segmentFrameCount(startMs, endMs, fps = 24) {
     fps = Math.max(1, Math.floor(fps));
