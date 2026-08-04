@@ -2458,11 +2458,6 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _audioUrl(filename) {
-        if (!filename) return null;
-        return this._assetFileUrl(filename, "audio", "input");
-    }
-
     async _syncProjectMedia() {
         if (!this._timeline) return;
         const wanted = new Map();
