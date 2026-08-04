@@ -219,7 +219,7 @@ export class CapTimelineEditorApp {
             configurable: true,
         });
         this.launcherWidget = w;
-        this.node.setSize([1280, 720]);
+        this.node.setSize([360, 280]);
     }
 
     open() {
@@ -1476,53 +1476,31 @@ export class CapTimelineEditorApp {
         return true;
     }
 
-    async _loadMediaList() {
-        try {
-            const r = await fetch(api.apiURL("/audio_keyframe_timeline/uploaded?kind=image"));
-            const d = await r.json();
-            this._imgFiles = Array.isArray(d.files) ? d.files : [];
-            for (const file of this._imgFiles) this._mediaStatus.set(`image:${file}`, { location: "input" });
-        } catch { this._imgFiles = []; }
-    }
-
     _imgUrl(file) {
         return this._assetFileUrl(file, "image", "input");
-    }
-
-    async _loadVideoFileList() {
-        try {
-            const r = await fetch(api.apiURL("/audio_keyframe_timeline/uploaded?kind=video"));
-            const d = await r.json();
-            this._videoFiles = Array.isArray(d.files) ? d.files : [];
-            for (const file of this._videoFiles) this._mediaStatus.set(`video:${file}`, { location: "input" });
-        } catch { this._videoFiles = []; }
     }
 
     _videoUrl(file) {
         return this._assetFileUrl(file, "video", "input");
     }
 
-    async _loadAudioFileList() {
-        try {
-            const r = await fetch(api.apiURL("/audio_keyframe_timeline/uploaded?kind=audio"));
-            const d = await r.json();
-            this._audioFiles = Array.isArray(d.files) ? d.files : [];
-            for (const file of this._audioFiles) this._mediaStatus.set(`audio:${file}`, { location: "input" });
-        } catch { this._audioFiles = []; }
+    _audioUrl(filename) {
+        if (!filename) return null;
+        return this._assetFileUrl(filename, "audio", "input");
     }
 
-    /** Load uploaded files, merge timeline/project refs (incl. missing), then redraw. */
+    /** Rebuild media lists from this project's resources + timeline refs only.
+     * Do not scan the whole ComfyUI input folder — a new empty node stays empty. */
     async _reloadMediaLibrary() {
         const btn = this._overlay?.querySelector(".cat-te-media-refresh");
         btn?.classList.add("spinning");
         this._videoThumbCache.clear();
         this._loadMediaStarsForDir();
         try {
-            await Promise.all([
-                this._loadMediaList(),
-                this._loadVideoFileList(),
-                this._loadAudioFileList(),
-            ]);
+            this._imgFiles = [];
+            this._videoFiles = [];
+            this._audioFiles = [];
+            this._mediaStatus.clear();
             await this._syncProjectMedia();
             this._renderMediaGrid();
         } finally {
@@ -1530,7 +1508,7 @@ export class CapTimelineEditorApp {
         }
     }
 
-    /** Re-scan uploaded input media for all three kinds, then redraw. */
+    /** Re-check project media status (missing / present), then redraw. */
     async _refreshMediaLists() {
         await this._reloadMediaLibrary();
     }
