@@ -20,21 +20,41 @@ class CAP_DataJsonClipParser:
                 "index": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
                                         "tooltip": "音频修剪偏移（秒），结束时间 = clip_end_ms + trim_offset × 1000"}),
+                "seq_name_mode": (
+                    ["from_start", "index"],
+                    {
+                        "default": "from_start",
+                        "tooltip": "序列帧合成视频文件名前缀后缀：from_start=FROM_… 标签，index=四位索引",
+                    },
+                ),
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING")
-    RETURN_NAMES = ("audio", "frame_count", "first_frame", "last_frame", "prompt")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING")
+    RETURN_NAMES = (
+        "audio",
+        "frame_count",
+        "first_frame",
+        "last_frame",
+        "prompt",
+        "run_prefix",
+        "generate_preview_video",
+        "from_start",
+        "from_preview_start",
+        "seq_filename_prefix",
+    )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "Parse data_json from Audio Timeline or Timeline Editor and extract a clip by index. "
-        "Outputs the clip audio segment, frame count, first/last keyframe images, and prompt."
+        "Outputs the clip audio segment, frame count, first/last keyframe images, prompt, "
+        "run_prefix, generate_preview_video, FROM_ tags, and seq_filename_prefix "
+        "(run_prefix/from_start or run_prefix/index) for Seq To Video."
     )
 
     @classmethod
-    def IS_CHANGED(cls, data_json, index, trim_offset):
-        return (data_json, index, trim_offset)
+    def IS_CHANGED(cls, data_json, index, trim_offset, seq_name_mode="from_start"):
+        return (data_json, index, trim_offset, seq_name_mode)
 
     def _load_waveform(self, audio_path: str):
         audio_path = os.path.normpath(str(audio_path or ""))
@@ -119,6 +139,30 @@ class CAP_DataJsonClipParser:
             return 1
         return max(1, int(round(duration_ms * fps / 1000)))
 
+    def _from_tag(self, start_ms: int, frame_count: int, fps: float) -> str:
+        """Filename tag: FROM_MMSS_ff_frames or FROM_HHMMSS_ff_frames (>=1h).
+
+        Negative start_ms (head-extend before 0) uses FROM_N… .
+        """
+        fps_i = max(1, int(round(float(fps) or 24)))
+        ms = int(start_ms)
+        neg = ms < 0
+        ms = abs(ms)
+        total_frames = int(round(ms * fps_i / 1000))
+        frames = total_frames % fps_i
+        total_seconds = total_frames // fps_i
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        frame_digits = max(2, len(str(fps_i - 1)))
+        frame_part = f"{frames:0{frame_digits}d}"
+        if hours > 0:
+            clock = f"{hours:02d}{minutes:02d}{seconds:02d}"
+        else:
+            clock = f"{minutes:02d}{seconds:02d}"
+        head = "FROM_N" if neg else "FROM_"
+        return f"{head}{clock}_{frame_part}_{max(1, int(frame_count))}"
+
     def _resolve_file_path(self, file_ref, location: str = "assets", assets_dir: str = "") -> str:
         return resolve_media_path(str(file_ref or ""), assets_dir=assets_dir, location=location)
 
@@ -191,7 +235,19 @@ class CAP_DataJsonClipParser:
             return self._silent_audio(sample_rate, output_ms)
         return self._pack(mixed, sample_rate)
 
-    def execute(self, data_json: str, index: int, trim_offset: int = 1):
+    def _seq_filename_prefix(self, run_prefix: str, from_start: str, index: int, mode: str) -> str:
+        """Build Seq-To-Video filename_prefix: run_prefix/from_start or run_prefix/index."""
+        mode = str(mode or "from_start").strip().lower()
+        if mode == "index":
+            leaf = f"{max(0, int(index)):04d}"
+        else:
+            leaf = str(from_start or "").strip() or f"{max(0, int(index)):04d}"
+        prefix = str(run_prefix or "").strip().replace("\\", "/").strip("/")
+        if prefix:
+            return f"{prefix}/{leaf}"
+        return leaf
+
+    def execute(self, data_json: str, index: int, trim_offset: int = 1, seq_name_mode: str = "from_start"):
         try:
             data = json.loads(data_json or "{}")
         except json.JSONDecodeError:
@@ -205,15 +261,33 @@ class CAP_DataJsonClipParser:
 
         fps = max(1.0, float(data.get("fps", 24.0)))
         global_prompt = data.get("global_prompt", "")
+        run_prefix = str(data.get("run_prefix") or "").strip()
 
         clip = clips[index] if clips and 0 <= index < len(clips) else {}
         if not isinstance(clip, dict):
             clip = {}
 
-        clip_start_ms = int(clip.get("start_ms", 0))
-        clip_end_ms = int(clip.get("end_ms", clip_start_ms))
+        clip_start_ms = int(clip.get("start_ms", 0) or 0)
+        clip_end_ms = int(clip.get("end_ms", clip_start_ms) or clip_start_ms)
         frame_count = self._frame_count(clip_start_ms, clip_end_ms, fps)
         prompt = self._compose_prompt(clip, global_prompt)
+        generate_preview_video = bool(clip.get("generate_preview_video", False))
+
+        preview_start_ms = clip.get("preview_start_ms", None)
+        preview_end_ms = clip.get("preview_end_ms", None)
+        try:
+            preview_start_ms = int(preview_start_ms) if preview_start_ms is not None else clip_start_ms
+        except (TypeError, ValueError):
+            preview_start_ms = clip_start_ms
+        try:
+            preview_end_ms = int(preview_end_ms) if preview_end_ms is not None else clip_end_ms
+        except (TypeError, ValueError):
+            preview_end_ms = clip_end_ms
+        preview_frame_count = self._frame_count(preview_start_ms, preview_end_ms, fps)
+
+        from_start = self._from_tag(clip_start_ms, frame_count, fps)
+        from_preview_start = self._from_tag(preview_start_ms, preview_frame_count, fps)
+        seq_filename_prefix = self._seq_filename_prefix(run_prefix, from_start, index, seq_name_mode)
 
         if self._uses_master_audio(data, clip):
             audio_out = self._clip_audio_from_master(data, clip, trim_offset)
@@ -228,7 +302,18 @@ class CAP_DataJsonClipParser:
         first_frame = _fi if _fi is not None else blank
         last_frame = _li if _li is not None else blank
 
-        return (audio_out, frame_count, first_frame, last_frame, prompt)
+        return (
+            audio_out,
+            frame_count,
+            first_frame,
+            last_frame,
+            prompt,
+            run_prefix,
+            generate_preview_video,
+            from_start,
+            from_preview_start,
+            seq_filename_prefix,
+        )
 
 
 NODE_CLASS_MAPPINGS = {"CAP_DataJsonClipParser": CAP_DataJsonClipParser}

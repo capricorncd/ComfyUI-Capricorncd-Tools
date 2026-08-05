@@ -151,6 +151,7 @@
   "height": 720,
   "global_prompt": "cinematic",
   "total_frame_count": 120,
+  "run_prefix": "20260805_224215",
   "clips": [
     {
       "id": "runtime_0001",
@@ -181,6 +182,7 @@
 
 | 字段 | 说明 |
 |------|------|
+| `run_prefix` | 本次执行生成的时间戳字符串（`YYYYMMDD_HHMMSS`），可直接用作统一文件名前缀 |
 | `start_ms` / `end_ms` | 运行时片段时间区间（毫秒） |
 | `start_image` / `end_image` | 经 ComfyUI `input` 解析后的绝对路径 |
 | `audios[]` | 与该视觉区间重叠的音/视频切片；由 [Data Json Clip Parser](data-json-clip-parser.md) 混音。非音频轨无素材的时间段内，音频不导出 |

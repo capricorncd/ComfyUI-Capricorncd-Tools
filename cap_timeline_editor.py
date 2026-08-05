@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -466,6 +467,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         # matching the frame sequence / total_frame_count timeline.
         clips_audio_out = self._concat_runtime_clips_audio(runtime_clips)
         frame_seq_dir = self._prepare_frame_seq_dir()
+        # Filesystem-safe stamp shared by this execute; downstream nodes can
+        # use it as a unified filename / folder prefix.
+        run_prefix = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         data_json = json.dumps({
             "project_version": PROJECT_VERSION,
             "schema_version": PROJECT_VERSION,
@@ -474,6 +478,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "height": height,
             "global_prompt": global_prompt,
             "total_frame_count": total_frame_count,
+            "run_prefix": run_prefix,
             "clips": runtime_clips,
         }, ensure_ascii=False)
 

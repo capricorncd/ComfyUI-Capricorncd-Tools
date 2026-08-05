@@ -69,14 +69,20 @@
     "inputs": {
       "data_json":    { "name": "Data JSON" },
       "index":        { "name": "Index" },
-      "trim_offset":  { "name": "Trim Offset (s)" }
+      "trim_offset":  { "name": "Trim Offset (s)" },
+      "seq_name_mode": { "name": "Seq Name Mode" }
     },
     "outputs": {
       "audio":       { "name": "Audio" },
       "frame_count": { "name": "Frame Count" },
       "first_frame": { "name": "First Frame" },
       "last_frame":  { "name": "Last Frame" },
-      "prompt":      { "name": "Prompt" }
+      "prompt":      { "name": "Prompt" },
+      "run_prefix":  { "name": "Run Prefix" },
+      "generate_preview_video": { "name": "Generate Preview Video" },
+      "from_start":  { "name": "FROM Start" },
+      "from_preview_start": { "name": "FROM Preview Start" },
+      "seq_filename_prefix": { "name": "Seq Filename Prefix" }
     }
   },
 
@@ -145,6 +151,20 @@
       "images":            { "name": "Images" },
       "audio":             { "name": "Audio" },
       "image_paths":       { "name": "Image File List" }
+    },
+    "outputs": {
+      "filename": { "name": "Filename" }
+    }
+  },
+
+  "CAP_ComposeClipVideos": {
+    "display_name": "Compose Clip Videos",
+    "inputs": {
+      "data_json":         { "name": "Data JSON" },
+      "clips_dir":         { "name": "Clips Dir" },
+      "name_mode":         { "name": "Name Mode" },
+      "filename_prefix":   { "name": "Output Filename Prefix" },
+      "trim_extends":      { "name": "Trim Extends" }
     },
     "outputs": {
       "filename": { "name": "Filename" }

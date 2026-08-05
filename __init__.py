@@ -19,6 +19,10 @@ from .cap_seq_to_video import (
     NODE_CLASS_MAPPINGS as _STV_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _STV_NAMES,
 )
+from .cap_compose_clip_videos import (
+    NODE_CLASS_MAPPINGS as _CCV_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CCV_NAMES,
+)
 from .cap_timeline_editor import (
     NODE_CLASS_MAPPINGS as _CTE_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CTE_NAMES,
@@ -69,6 +73,7 @@ NODE_CLASS_MAPPINGS = {
     **_CAT_CLASS,
     **_CDP_CLASS,
     **_STV_CLASS,
+    **_CCV_CLASS,
     **_CTE_CLASS,
     **_CSI_CLASS,
     **_CIB_CLASS,
@@ -84,6 +89,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CAT_NAMES,
     **_CDP_NAMES,
     **_STV_NAMES,
+    **_CCV_NAMES,
     **_CTE_NAMES,
     **_CSI_NAMES,
     **_CIB_NAMES,

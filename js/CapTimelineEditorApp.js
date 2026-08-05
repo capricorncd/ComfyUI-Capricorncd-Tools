@@ -411,7 +411,7 @@ export class CapTimelineEditorApp {
             this._mediaBatchSelected.clear();
             this._mediaListResizeObserver?.disconnect();
             this._mediaListResizeObserver = null;
-            try { this._clearClipInfoQueue(); } catch { /* overlay may be gone */ }
+            try { this._clearClipInfoPanel(); } catch { /* overlay may be gone */ }
         } finally {
             this._overlay?.classList.remove("open");
             document.body.classList.remove(...BODY_UI_CLASSES);
@@ -776,7 +776,10 @@ export class CapTimelineEditorApp {
     }
 
     _ensureOverlay() {
-        if (this._overlay) return;
+        if (this._overlay) {
+            this._syncClipSettingRefs();
+            return;
+        }
         const el = document.createElement("div");
         el.className = "cat-te-overlay";
         el.tabIndex = -1;
@@ -847,16 +850,16 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-gen-preview-video" type="checkbox" disabled />
                   <span>生成预览时长视频</span>
                 </label>
+                <label class="cat-te-clip-setting-check cat-te-use-global">
+                  <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
+                  <span>Use Global</span>
+                </label>
               </div>
               <div class="cat-te-prompt-wrap">
                 <div class="cat-te-prompt-label">Keyframe Prompt</div>
                 <div class="cat-te-prompt-input-wrap">
                   <textarea class="cat-te-prompt-input" placeholder="选中素材后编辑提示词…" disabled></textarea>
                 </div>
-                <label class="cat-te-use-global">
-                  <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
-                  <span>Use Global</span>
-                </label>
               </div>
               <div class="cat-te-shortcuts">
                 Ctrl+点击 多选 · Del 删除（确认）<br>
@@ -1092,9 +1095,12 @@ export class CapTimelineEditorApp {
         this.promptInput.addEventListener("blur", () => { this._promptUndoArmed = false; });
         this.promptInput.addEventListener("input", () => this._onPromptInput());
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
-        this.headExtendInput?.addEventListener("change", () => this._onHeadExtendChange());
-        this.tailExtendInput?.addEventListener("change", () => this._onTailExtendChange());
-        this.genPreviewVideoCb?.addEventListener("change", () => this._onGenPreviewVideoChange());
+        if (this.headExtendInput && !this.headExtendInput._catTeBound) {
+            this.headExtendInput._catTeBound = true;
+            this.headExtendInput.addEventListener("change", () => this._onHeadExtendChange());
+            this.tailExtendInput?.addEventListener("change", () => this._onTailExtendChange());
+            this.genPreviewVideoCb?.addEventListener("change", () => this._onGenPreviewVideoChange());
+        }
         this.clipThumbWrap?.addEventListener("click", () => {
             const clip = this._selClip;
             if (clip) this._openClipMediaPreview(clip);
@@ -3134,7 +3140,7 @@ export class CapTimelineEditorApp {
 
     _decorateClip(clip) {
         if (!clip?.el) return;
-        const m = this._meta.get(clip.id) ?? defaultImageMeta();
+        const m = this._ensureClipMeta(clip);
         const track = clip.track;
         const trackHidden = track.type === "image" && track.visible === false;
         const trackMuted = track.type === "audio" && track.muted;
@@ -3156,8 +3162,8 @@ export class CapTimelineEditorApp {
                     e.stopPropagation();
                     if (track.locked) return;
                     this._recordUndo();
-                    m.muted = !m.muted;
-                    this._meta.set(clip.id, m);
+                    const meta = this._ensureClipMeta(clip);
+                    meta.muted = !meta.muted;
                     this._decorateClip(clip);
                 });
                 clip.el.appendChild(muteBadge);
@@ -4819,7 +4825,7 @@ export class CapTimelineEditorApp {
             if (to.type === "audio") m.clipType = "audio";
             else m.clipType = "image";
             this._meta.set(clip.id, m);
-            this._updateClipInfoQueue(clip);
+            this._updateClipInfoPanel(clip);
             this._pruneEmptyTrack(from);
             this._scheduleProgramPreview();
         });
@@ -4828,12 +4834,12 @@ export class CapTimelineEditorApp {
             this._scheduleProgramPreview();
         });
         tl.on("clip:move", ({ clip }) => {
-            if (this._selClip?.id === clip.id) this._updateClipInfoQueue(clip);
+            if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
             this._refreshTimelineDuration();
             this._scheduleProgramPreview();
         });
         tl.on("clip:resize", ({ clip }) => {
-            if (this._selClip?.id === clip.id) this._updateClipInfoQueue(clip);
+            if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
             this._refreshTimelineDuration();
             this._scheduleProgramPreview();
         });
@@ -4921,19 +4927,50 @@ export class CapTimelineEditorApp {
         this.clipDurEl.textContent = `时长 ${tl.formatTime(clip.duration)}（总帧数 ${totalFrames}）`;
     }
 
+    /** Ensure `_meta` has an entry for `clip` (create defaults if missing). */
+    _ensureClipMeta(clip) {
+        if (!clip) return null;
+        let m = this._meta.get(clip.id);
+        if (m) return m;
+        const ti = this._trackIndex(clip.track);
+        m = clip.track?.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti);
+        this._meta.set(clip.id, m);
+        return m;
+    }
+
+    /** Re-resolve right-panel setting controls if refs are stale/missing. */
+    _syncClipSettingRefs() {
+        const el = this._overlay;
+        if (!el) return;
+        const head = el.querySelector(".cat-te-head-extend");
+        const tail = el.querySelector(".cat-te-tail-extend");
+        const gen = el.querySelector(".cat-te-gen-preview-video");
+        if (!head) return;
+        if (head === this.headExtendInput && tail === this.tailExtendInput && gen === this.genPreviewVideoCb) {
+            return;
+        }
+        this.headExtendInput = head;
+        this.tailExtendInput = tail;
+        this.genPreviewVideoCb = gen;
+        if (!head._catTeBound) {
+            head._catTeBound = true;
+            head.addEventListener("change", () => this._onHeadExtendChange());
+            tail?.addEventListener("change", () => this._onTailExtendChange());
+            gen?.addEventListener("change", () => this._onGenPreviewVideoChange());
+        }
+    }
+
     _updatePromptPanel() {
         const clip = this._syncSelectedClip();
-        const m = clip ? this._meta.get(clip.id) : null;
-        const isAudio = clip?.track?.type === "audio" || m?.clipType === "audio";
-        const isVisual = clip && m && !isAudio;
-        this._updateClipInfoView(clip);
-        const label = this._overlay.querySelector(".cat-te-prompt-label");
+        this._syncClipSettingRefs();
+        this._updateClipInfoPanel(clip);
+        // Visual vs audio is owned by the track; don't require `_meta` to already exist.
+        const isAudio = clip?.track?.type === "audio";
+        const m = clip ? this._ensureClipMeta(clip) : null;
+        const isVisual = !!(clip && !isAudio);
+        const label = this._overlay?.querySelector(".cat-te-prompt-label");
         if (isVisual) {
-            this.promptInput.disabled = false;
-            this.useGlobalCb.disabled = false;
-            setRichPromptValue(this.promptInput, m.prompt ?? "");
-            this.useGlobalCb.checked = m.useGlobalPrompt !== false;
-            label.textContent = "Keyframe Prompt";
+            // Enable clip settings first so a later prompt-mirror error cannot leave them stuck disabled.
             if (this.headExtendInput) {
                 this.headExtendInput.disabled = false;
                 this.headExtendInput.value = String(Math.max(0, Math.round(Number(m.headExtendSec) || 0)));
@@ -4946,11 +4983,14 @@ export class CapTimelineEditorApp {
                 this.genPreviewVideoCb.disabled = false;
                 this.genPreviewVideoCb.checked = !!m.generatePreviewVideo;
             }
+            if (this.promptInput) this.promptInput.disabled = false;
+            if (this.useGlobalCb) {
+                this.useGlobalCb.disabled = false;
+                this.useGlobalCb.checked = m.useGlobalPrompt !== false;
+            }
+            setRichPromptValue(this.promptInput, m.prompt ?? "", true);
+            if (label) label.textContent = "Keyframe Prompt";
         } else {
-            this.promptInput.disabled = true;
-            this.useGlobalCb.disabled = true;
-            setRichPromptValue(this.promptInput, "");
-            label.textContent = isAudio ? "音频素材（无提示词）" : "Keyframe Prompt";
             if (this.headExtendInput) {
                 this.headExtendInput.disabled = true;
                 this.headExtendInput.value = "0";
@@ -4963,6 +5003,10 @@ export class CapTimelineEditorApp {
                 this.genPreviewVideoCb.disabled = true;
                 this.genPreviewVideoCb.checked = false;
             }
+            if (this.promptInput) this.promptInput.disabled = true;
+            if (this.useGlobalCb) this.useGlobalCb.disabled = true;
+            setRichPromptValue(this.promptInput, "", false);
+            if (label) label.textContent = isAudio ? "音频素材（无提示词）" : "Keyframe Prompt";
         }
     }
 

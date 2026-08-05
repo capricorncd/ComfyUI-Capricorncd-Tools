@@ -97,10 +97,14 @@ Adds extra seconds to the clip's audio end time. This is useful when the generat
 | Name | Type | Description |
 |------|------|-------------|
 | `audio` | AUDIO | Audio for this clip (extended by `trim_offset` seconds) |
-| `frame_count` | INT | Number of frames in this clip at the timeline FPS |
+| `frame_count` | INT | Frame count for the extended runtime range |
 | `first_frame` | IMAGE | Start keyframe image; 64×64 blank if none assigned |
 | `last_frame` | IMAGE | End keyframe image; 64×64 blank if none assigned |
 | `prompt` | STRING | Per-clip prompt, or `global_prompt` if the clip has none |
+| `run_prefix` | STRING | Top-level `run_prefix` (`YYYYMMDD_HHMMSS`) for shared filename prefixes |
+| `generate_preview_video` | BOOLEAN | Whether to also generate a preview-duration video |
+| `from_start` | STRING | Extended start tag, e.g. `FROM_0010_12_480`; negative times use `FROM_N…` |
+| `from_preview_start` | STRING | Preview (original timeline) start tag, e.g. `FROM_0012_12_432` |
 
 ---
 

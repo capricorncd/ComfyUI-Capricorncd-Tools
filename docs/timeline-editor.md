@@ -6,6 +6,8 @@ Fullscreen multi-track timeline editor for image / video / audio projects. Unlik
 
 Open the editor from the node launcher (fullscreen shell). Edits sync back into the node's `project_json` widget.
 
+![timeline-editor](./timeline-editor.jpg)
+
 ---
 
 ## Compared with Audio Timeline
@@ -151,6 +153,7 @@ The fullscreen editor owns this document; you normally do not edit it by hand.
   "height": 720,
   "global_prompt": "cinematic",
   "total_frame_count": 120,
+  "run_prefix": "20260805_224215",
   "clips": [
     {
       "id": "runtime_0001",
@@ -181,6 +184,7 @@ The fullscreen editor owns this document; you normally do not edit it by hand.
 
 | Field | Description |
 |-------|-------------|
+| `run_prefix` | Per-execute timestamp string (`YYYYMMDD_HHMMSS`) for a shared filename / folder prefix |
 | `start_ms` / `end_ms` | Runtime clip time range (ms) |
 | `start_image` / `end_image` | Absolute paths resolved via ComfyUI `input` |
 | `audios[]` | Audio/video slices overlapping this visual range; mixed by [Data Json Clip Parser](data-json-clip-parser.md) |
