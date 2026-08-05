@@ -2214,7 +2214,7 @@ export class CapTimelineEditorApp {
             setTimeout(() => this._showDropActionMenu(file, targetClip, x, y), 0);
             return;
         }
-        const t = tl.clientXToTime(clientX);
+        const t = tl.currentTime;
         if (kind === "audio") void this._addAudioAtTime(file, t, clientY);
         else if (kind === "video") void this._addVideoAtTime(file, t, clientY);
         else void this._addImageAtTime(file, t, clientY);
