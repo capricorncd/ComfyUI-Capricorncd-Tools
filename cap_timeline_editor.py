@@ -423,18 +423,39 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             source = self._source(clip)
             start_image = str(source.get("file") or clip.get("start_image") or "")
             end_image = str(clip.get("end_image") or "")
+            try:
+                head_sec = max(0, int(clip.get("head_extend_sec", 0) or 0))
+            except (TypeError, ValueError):
+                head_sec = 0
+            try:
+                tail_sec = max(0, int(clip.get("tail_extend_sec", 0) or 0))
+            except (TypeError, ValueError):
+                tail_sec = 0
+            head_ms = int(round(head_sec * 1000))
+            tail_ms = int(round(tail_sec * 1000))
+            # Extended range may start before 0 (negative start_ms). Audio mix
+            # pads leading silence for that overhang; timeline geometry is unchanged.
+            ext_start = int(start) - head_ms
+            ext_end = int(end) + tail_ms
+            if ext_end <= ext_start:
+                ext_end = ext_start + 1
             runtime_clips.append({
                 "id": f"runtime_{index:04d}",
                 "source_clip_id": str(clip.get("id", "")),
                 "clip_type": str(clip.get("type") or "image"),
-                "start_ms": start,
-                "end_ms": end,
+                "start_ms": ext_start,
+                "end_ms": ext_end,
+                "preview_start_ms": int(start),
+                "preview_end_ms": int(end),
+                "head_extend_sec": head_sec,
+                "tail_extend_sec": tail_sec,
+                "generate_preview_video": bool(clip.get("generate_preview_video", False)),
                 "start_image": resolve_media(start_image),
                 "end_image": resolve_media(end_image) if end_image else "",
                 "prompt": _strip_comment_lines(clip.get("prompt") or ""),
                 "use_global_prompt": _clip_use_global_prompt(clip),
                 "z_index": z_index,
-                "audios": self._audio_slices(start, end, audio_clips, resolve_media),
+                "audios": self._audio_slices(ext_start, ext_end, audio_clips, resolve_media),
             })
 
         total_frame_count = max(1, sum(
