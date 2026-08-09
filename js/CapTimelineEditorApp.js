@@ -882,7 +882,7 @@ export class CapTimelineEditorApp {
           </div>
           <footer class="cat-te-footer">
             <div class="cat-te-footer-center"></div>
-            <input class="cat-te-add-material-file" type="file" accept="image/*,video/*,audio/*" hidden />
+            <input class="cat-te-add-material-file" type="file" accept="image/*,video/*,audio/*" multiple hidden />
           </footer>
           <div class="cat-te-frame-preview"></div>
           <div class="cat-te-modal-backdrop cat-te-media-preview-modal" hidden>
@@ -3750,6 +3750,8 @@ export class CapTimelineEditorApp {
     _chooseMaterialFile(relink = null) {
         this._pendingRelink = relink;
         this.addMaterialInput.value = "";
+        // Replace mode is always single-file; add mode supports multi-select.
+        this.addMaterialInput.multiple = !relink;
         if (relink?.kind === "image") this.addMaterialInput.accept = "image/*";
         else if (relink?.kind === "video") this.addMaterialInput.accept = "video/*";
         else if (relink?.kind === "audio") this.addMaterialInput.accept = "audio/*";
@@ -3766,94 +3768,150 @@ export class CapTimelineEditorApp {
         return null;
     }
 
-    _setAddMaterialMode(isReplace) {
+    _setAddMaterialMode(isReplace, count = 1) {
         if (this.addMaterialTitle) {
-            this.addMaterialTitle.textContent = isReplace ? "替换素材" : "添加素材";
+            if (isReplace) this.addMaterialTitle.textContent = "替换素材";
+            else this.addMaterialTitle.textContent = count > 1 ? `添加素材（${count}）` : "添加素材";
         }
         if (this.addMaterialConfirmBtn) {
             this.addMaterialConfirmBtn.textContent = isReplace ? "确认替换" : "确认";
         }
     }
 
-    _previewSelectedMaterial(event) {
-        const file = event.target.files?.[0];
-        event.target.value = "";
-        if (!file) {
-            this._pendingRelink = null;
-            return;
-        }
-        const kind = this._materialKind(file);
-        if (!kind) { alert("不支持的素材格式"); this._pendingRelink = null; return; }
-        if (this._pendingRelink && this._pendingRelink.kind !== kind) {
-            const expect = this._pendingRelink.kind === "image" ? "图片"
-                : this._pendingRelink.kind === "video" ? "视频" : "音频";
-            alert(`请选择同类型的${expect}文件`);
-            this._pendingRelink = null;
-            return;
-        }
-        this._pendingMaterial = { file, kind, objectUrl: URL.createObjectURL(file), relink: this._pendingRelink };
-        this._pendingRelink = null;
+    _renderAddMaterialPreview(items) {
         this.addMaterialPreview.replaceChildren();
-        const media = document.createElement(kind === "image" ? "img" : kind);
-        media.src = this._pendingMaterial.objectUrl;
-        if (kind !== "image") media.controls = true;
-        this.addMaterialPreview.appendChild(media);
+        const list = document.createElement("div");
+        list.className = "cat-te-add-material-list";
+        for (const item of items) {
+            const cell = document.createElement("div");
+            cell.className = "cat-te-add-material-item";
+            const media = document.createElement(item.kind === "image" ? "img" : item.kind);
+            media.src = item.objectUrl;
+            media.className = "cat-te-add-material-thumb";
+            if (item.kind !== "image") media.controls = true;
+            const name = document.createElement("div");
+            name.className = "cat-te-add-material-item-name";
+            name.textContent = item.file.name;
+            name.title = item.file.name;
+            cell.append(media, name);
+            list.appendChild(cell);
+        }
+        this.addMaterialPreview.appendChild(list);
+    }
+
+    _previewSelectedMaterial(event) {
+        const fileList = Array.from(event.target.files || []);
+        event.target.value = "";
+        const relink = this._pendingRelink;
+        this._pendingRelink = null;
+        if (!fileList.length) return;
+
+        if (relink && fileList.length > 1) {
+            alert("替换素材一次只能选择一个文件");
+            return;
+        }
+
+        const items = [];
+        const unsupported = [];
+        for (const file of fileList) {
+            const kind = this._materialKind(file);
+            if (!kind) {
+                unsupported.push(file.name);
+                continue;
+            }
+            if (relink && relink.kind !== kind) {
+                const expect = relink.kind === "image" ? "图片"
+                    : relink.kind === "video" ? "视频" : "音频";
+                alert(`请选择同类型的${expect}文件`);
+                return;
+            }
+            items.push({ file, kind, objectUrl: URL.createObjectURL(file) });
+        }
+        if (!items.length) {
+            alert(unsupported.length ? `不支持的素材格式：\n${unsupported.slice(0, 8).join("\n")}` : "不支持的素材格式");
+            return;
+        }
+        if (unsupported.length) {
+            alert(`已忽略 ${unsupported.length} 个不支持的文件：\n${unsupported.slice(0, 8).join("\n")}`);
+        }
+
+        this._pendingMaterial = { items, relink };
+        this._renderAddMaterialPreview(items);
         this.insertAfterAddCb.checked = false;
-        this.insertAfterAddCb.closest("label").hidden = !!this._pendingMaterial.relink;
-        this._setAddMaterialMode(!!this._pendingMaterial.relink);
+        this.insertAfterAddCb.closest("label").hidden = !!relink;
+        this._setAddMaterialMode(!!relink, items.length);
         this.addMaterialModal.hidden = false;
     }
 
     _closeAddMaterial() {
         if (!this.addMaterialModal) return;
         for (const media of this.addMaterialPreview.querySelectorAll("audio, video")) media.pause();
-        if (this._pendingMaterial?.objectUrl) URL.revokeObjectURL(this._pendingMaterial.objectUrl);
+        for (const item of this._pendingMaterial?.items || []) {
+            if (item.objectUrl) URL.revokeObjectURL(item.objectUrl);
+        }
         this._pendingMaterial = null;
         this._pendingRelink = null;
         this.addMaterialPreview.replaceChildren();
         this._setAddMaterialMode(false);
         this.addMaterialInput.accept = "image/*,video/*,audio/*";
+        this.addMaterialInput.multiple = true;
         this.addMaterialModal.hidden = true;
+    }
+
+    async _uploadMaterialItem(item) {
+        const form = new FormData();
+        form.append("kind", item.kind);
+        form.append("to_assets", "false");
+        form.append("file", item.file, item.file.name);
+        const response = await fetch(api.apiURL("/audio_keyframe_timeline/import_asset"), { method: "POST", body: form });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        return { file: result.file, kind: item.kind, location: result.location };
     }
 
     async _confirmAddMaterial() {
         const pending = this._pendingMaterial;
-        if (!pending) return;
+        const items = pending?.items || [];
+        if (!items.length) return;
         const relink = pending.relink;
         if (relink) {
             const oldName = String(relink.file || "").split(/[\\/]/).pop() || relink.file;
-            const newName = pending.file?.name || "新素材";
+            const newName = items[0].file?.name || "新素材";
             if (!confirm(`确定用「${newName}」替换「${oldName}」？\n时间轴上引用该素材的片段将一并更新。`)) {
                 return;
             }
         }
-        const form = new FormData();
-        form.append("kind", pending.kind);
-        form.append("to_assets", "false");
-        form.append("file", pending.file, pending.file.name);
+        const shouldInsert = this.insertAfterAddCb.checked && !relink;
+        const confirmBtn = this.addMaterialConfirmBtn;
+        if (confirmBtn) confirmBtn.disabled = true;
         try {
-            const response = await fetch(api.apiURL("/audio_keyframe_timeline/import_asset"), { method: "POST", body: form });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-            const shouldInsert = this.insertAfterAddCb.checked && !relink;
-            const kind = pending.kind;
+            const uploaded = [];
+            for (const item of items) {
+                uploaded.push(await this._uploadMaterialItem(item));
+            }
             this._closeAddMaterial();
             if (relink) {
-                // Update the original library entry in place (do not leave a
-                // missing stub alongside a newly registered file).
-                this._replaceMediaReference(relink.file, result.file, kind);
+                this._replaceMediaReference(relink.file, uploaded[0].file, uploaded[0].kind);
                 this._saveToWidgets();
             } else {
-                this._registerMediaFile(result.file, kind, result.location);
+                for (const u of uploaded) this._registerMediaFile(u.file, u.kind, u.location);
             }
             this._renderMediaGrid();
-            if (shouldInsert) {
-                if (kind === "audio") await this._addAudioAtPlayhead(result.file);
-                else if (kind === "video") await this._addVideoAtPlayhead(result.file);
-                else await this._addMediaAtPlayhead(result.file);
+            if (shouldInsert && this._timeline) {
+                let at = this._timeline.currentTime;
+                for (const u of uploaded) {
+                    this._timeline.setCurrentTime(at, { userSeek: false });
+                    if (u.kind === "audio") await this._addAudioAtPlayhead(u.file);
+                    else if (u.kind === "video") await this._addVideoAtPlayhead(u.file);
+                    else await this._addMediaAtPlayhead(u.file);
+                    const clip = this.getSelectedClip();
+                    if (clip) at = clip.endTime;
+                }
             }
         } catch (error) {
             alert(`${relink ? "替换" : "添加"}素材失败：${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            if (confirmBtn) confirmBtn.disabled = false;
         }
     }
 
@@ -4809,8 +4867,8 @@ export class CapTimelineEditorApp {
         const materialBtn = document.createElement("button");
         materialBtn.type = "button";
         materialBtn.className = "tl-btn tl-btn-insert-material";
-        materialBtn.title = "插入素材";
-        materialBtn.textContent = "插入素材";
+        materialBtn.title = "添加素材（可多选）";
+        materialBtn.textContent = "添加素材";
         materialBtn.addEventListener("click", () => this._chooseMaterialFile());
         tl.toolbarEl.appendChild(materialBtn);
 
