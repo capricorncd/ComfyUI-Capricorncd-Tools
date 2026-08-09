@@ -1072,6 +1072,37 @@ body.cat-te-row-resize * {
     background: rgba(91, 78, 255, 0.03);
 }
 
+/* OS file drop targets (media library / timeline) */
+.cat-te-media.cat-te-file-drop-over {
+    box-shadow: inset 0 0 0 2px rgba(91, 78, 255, 0.55);
+    background: rgba(91, 78, 255, 0.06);
+}
+.cat-te-timeline-host.cat-te-file-drop-over {
+    box-shadow: inset 0 0 0 2px rgba(91, 78, 255, 0.55);
+    border-radius: 4px;
+}
+.cat-te-timeline-host.cat-te-file-drop-over .tl-scroll {
+    box-shadow: inset 0 0 0 2px rgba(91, 78, 255, 0.45);
+    background: rgba(91, 78, 255, 0.03);
+}
+.cat-te-file-drop-status {
+    position: absolute;
+    left: 50%;
+    bottom: 72px;
+    transform: translateX(-50%);
+    z-index: 100020;
+    max-width: min(520px, 80vw);
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid #5b4eff;
+    background: rgba(14, 14, 28, 0.94);
+    color: #e8e0ff;
+    font-size: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+}
+.cat-te-file-drop-status[hidden] { display: none !important; }
+
 /* Pointer-drag ghost for media → timeline (Tauri/WebView2-safe) */
 .cat-te-media-drag-ghost {
     position: fixed;

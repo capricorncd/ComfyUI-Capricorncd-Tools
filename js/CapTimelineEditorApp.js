@@ -174,6 +174,8 @@ export class CapTimelineEditorApp {
         this._dndMedia = null;
         this._dndHoverClip = null;
         this._abortMediaDrag = null;
+        /** Guard against overlapping OS file drops / uploads. */
+        this._fileDropBusy = false;
         this._previewImages = new Map();
         this._previewVideos = new Map();
         this._programPreviewRaf = 0;
@@ -318,6 +320,8 @@ export class CapTimelineEditorApp {
         this._applySavedMediaPanelWidth();
         this._applySavedSidebarPanelWidth();
         this._applySavedProgramPanelHeight();
+        // Bind (or re-bind) OS file drops — overlay may predate this feature.
+        this._bindExternalFileDrop();
         await this._initTimelineFromWidgets();
         if (gen !== this._openGen || CapTimelineEditorApp._open !== this || !this._overlay?.classList.contains("open")) {
             this._timeline?.destroy();
@@ -1149,6 +1153,7 @@ export class CapTimelineEditorApp {
         this._bindSidebarPanelResize();
         this._applySavedProgramPanelHeight();
         this._bindProgramPanelResize();
+        this._bindExternalFileDrop();
     }
 
     _mediaPanelMaxWidth() {
@@ -1971,7 +1976,7 @@ export class CapTimelineEditorApp {
         if (!this._imgFiles.length) {
             const msg = document.createElement("div");
             msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
-            msg.textContent = "暂无上传图片，点击上方按钮添加";
+            msg.textContent = "暂无图片，拖入文件或点「添加素材」";
             this.mediaGrid.appendChild(msg);
             return;
         }
@@ -1992,7 +1997,7 @@ export class CapTimelineEditorApp {
         if (!this._audioFiles.length) {
             const msg = document.createElement("div");
             msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
-            msg.textContent = "暂无上传音频，点击上方按钮添加";
+            msg.textContent = "暂无音频，拖入文件或点「添加素材」";
             this.mediaGrid.appendChild(msg);
             return;
         }
@@ -2013,7 +2018,7 @@ export class CapTimelineEditorApp {
         if (!this._videoFiles.length) {
             const msg = document.createElement("div");
             msg.style.cssText = "width:100%;font-size:10px;color:#666;padding:8px";
-            msg.textContent = "暂无上传视频，点击上方按钮添加";
+            msg.textContent = "暂无视频，拖入文件或点「添加素材」";
             this.mediaGrid.appendChild(msg);
             return;
         }
@@ -2254,12 +2259,14 @@ export class CapTimelineEditorApp {
     }
 
     _updateMediaDragHover(clientX, clientY) {
+        const host = this.tlHost;
         const scroll = this._timeline?.scrollEl;
-        if (!scroll) return;
-        const r = scroll.getBoundingClientRect();
+        if (!host && !scroll) return;
+        const r = (host || scroll).getBoundingClientRect();
         const over = clientX >= r.left && clientX <= r.right
             && clientY >= r.top && clientY <= r.bottom;
-        scroll.classList.toggle("cat-te-drop-active", over);
+        host?.classList.toggle("cat-te-file-drop-over", over);
+        scroll?.classList.toggle("cat-te-drop-active", over);
         document.body.classList.toggle("cat-te-media-dnd-over-tl", over);
 
         const prev = this._dndHoverClip;
@@ -2275,6 +2282,7 @@ export class CapTimelineEditorApp {
         item?.classList.remove("dragging");
         ghost?.remove();
         document.body.classList.remove("cat-te-media-dnd", "cat-te-media-dnd-over-tl");
+        this.tlHost?.classList.remove("cat-te-file-drop-over");
         this._timeline?.scrollEl?.classList.remove("cat-te-drop-active");
         this._dndHoverClip?.el?.classList.remove("cat-te-drop-target");
         // Keep _dndHoverClip until _commitMediaDrop reads it.
@@ -2283,9 +2291,11 @@ export class CapTimelineEditorApp {
     _commitMediaDrop(media, clientX, clientY) {
         const tl = this._timeline;
         if (!tl || !media?.file) return;
-        const scroll = tl.scrollEl;
-        if (!scroll) return;
-        const r = scroll.getBoundingClientRect();
+        // Hit-test the whole timeline host (not only scrollEl) so drops on
+        // track headers / padding still count.
+        const host = this.tlHost || tl.scrollEl;
+        if (!host) return;
+        const r = host.getBoundingClientRect();
         if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return;
 
         const { kind, file } = media;
@@ -3768,6 +3778,219 @@ export class CapTimelineEditorApp {
         return null;
     }
 
+    _materialItemsFromFiles(fileList, { withObjectUrl = false } = {}) {
+        const items = [];
+        const unsupported = [];
+        for (const file of fileList || []) {
+            const kind = this._materialKind(file);
+            if (!kind) {
+                unsupported.push(file?.name || "未知文件");
+                continue;
+            }
+            const item = { file, kind };
+            if (withObjectUrl) item.objectUrl = URL.createObjectURL(file);
+            items.push(item);
+        }
+        return { items, unsupported };
+    }
+
+    _isExternalFileDrag(event) {
+        const dt = event?.dataTransfer;
+        if (!dt) return false;
+        // On drop, files is populated; during dragover it is often empty.
+        if (dt.files && dt.files.length > 0) return true;
+        if (dt.items && dt.items.length) {
+            for (let i = 0; i < dt.items.length; i++) {
+                if (dt.items[i]?.kind === "file") return true;
+            }
+        }
+        const types = dt.types;
+        if (!types) return false;
+        for (let i = 0; i < types.length; i++) {
+            const t = String(types[i] || "").toLowerCase();
+            if (t === "files" || t.includes("filename") || t.includes("file")) return true;
+        }
+        return false;
+    }
+
+    _filesFromDataTransfer(dt) {
+        if (!dt) return [];
+        if (dt.files?.length) return Array.from(dt.files);
+        const out = [];
+        if (dt.items) {
+            for (let i = 0; i < dt.items.length; i++) {
+                const item = dt.items[i];
+                if (item?.kind !== "file") continue;
+                const file = item.getAsFile?.();
+                if (file) out.push(file);
+            }
+        }
+        return out;
+    }
+
+    _fileDropModeAt(clientX, clientY) {
+        const el = document.elementFromPoint(clientX, clientY);
+        if (!el || !this._overlay?.contains(el)) return null;
+        if (el.closest(".cat-te-media")) return "library";
+        if (el.closest(".cat-te-timeline-host, .tl-root, .tl-scroll, .tl-main, .cat-te-center")) {
+            return "timeline";
+        }
+        return "library";
+    }
+
+    _setFileDropHighlight(mode) {
+        this.mediaPanel?.classList.toggle("cat-te-file-drop-over", mode === "library");
+        this.tlHost?.classList.toggle("cat-te-file-drop-over", mode === "timeline");
+        this._timeline?.scrollEl?.classList.toggle("cat-te-drop-active", mode === "timeline");
+        document.body.classList.toggle("cat-te-media-dnd-over-tl", mode === "timeline");
+    }
+
+    _showFileDropStatus(text) {
+        let bar = this._overlay?.querySelector(".cat-te-file-drop-status");
+        if (!bar && this._overlay) {
+            bar = document.createElement("div");
+            bar.className = "cat-te-file-drop-status";
+            this._overlay.appendChild(bar);
+        }
+        if (!bar) return;
+        bar.textContent = text || "";
+        bar.hidden = !text;
+    }
+
+    /**
+     * Accept OS file drops on the media library and timeline.
+     * Uses capture on the fullscreen overlay so nested timeline widgets
+     * cannot swallow dragover (which would block drop entirely).
+     */
+    _bindExternalFileDrop() {
+        const overlay = this._overlay;
+        if (!overlay) return;
+        if (this.mediaPanel) {
+            this.mediaPanel.title = "可从系统拖入图片 / 视频 / 音频文件";
+        }
+        if (overlay._catTeFileDropBound) return;
+        overlay._catTeFileDropBound = true;
+
+        const onDragEnterOrOver = (e) => {
+            if (!overlay.classList.contains("open")) return;
+            if (!this._isExternalFileDrag(e)) return;
+            // Required: without preventDefault the browser never fires drop.
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+            if (this._modalsBlockFileDrop()) {
+                this._setFileDropHighlight(null);
+                return;
+            }
+            this._setFileDropHighlight(this._fileDropModeAt(e.clientX, e.clientY));
+        };
+
+        const onDragLeave = (e) => {
+            if (!overlay.classList.contains("open")) return;
+            const next = e.relatedTarget;
+            if (next && overlay.contains(next)) return;
+            this._setFileDropHighlight(null);
+        };
+
+        const onDrop = (e) => {
+            if (!overlay.classList.contains("open")) return;
+            const files = this._filesFromDataTransfer(e.dataTransfer);
+            if (!files.length && !this._isExternalFileDrag(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const mode = this._fileDropModeAt(e.clientX, e.clientY) || "library";
+            this._setFileDropHighlight(null);
+            void this._onExternalFilesDropped(files, mode, e.clientY);
+        };
+
+        overlay.addEventListener("dragenter", onDragEnterOrOver, true);
+        overlay.addEventListener("dragover", onDragEnterOrOver, true);
+        overlay.addEventListener("dragleave", onDragLeave, true);
+        overlay.addEventListener("drop", onDrop, true);
+
+        // Some hosts only deliver drag events on window; keep drop alive while open.
+        const onWinDragOver = (e) => {
+            if (!overlay.classList.contains("open")) return;
+            if (!this._isExternalFileDrag(e)) return;
+            e.preventDefault();
+        };
+        const onWinDrop = (e) => {
+            if (!overlay.classList.contains("open")) return;
+            const files = this._filesFromDataTransfer(e.dataTransfer);
+            if (!files.length) return;
+            // Only claim drops that land inside the editor.
+            if (!overlay.contains(e.target) && this._fileDropModeAt(e.clientX, e.clientY) == null) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const mode = this._fileDropModeAt(e.clientX, e.clientY) || "library";
+            this._setFileDropHighlight(null);
+            void this._onExternalFilesDropped(files, mode, e.clientY);
+        };
+        window.addEventListener("dragover", onWinDragOver, true);
+        window.addEventListener("drop", onWinDrop, true);
+        overlay._catTeFileDropWinCleanup = () => {
+            window.removeEventListener("dragover", onWinDragOver, true);
+            window.removeEventListener("drop", onWinDrop, true);
+        };
+    }
+
+    _switchMediaTab(kind) {
+        if (!kind || !["image", "video", "audio"].includes(kind)) return;
+        this._mediaTab = kind;
+        this._overlay?.querySelectorAll(".cat-te-tab").forEach((btn) => {
+            btn.classList.toggle("active", btn.dataset.tab === kind);
+        });
+    }
+
+    _modalsBlockFileDrop() {
+        return Boolean(
+            (this.addMaterialModal && !this.addMaterialModal.hidden)
+            || (this.mediaPreviewModal && !this.mediaPreviewModal.hidden)
+            || (this.settingsModal && !this.settingsModal.hidden),
+        );
+    }
+
+    async _onExternalFilesDropped(fileList, mode, clientY = null) {
+        if (!this._overlay?.classList.contains("open") || this._modalsBlockFileDrop()) return;
+        if (this._fileDropBusy) return;
+
+        const { items, unsupported } = this._materialItemsFromFiles(fileList || []);
+        if (!items.length) {
+            alert(unsupported.length
+                ? `不支持的素材格式：\n${unsupported.slice(0, 8).join("\n")}`
+                : "未检测到可导入的图片 / 视频 / 音频文件");
+            return;
+        }
+        if (unsupported.length) {
+            alert(`已忽略 ${unsupported.length} 个不支持的文件：\n${unsupported.slice(0, 8).join("\n")}`);
+        }
+
+        this._fileDropBusy = true;
+        this._showFileDropStatus(
+            mode === "timeline"
+                ? `正在导入并插入 ${items.length} 个素材…`
+                : `正在导入 ${items.length} 个素材…`,
+        );
+        try {
+            await this._importMaterialItems(items, {
+                insertToTimeline: mode === "timeline",
+                clientY,
+            });
+            this._showFileDropStatus(
+                mode === "timeline"
+                    ? `已插入 ${items.length} 个素材`
+                    : `已添加 ${items.length} 个素材`,
+            );
+            setTimeout(() => {
+                if (!this._fileDropBusy) this._showFileDropStatus("");
+            }, 1600);
+        } catch (error) {
+            this._showFileDropStatus("");
+            alert(`导入素材失败：${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            this._fileDropBusy = false;
+        }
+    }
+
     _setAddMaterialMode(isReplace, count = 1) {
         if (this.addMaterialTitle) {
             if (isReplace) this.addMaterialTitle.textContent = "替换素材";
@@ -3811,21 +4034,17 @@ export class CapTimelineEditorApp {
             return;
         }
 
-        const items = [];
-        const unsupported = [];
-        for (const file of fileList) {
-            const kind = this._materialKind(file);
-            if (!kind) {
-                unsupported.push(file.name);
-                continue;
-            }
-            if (relink && relink.kind !== kind) {
+        const { items, unsupported } = this._materialItemsFromFiles(fileList, { withObjectUrl: true });
+        if (relink && items.length) {
+            if (items[0].kind !== relink.kind) {
+                for (const item of items) {
+                    if (item.objectUrl) URL.revokeObjectURL(item.objectUrl);
+                }
                 const expect = relink.kind === "image" ? "图片"
                     : relink.kind === "video" ? "视频" : "音频";
                 alert(`请选择同类型的${expect}文件`);
                 return;
             }
-            items.push({ file, kind, objectUrl: URL.createObjectURL(file) });
         }
         if (!items.length) {
             alert(unsupported.length ? `不支持的素材格式：\n${unsupported.slice(0, 8).join("\n")}` : "不支持的素材格式");
@@ -3869,6 +4088,29 @@ export class CapTimelineEditorApp {
         return { file: result.file, kind: item.kind, location: result.location };
     }
 
+    async _importMaterialItems(items, { insertToTimeline = false, clientY = null } = {}) {
+        if (!items.length) return [];
+        const uploaded = [];
+        for (const item of items) {
+            uploaded.push(await this._uploadMaterialItem(item));
+        }
+        for (const u of uploaded) this._registerMediaFile(u.file, u.kind, u.location);
+        if (uploaded[0]) this._switchMediaTab(uploaded[0].kind);
+        this._renderMediaGrid();
+        if (insertToTimeline && this._timeline) {
+            let at = this._timeline.currentTime;
+            for (const u of uploaded) {
+                if (u.kind === "audio") await this._addAudioAtTime(u.file, at, clientY);
+                else if (u.kind === "video") await this._addVideoAtTime(u.file, at, clientY);
+                else await this._addImageAtTime(u.file, at, clientY);
+                const clip = this.getSelectedClip();
+                if (clip) at = clip.endTime;
+            }
+        }
+        this._saveToWidgets();
+        return uploaded;
+    }
+
     async _confirmAddMaterial() {
         const pending = this._pendingMaterial;
         const items = pending?.items || [];
@@ -3885,28 +4127,16 @@ export class CapTimelineEditorApp {
         const confirmBtn = this.addMaterialConfirmBtn;
         if (confirmBtn) confirmBtn.disabled = true;
         try {
-            const uploaded = [];
-            for (const item of items) {
-                uploaded.push(await this._uploadMaterialItem(item));
-            }
-            this._closeAddMaterial();
             if (relink) {
-                this._replaceMediaReference(relink.file, uploaded[0].file, uploaded[0].kind);
+                const uploaded = await this._uploadMaterialItem(items[0]);
+                this._closeAddMaterial();
+                this._replaceMediaReference(relink.file, uploaded.file, uploaded.kind);
                 this._saveToWidgets();
+                this._renderMediaGrid();
             } else {
-                for (const u of uploaded) this._registerMediaFile(u.file, u.kind, u.location);
-            }
-            this._renderMediaGrid();
-            if (shouldInsert && this._timeline) {
-                let at = this._timeline.currentTime;
-                for (const u of uploaded) {
-                    this._timeline.setCurrentTime(at, { userSeek: false });
-                    if (u.kind === "audio") await this._addAudioAtPlayhead(u.file);
-                    else if (u.kind === "video") await this._addVideoAtPlayhead(u.file);
-                    else await this._addMediaAtPlayhead(u.file);
-                    const clip = this.getSelectedClip();
-                    if (clip) at = clip.endTime;
-                }
+                const uploaded = await this._importMaterialItems(items, { insertToTimeline: shouldInsert });
+                this._closeAddMaterial();
+                if (!uploaded.length) return;
             }
         } catch (error) {
             alert(`${relink ? "替换" : "添加"}素材失败：${error instanceof Error ? error.message : String(error)}`);
