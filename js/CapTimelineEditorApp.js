@@ -4532,10 +4532,28 @@ export class CapTimelineEditorApp {
         return t;
     }
 
+    /** True if every snapshot fits on its paste track when the group starts at `base`. */
+    _pasteGroupFitsAt(snaps, tracks, minStart, base) {
+        for (let i = 0; i < snaps.length; i++) {
+            const start = base + (snaps[i].startTime - minStart);
+            if (!this._trackHasRoom(tracks[i], start, snaps[i].duration)) return false;
+        }
+        return true;
+    }
+
+    /** Latest clip end among the paste target tracks. */
+    _pasteTracksEndTime(tracks) {
+        let end = 0;
+        for (const track of tracks) {
+            for (const c of track.clips) end = Math.max(end, c.endTime);
+        }
+        return end;
+    }
+
     /**
-     * Paste clipboard clips after the last clip on the preferred track
-     * (or at the playhead when it is already past that point), keeping
-     * relative offsets within the copied group.
+     * Paste clipboard clips keeping relative offsets within the copied group.
+     * Prefer the seek (playhead) when the whole group fits there; otherwise
+     * append after the last clip on the target tracks.
      * @returns {boolean} true if anything was pasted
      */
     _pasteClips() {
@@ -4549,25 +4567,29 @@ export class CapTimelineEditorApp {
         const tracks = snaps.map(s => this._resolvePasteTrack(s));
         if (tracks.some(t => !t)) return false;
 
-        let pasteBase = 0;
-        for (const track of tracks) {
-            for (const c of track.clips) pasteBase = Math.max(pasteBase, c.endTime);
-        }
-        if (tl.currentTime >= pasteBase) pasteBase = tl.currentTime;
-
-        // Shift the whole group forward until every clip fits on its track.
-        for (let guard = 0; guard < 64; guard++) {
-            let bump = null;
-            for (let i = 0; i < snaps.length; i++) {
-                const start = pasteBase + (snaps[i].startTime - minStart);
-                if (!this._trackHasRoom(tracks[i], start, snaps[i].duration)) {
-                    const free = this._findFreeStart(tracks[i], start, snaps[i].duration);
-                    const need = free - (snaps[i].startTime - minStart);
-                    bump = bump == null ? need : Math.max(bump, need);
+        const seek = typeof tl._snapTime === "function"
+            ? tl._snapTime(tl.currentTime)
+            : Math.max(0, tl.currentTime);
+        let pasteBase;
+        if (this._pasteGroupFitsAt(snaps, tracks, minStart, seek)) {
+            pasteBase = seek;
+        } else {
+            pasteBase = this._pasteTracksEndTime(tracks);
+            // Safety: nudge forward if the group still collides (e.g. same-track overlaps).
+            for (let guard = 0; guard < 64; guard++) {
+                if (this._pasteGroupFitsAt(snaps, tracks, minStart, pasteBase)) break;
+                let bump = null;
+                for (let i = 0; i < snaps.length; i++) {
+                    const start = pasteBase + (snaps[i].startTime - minStart);
+                    if (!this._trackHasRoom(tracks[i], start, snaps[i].duration)) {
+                        const free = this._findFreeStart(tracks[i], start, snaps[i].duration);
+                        const need = free - (snaps[i].startTime - minStart);
+                        bump = bump == null ? need : Math.max(bump, need);
+                    }
                 }
+                if (bump == null) break;
+                pasteBase = Math.max(pasteBase, bump);
             }
-            if (bump == null) break;
-            pasteBase = Math.max(pasteBase, bump);
         }
 
         const created = [];
