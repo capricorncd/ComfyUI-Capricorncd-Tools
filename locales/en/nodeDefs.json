@@ -171,6 +171,21 @@
     }
   },
 
+  "CAP_JoinStrings": {
+    "display_name": "Join Strings",
+    "inputs": {
+      "join_mode":      { "name": "Join Mode" },
+      "leading_blank":  { "name": "Leading Blank" },
+      "trailing_blank": { "name": "Trailing Blank" },
+      "prefix":         { "name": "Prefix" },
+      "suffix":         { "name": "Suffix" },
+      "texts":          { "name": "Texts" }
+    },
+    "outputs": {
+      "STRING": { "name": "String" }
+    }
+  },
+
   "CAP_ClearDirectory": {
     "display_name": "Clear Directory",
     "inputs": {

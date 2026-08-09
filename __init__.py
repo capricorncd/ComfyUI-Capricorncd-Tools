@@ -55,6 +55,7 @@ from .cap_prompt_group import (
     NODE_CLASS_MAPPINGS as _CPG_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CPG_NAMES,
 )
+from .cap_join_strings import CAP_JoinStrings
 from .timecode import (
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -82,6 +83,7 @@ NODE_CLASS_MAPPINGS = {
     **_CSS_CLASS,
     **_CFJ_CLASS,
     **_CPG_CLASS,
+    "CAP_JoinStrings": CAP_JoinStrings,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -98,6 +100,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CSS_NAMES,
     **_CFJ_NAMES,
     **_CPG_NAMES,
+    "CAP_JoinStrings": "Join Strings",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

@@ -171,6 +171,21 @@
     }
   },
 
+  "CAP_JoinStrings": {
+    "display_name": "字符串拼接",
+    "inputs": {
+      "join_mode":      { "name": "拼接方式" },
+      "leading_blank":  { "name": "开始空行" },
+      "trailing_blank": { "name": "结尾空行" },
+      "prefix":         { "name": "前缀" },
+      "suffix":         { "name": "后缀" },
+      "texts":          { "name": "文本" }
+    },
+    "outputs": {
+      "STRING": { "name": "字符串" }
+    }
+  },
+
   "CAP_ClearDirectory": {
     "display_name": "清空目录",
     "inputs": {
