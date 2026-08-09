@@ -26,6 +26,8 @@ const MIN_PROGRAM_PANEL_H = 120;
 const DEFAULT_PROGRAM_PANEL_H = 240;
 const MAX_PROGRAM_PANEL_FRAC = 0.7;
 const STORAGE_MEDIA_LIST_VIEW = "cat-te-media-list-view";
+/** Per-node timeline viewport (scroll) when project settings lack it. */
+const STORAGE_VIEW_PREFIX = "cat-te-view:";
 const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
@@ -312,6 +314,10 @@ export class CapTimelineEditorApp {
         this._openedWidgetValues = Object.fromEntries(
             ["fps", "width", "height", "global_prompt"].map(name => [name, this._w(name)?.value]),
         );
+        // Re-apply panel layout each open (window size / localStorage may have changed).
+        this._applySavedMediaPanelWidth();
+        this._applySavedSidebarPanelWidth();
+        this._applySavedProgramPanelHeight();
         await this._initTimelineFromWidgets();
         if (gen !== this._openGen || CapTimelineEditorApp._open !== this || !this._overlay?.classList.contains("open")) {
             this._timeline?.destroy();
@@ -325,9 +331,12 @@ export class CapTimelineEditorApp {
             return;
         }
         this._refreshTimelineDuration();
+        const viewSettings = this._readViewSettingsFromProjectWidget();
         requestAnimationFrame(() => {
             if (gen !== this._openGen) return;
             this._timeline?._refresh();
+            // Scroll needs laid-out viewport; restore again after paint.
+            this._applyTimelineViewFromSettings(viewSettings, { applyZoom: false });
         });
         this._undoStack = [];
         this._redoStack = [];
@@ -393,6 +402,8 @@ export class CapTimelineEditorApp {
             try { this._closeAddMaterial(); } catch { /* ignore */ }
             try { this._closeSettings(); } catch { /* ignore */ }
             this._removeCtxMenu();
+            try { this._persistPanelLayout(); } catch { /* ignore */ }
+            try { this._persistViewToLocalCache(); } catch { /* ignore */ }
             if (save) {
                 try { this._saveToWidgets(); } catch { /* node may already be removed */ }
             } else if (this._openedWidgetValues) {
@@ -1402,6 +1413,83 @@ export class CapTimelineEditorApp {
         } else if (autoFitIfMissing) {
             this._autoFitZoom();
         }
+    }
+
+    _viewCacheKey() {
+        const id = this.node?.id;
+        return `${STORAGE_VIEW_PREFIX}${id != null ? id : "default"}`;
+    }
+
+    _readViewFromLocalCache() {
+        try {
+            const raw = localStorage.getItem(this._viewCacheKey());
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            return data && typeof data === "object" ? data : null;
+        } catch {
+            return null;
+        }
+    }
+
+    _persistViewToLocalCache() {
+        const tl = this._timeline;
+        if (!tl) return;
+        const payload = {
+            current_time: Number(tl.currentTime) || 0,
+            timeline_zoom: Number(tl.getZoom?.() ?? tl._zoom) || 1.2,
+            timeline_scroll_left: Number(tl.scrollEl?.scrollLeft) || 0,
+            timeline_scroll_top: Number(tl.scrollEl?.scrollTop) || 0,
+        };
+        try {
+            localStorage.setItem(this._viewCacheKey(), JSON.stringify(payload));
+        } catch { /* quota / private mode */ }
+    }
+
+    _persistPanelLayout() {
+        const mediaW = this.mediaPanel?.offsetWidth;
+        const sidebarW = this.sidebarPanel?.offsetWidth;
+        const programH = this.programRoot?.offsetHeight;
+        if (Number.isFinite(mediaW) && mediaW >= MIN_MEDIA_PANEL_W) {
+            localStorage.setItem(STORAGE_MEDIA_PANEL_W, String(Math.round(mediaW)));
+        }
+        if (Number.isFinite(sidebarW) && sidebarW >= MIN_SIDEBAR_PANEL_W) {
+            localStorage.setItem(STORAGE_SIDEBAR_PANEL_W, String(Math.round(sidebarW)));
+        }
+        if (Number.isFinite(programH) && programH >= MIN_PROGRAM_PANEL_H) {
+            localStorage.setItem(STORAGE_PROGRAM_PANEL_H, String(Math.round(programH)));
+        }
+    }
+
+    _readViewSettingsFromProjectWidget() {
+        try {
+            const project = JSON.parse(this._w("project_json")?.value || "{}");
+            const settings = project?.settings && typeof project.settings === "object" ? project.settings : {};
+            return { ...this._readViewFromLocalCache(), ...settings };
+        } catch {
+            return this._readViewFromLocalCache() || {};
+        }
+    }
+
+    /**
+     * Restore playhead + scroll (and optionally zoom) from project settings /
+     * local cache. Zoom should already be applied when applyZoom is false.
+     */
+    _applyTimelineViewFromSettings(settings, { applyZoom = false, autoFitIfMissing = false } = {}) {
+        const tl = this._timeline;
+        if (!tl) return;
+        if (applyZoom) {
+            this._applyTimelineZoomFromSettings(settings, { autoFitIfMissing });
+        }
+        const t = Number(settings?.current_time);
+        if (Number.isFinite(t) && t >= 0) {
+            tl.setCurrentTime(t, { userSeek: false });
+        }
+        const scrollEl = tl.scrollEl;
+        if (!scrollEl) return;
+        const sl = Number(settings?.timeline_scroll_left);
+        const st = Number(settings?.timeline_scroll_top);
+        if (Number.isFinite(sl) && sl >= 0) scrollEl.scrollLeft = sl;
+        if (Number.isFinite(st) && st >= 0) scrollEl.scrollTop = st;
     }
 
     _computeTimelineDuration() {
@@ -2835,6 +2923,9 @@ export class CapTimelineEditorApp {
 
         this._refreshTimelineDuration();
         this._applyTimelineZoomFromSettings(settings);
+        // Merge local cache under project settings so project wins when present.
+        const viewSettings = { ...this._readViewFromLocalCache(), ...settings };
+        this._applyTimelineViewFromSettings(viewSettings, { applyZoom: false });
         this._decorateAllClips();
         this._bindTimelineEvents();
         this._configureTimelineUi();
@@ -5150,6 +5241,9 @@ export class CapTimelineEditorApp {
                 height: Number(this._w("height")?.value ?? 720),
                 global_prompt: String(this._w("global_prompt")?.value ?? ""),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
+                current_time: Number(this._timeline?.currentTime ?? 0) || 0,
+                timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,
+                timeline_scroll_top: Number(this._timeline?.scrollEl?.scrollTop ?? 0) || 0,
             },
             tracks,
         };
@@ -5158,6 +5252,8 @@ export class CapTimelineEditorApp {
     _saveToWidgets() {
         const projectW = this._w("project_json");
         if (projectW) projectW.value = JSON.stringify(this._buildProject());
+        try { this._persistViewToLocalCache(); } catch { /* ignore */ }
+        try { this._persistPanelLayout(); } catch { /* ignore */ }
 
         this.node.setDirtyCanvas(true, true);
     }
@@ -5276,10 +5372,14 @@ export class CapTimelineEditorApp {
             });
             await Promise.all(clips.map(c => this._addClipFromJson(c)));
 
-            this._timeline.setCurrentTime(snapshot.currentTime || 0);
             this._decorateAllClips();
             this._refreshTimelineDuration();
-            this._applyTimelineZoomFromSettings(snapshot.project?.settings ?? {});
+            const snapSettings = snapshot.project?.settings ?? {};
+            this._applyTimelineZoomFromSettings(snapSettings, { autoFitIfMissing: false });
+            this._applyTimelineViewFromSettings(
+                { ...snapSettings, current_time: snapshot.currentTime || 0 },
+                { applyZoom: false },
+            );
             this._updatePromptPanel();
             this._renderMediaGrid();
         } finally {
