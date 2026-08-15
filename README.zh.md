@@ -18,11 +18,13 @@
 | **Audio Timeline** | 波形修剪 + 图像关键帧时间轴 + 每片段提示词 | [→](docs/zh/audio-timeline.md) |
 | **Timeline Editor** | 全屏多轨时间轴编辑器；输出 `data_json` 与 `frame_seq_dir` | [→](docs/zh/timeline-editor.md) |
 | **Data Json Clip Parser** | 从 Audio Timeline / Timeline Editor 的 `data_json` 中提取单个片段 | [→](docs/zh/data-json-clip-parser.md) |
-| **Save Images** | 将一批图像保存到指定目录，返回目录路径和文件路径列表 | [→](docs/zh/save-images.md) |
+| **Save Images** | 将一批图像保存到指定目录；可选写入 `{prefix}.json` 记录提示词与模型 | [→](docs/zh/save-images.md) |
 | **Load Images From Dir** | 从目录加载图像为 `IMAGE` 批次 | [→](docs/zh/load-images-from-dir.md) |
 | **Image Batch Count** | 返回批次中的图像数量 | [→](docs/zh/image-batch.md) |
 | **Image From Batch Index** | 按索引从批次中提取单张图像 | [→](docs/zh/image-batch.md) |
-| **Seq To Video** | 通过 ffmpeg 将图像序列和音频合成为 MP4 | [→](docs/zh/seq-to-video.md) |
+| **Seq To Video** | 通过 ffmpeg 将图像序列和音频合成为 MP4；默认写入同名 JSON 记录提示词与模型 | [→](docs/zh/seq-to-video.md) |
+| **Compose Clip Videos** | 将各片段 MP4 合成为一条时间轴视频；可选同名 JSON | [→](docs/zh/compose-clip-videos.md) |
+| **Join Strings** | 拼接可变数量的字符串/数值；换行、逗号、`_`、`-`、`/`、空拼接或自定义分隔符 | [→](docs/zh/join-strings.md) |
 | **Clear Directory** | 删除目录中选定类型的媒体文件；Windows 支持回收站 | [→](docs/zh/clear-directory.md) |
 | **Size Settings** | 尺寸预设 / 倍数 / 锁定比例 / 方向 → `width`、`height`、`count`、`fps` | [→](docs/zh/size-settings.md) |
 | **Format JSON** | 在画布上格式化显示 JSON 字符串 | [→](docs/zh/format-json.md) |

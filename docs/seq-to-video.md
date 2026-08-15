@@ -48,6 +48,20 @@ Each run produces a unique file; no previous renders are overwritten.
 
 `filename_prefix` may include subfolders, e.g. `video/nsfw-audio/STV` writes to `output/video/nsfw-audio/STV_{yyyyMMdd_HHmmss}.mp4`. The subfolder is created automatically if it does not exist. Paths that would resolve outside the ComfyUI `output` directory (e.g. via `..`) are rejected.
 
+When `save_sidecar` is on (default), a JSON with the same stem is written next to the MP4, for example `STV_20260815_201800.mp4` → `STV_20260815_201800.json`. Wire a clip prompt into `metadata` to store the exact text used for that run in `note`.
+
+Typical fields:
+
+| Field | Content |
+|-------|---------|
+| `file` | Video filename |
+| `created` | Local timestamp |
+| `note` | `metadata` input, if any |
+| `prompts` | Prompt widgets from the graph |
+| `models` | Checkpoint / UNET / VAE / CLIP / LoRA filenames |
+| `samplers` | seed, steps, cfg, sampler, scheduler |
+| `fps` / `frames` / `duration` | Encode settings for this run |
+
 ---
 
 ## Video player
@@ -75,6 +89,8 @@ Output length always follows the frame count: `frame_count / fps`. If the audio 
 | `images` | IMAGE | *(optional)* | Highest-priority frame source |
 | `image_paths` | STRING | `""` | Comma-separated image file paths |
 | `audio` | AUDIO | *(optional)* | Audio to mix into the video; omit for video-only output |
+| `metadata` | STRING | `""` | Optional note / prompt written into the sidecar `note` field |
+| `save_sidecar` | BOOLEAN | true | Write a same-name JSON next to the video |
 
 ## Outputs
 

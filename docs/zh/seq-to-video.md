@@ -48,6 +48,20 @@ D:\ComfyUI\output\temp\img_00000.png, D:\ComfyUI\output\temp\img_00001.png
 
 `filename_prefix` 可以包含子目录，例如 `video/nsfw-audio/STV` 会写入 `output/video/nsfw-audio/STV_{yyyyMMdd_HHmmss}.mp4`。子目录不存在时会自动创建。若解析后的路径会超出 `output` 目录范围（例如通过 `..`），则会被拒绝。
 
+默认开启 `save_sidecar` 时，会在 MP4 旁写入同名 JSON，例如 `STV_20260815_201800.mp4` → `STV_20260815_201800.json`。把片段提示词接到 `metadata`，会写入 `note`。
+
+常见字段：
+
+| 字段 | 内容 |
+|------|------|
+| `file` | 视频文件名 |
+| `created` | 本地时间戳 |
+| `note` | `metadata` 输入（如有） |
+| `prompts` | 工作流中的提示词 |
+| `models` | Checkpoint / UNET / VAE / CLIP / LoRA 文件名 |
+| `samplers` | seed、steps、cfg、sampler、scheduler |
+| `fps` / `frames` / `duration` | 本次编码参数 |
+
 ---
 
 ## 内嵌播放器
@@ -75,6 +89,8 @@ D:\ComfyUI\output\temp\img_00000.png, D:\ComfyUI\output\temp\img_00001.png
 | `images` | IMAGE | *（可选）* | 最高优先级的帧来源 |
 | `image_paths` | STRING | `""` | 逗号分隔的图片文件路径 |
 | `audio` | AUDIO | *（可选）* | 混入视频的音频；省略则输出纯视频 |
+| `metadata` | STRING | `""` | 写入同名 JSON 的 `note` 字段；可接入片段提示词 |
+| `save_sidecar` | BOOLEAN | true | 在视频旁写入同名 JSON |
 
 ## 输出参数
 

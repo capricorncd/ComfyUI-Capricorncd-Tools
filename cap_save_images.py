@@ -8,6 +8,8 @@ import folder_paths
 import numpy as np
 from PIL import Image
 
+from .cap_save_sidecar import build_sidecar_payload, write_sidecar
+
 
 class CAP_SaveImages:
     """Save an IMAGE batch to disk (relative under output, or absolute anywhere)."""
@@ -58,12 +60,22 @@ class CAP_SaveImages:
                     "label_off": "仅图片",
                     "tooltip": "Also pack saved images into a zip next to the folder",
                 }),
+                "save_sidecar": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "保存 JSON",
+                    "label_off": "不保存",
+                    "tooltip": "Write a JSON next to the sequence (named after the file prefix) with prompts, models, and sampler settings",
+                }),
             },
             "optional": {
                 "metadata": ("STRING", {
                     "default": "",
-                    "tooltip": "String written to the file comment metadata field",
+                    "tooltip": "String written to the image comment and the sidecar note field",
                 }),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
             },
         }
 
@@ -78,7 +90,9 @@ class CAP_SaveImages:
         "Absolute filename_prefix is the save directory anywhere on disk "
         "(file prefix defaults to CSI). Supports strftime. "
         "filename supports {prefix} and {index} (zero-padded to 5 digits). "
-        "When save_as_zip is true, also pack the saved images into a zip next to the folder."
+        "When save_as_zip is true, also pack the saved images into a zip next to the folder. "
+        "When save_sidecar is true, write {prefix}.json in the save directory "
+        "with prompts, models, and sampler settings."
     )
 
     def _resolve_save_dir(self, filename_prefix: str) -> tuple[str, str]:
@@ -118,7 +132,19 @@ class CAP_SaveImages:
             )
         return save_dir, name_prefix
 
-    def save_images(self, images, filename_prefix, filename, quality, dpi, save_as_zip=False, metadata=""):
+    def save_images(
+        self,
+        images,
+        filename_prefix,
+        filename,
+        quality,
+        dpi,
+        save_as_zip=False,
+        save_sidecar=True,
+        metadata="",
+        prompt=None,
+        extra_pnginfo=None,
+    ):
         save_dir, name_prefix = self._resolve_save_dir(filename_prefix)
         os.makedirs(save_dir, exist_ok=True)
 
@@ -143,12 +169,26 @@ class CAP_SaveImages:
             del image
             saved_paths.append(path)
 
+        sidecar = ""
+        if save_sidecar and saved_paths:
+            sidecar = write_sidecar(
+                os.path.join(save_dir, f"{name_prefix}.json"),
+                build_sidecar_payload(
+                    f"{name_prefix}.json",
+                    note=metadata,
+                    prompt=prompt,
+                    extra={"files": [os.path.basename(p) for p in saved_paths]},
+                ),
+            )
+
         if save_as_zip and saved_paths:
             save_dir_stripped = save_dir.rstrip("/\\")
             zip_path = f"{save_dir_stripped}.zip"
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for path in saved_paths:
                     zf.write(path, arcname=os.path.basename(path))
+                if sidecar and os.path.isfile(sidecar):
+                    zf.write(sidecar, arcname=os.path.basename(sidecar))
 
         return (save_dir, ", ".join(saved_paths))
 

@@ -4,6 +4,21 @@ import re
 
 from comfy_api.latest import io
 
+_JOIN_SEPS = {
+    "newline": "\n",
+    "comma": ",",
+    "underscore": "_",
+    "hyphen": "-",
+    "slash": "/",
+    "none": "",
+}
+
+
+def _join_sep(join_mode: str, custom_sep: str | None) -> str:
+    if custom_sep is not None and custom_sep != "":
+        return str(custom_sep)
+    return _JOIN_SEPS.get(str(join_mode), ",")
+
 
 def _stringify(value) -> str | None:
     """Convert connected values to string; skip unconnected/None."""
@@ -39,15 +54,22 @@ class CAP_JoinStrings(io.ComfyNode):
             description=(
                 "Join a variable number of string/int/float inputs. "
                 "Slots auto-grow like Math Expression. "
-                "Join with newline or comma; optional leading/trailing blank lines, prefix and suffix."
+                "Join with newline, comma, underscore, hyphen, slash, or none; "
+                "custom_sep overrides join_mode when non-empty. "
+                "Optional leading/trailing blank lines, prefix and suffix."
             ),
             search_aliases=["concat", "join", "string", "拼接", "字符串"],
             inputs=[
                 io.Combo.Input(
                     "join_mode",
-                    options=["newline", "comma"],
+                    options=["newline", "comma", "underscore", "hyphen", "slash", "none"],
                     default="newline",
-                    tooltip="拼接分隔：换行 或 半角逗号",
+                    tooltip="拼接分隔：换行、逗号、下划线、横线、斜线、无（空字符）。custom_sep 非空时优先。",
+                ),
+                io.String.Input(
+                    "custom_sep",
+                    default="",
+                    tooltip="自定义分隔符；有内容时优先于拼接方式。空则使用上方选项。",
                 ),
                 io.Boolean.Input(
                     "leading_blank",
@@ -76,6 +98,7 @@ class CAP_JoinStrings(io.ComfyNode):
     def execute(
         cls,
         join_mode: str,
+        custom_sep: str,
         leading_blank: bool,
         trailing_blank: bool,
         prefix: str,
@@ -94,6 +117,5 @@ class CAP_JoinStrings(io.ComfyNode):
         if trailing_blank:
             parts.append("")
 
-        sep = "\n" if str(join_mode) == "newline" else ","
-        body = sep.join(parts)
+        body = _join_sep(join_mode, custom_sep).join(parts)
         return io.NodeOutput(f"{prefix or ''}{body}{suffix or ''}")

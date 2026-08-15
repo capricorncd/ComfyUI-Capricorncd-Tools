@@ -13,6 +13,7 @@ import tempfile
 import folder_paths
 
 from .cap_data_json_parser import CAP_DataJsonClipParser
+from .cap_save_sidecar import build_sidecar_payload, clip_prompts_from_data_json, sidecar_path, write_sidecar
 from .cap_seq_to_video import _ffmpeg_path
 
 log = logging.getLogger(__name__)
@@ -113,6 +114,16 @@ class CAP_ComposeClipVideos:
                         "合成前裁掉扩展，只保留预览时长区间。"
                     ),
                 }),
+                "save_sidecar": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "保存 JSON",
+                    "label_off": "不保存",
+                    "tooltip": "在合成视频旁写入同名 JSON，记录各片段提示词、模型等。",
+                }),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
             },
         }
 
@@ -123,7 +134,8 @@ class CAP_ComposeClipVideos:
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "Compose multi-clip videos produced under output/run_prefix into one MP4. "
-        "Optionally trims head/tail extend so the final cut matches preview duration."
+        "Optionally trims head/tail extend so the final cut matches preview duration. "
+        "When save_sidecar is true, write a same-name JSON next to the video."
     )
 
     @classmethod
@@ -288,6 +300,9 @@ class CAP_ComposeClipVideos:
         name_mode: str = "from_start",
         filename_prefix: str = "composed",
         trim_extends: bool = True,
+        save_sidecar: bool = True,
+        prompt=None,
+        extra_pnginfo=None,
     ):
         if not shutil.which("ffmpeg"):
             raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
@@ -350,6 +365,20 @@ class CAP_ComposeClipVideos:
             if concat_list and os.path.exists(concat_list):
                 os.unlink(concat_list)
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        if save_sidecar:
+            extra = {"clips": len(sources), "clips_dir": resolved_dir}
+            clip_rows = clip_prompts_from_data_json(data_json)
+            if clip_rows:
+                extra["clip_prompts"] = clip_rows
+            write_sidecar(
+                sidecar_path(output_path),
+                build_sidecar_payload(
+                    output_filename,
+                    prompt=prompt,
+                    extra=extra,
+                ),
+            )
 
         rel_name = f"{subfolder}/{output_filename}" if subfolder else output_filename
         return {

@@ -7,7 +7,7 @@
 ---
 
 <!-- AUTO:API:begin -->
-Save a batch of images to disk. Relative filename_prefix is under ComfyUI output (last segment = file prefix). Absolute filename_prefix is the save directory anywhere on disk (file prefix defaults to CSI). Supports strftime. filename supports {prefix} and {index} (zero-padded to 5 digits). When save_as_zip is true, also pack the saved images into a zip next to the folder.
+Save a batch of images to disk. Relative filename_prefix is under ComfyUI output (last segment = file prefix). Absolute filename_prefix is the save directory anywhere on disk (file prefix defaults to CSI). Supports strftime. filename supports {prefix} and {index} (zero-padded to 5 digits). When save_as_zip is true, also pack the saved images into a zip next to the folder. When save_sidecar is true, write {prefix}.json in the save directory with prompts, models, and sampler settings.
 
 #### Inputs
 
@@ -19,7 +19,8 @@ Save a batch of images to disk. Relative filename_prefix is under ComfyUI output
 | `quality` | INT | `80` | JPEG quality (1–100); for PNG mapped to zlib compression |
 | `dpi` | INT | `300` | DPI metadata written to the image file |
 | `save_as_zip` | BOOLEAN | false | Also pack saved images into a zip next to the folder |
-| `metadata` *(optional)* | STRING | `""` | String written to the file comment metadata field |
+| `save_sidecar` | BOOLEAN | true | Write a JSON next to the sequence (named after the file prefix) with prompts, models, and sampler settings |
+| `metadata` *(optional)* | STRING | `""` | String written to the image comment and the sidecar note field |
 
 #### Outputs
 
@@ -37,3 +38,4 @@ Save a batch of images to disk. Relative filename_prefix is under ComfyUI output
 - 相对路径：最后一段为文件前缀，前面各段为 ComfyUI `output` 下的子目录（须位于 `output` 内）。
 - 绝对路径：整段路径作为保存目录，可为电脑任意位置；文件前缀默认为 `CSI`。
 - 开启 `save_as_zip` 时，会在目录旁额外生成包含已保存图片的 zip。
+- 默认开启 `save_sidecar` 时，会在保存目录写入 `{prefix}.json`，记录提示词、模型与采样参数；打包 zip 时也会一并放入。

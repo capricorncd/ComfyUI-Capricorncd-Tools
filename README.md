@@ -18,11 +18,13 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 | **Audio Timeline** | Waveform trim + image keyframe clip track + per-clip prompts | [→](docs/audio-timeline.md) · [中文](docs/zh/audio-timeline.md) |
 | **Timeline Editor** | Fullscreen multi-track timeline editor; outputs `data_json` and `frame_seq_dir` | [→](docs/timeline-editor.md) · [中文](docs/zh/timeline-editor.md) |
 | **Data Json Clip Parser** | Extracts a single clip from Audio Timeline / Timeline Editor `data_json` output | [→](docs/data-json-clip-parser.md) · [中文](docs/zh/data-json-clip-parser.md) |
-| **Save Images** | Saves an `IMAGE` batch to disk; returns directory path and comma-separated file paths | [→](docs/save-images.md) · [中文](docs/zh/save-images.md) |
+| **Save Images** | Saves an `IMAGE` batch to disk; optional `{prefix}.json` sidecar with prompts and models | [→](docs/save-images.md) · [中文](docs/zh/save-images.md) |
 | **Load Images From Dir** | Loads images from a directory into an `IMAGE` batch | [→](docs/load-images-from-dir.md) · [中文](docs/zh/load-images-from-dir.md) |
 | **Image Batch Count** | Returns the number of images in a batch | [→](docs/image-batch.md) · [中文](docs/zh/image-batch.md) |
 | **Image From Batch Index** | Extracts one image from a batch by index | [→](docs/image-batch.md) · [中文](docs/zh/image-batch.md) |
-| **Seq To Video** | Composes frames + optional audio into MP4 via ffmpeg | [→](docs/seq-to-video.md) · [中文](docs/zh/seq-to-video.md) |
+| **Seq To Video** | Composes frames + optional audio into MP4 via ffmpeg; writes a same-name JSON with prompts and models | [→](docs/seq-to-video.md) · [中文](docs/zh/seq-to-video.md) |
+| **Compose Clip Videos** | Concatenates per-clip MP4s into one timeline video; optional same-name JSON sidecar | [→](docs/compose-clip-videos.md) · [中文](docs/zh/compose-clip-videos.md) |
+| **Join Strings** | Joins a variable number of string/int/float inputs; newline, comma, `_`, `-`, `/`, none, or custom separator | [→](docs/join-strings.md) · [中文](docs/zh/join-strings.md) |
 | **Clear Directory** | Deletes selected media files in a directory; supports Recycle Bin on Windows | [→](docs/clear-directory.md) · [中文](docs/zh/clear-directory.md) |
 | **Size Settings** | Size preset / scale / lock aspect / orientation → `width`, `height`, `count`, `fps` | [→](docs/size-settings.md) · [中文](docs/zh/size-settings.md) |
 | **Format JSON** | Pretty-print a JSON string in the graph UI | [→](docs/format-json.md) · [中文](docs/zh/format-json.md) |
@@ -77,6 +79,8 @@ python scripts/gen_node_docs.py
 ```
 docs/
 ├── prompt-input.md
+├── prompt-group.md
+├── prompt-from-batch.md
 ├── audio-timeline.md
 ├── timeline-editor.md
 ├── data-json-clip-parser.md
@@ -84,6 +88,8 @@ docs/
 ├── load-images-from-dir.md
 ├── image-batch.md
 ├── seq-to-video.md
+├── compose-clip-videos.md
+├── join-strings.md
 ├── clear-directory.md
 ├── size-settings.md
 ├── format-json.md

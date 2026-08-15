@@ -118,6 +118,7 @@
       "quality":         { "name": "Quality" },
       "dpi":             { "name": "DPI" },
       "save_as_zip":     { "name": "Save As Zip" },
+      "save_sidecar":    { "name": "Save JSON" },
       "metadata":        { "name": "Metadata" }
     },
     "outputs": {
@@ -150,7 +151,9 @@
       "filename_prefix":   { "name": "Filename Prefix" },
       "images":            { "name": "Images" },
       "audio":             { "name": "Audio" },
-      "image_paths":       { "name": "Image File List" }
+      "image_paths":       { "name": "Image File List" },
+      "metadata":          { "name": "Metadata" },
+      "save_sidecar":      { "name": "Save JSON" }
     },
     "outputs": {
       "filename": { "name": "Filename" }
@@ -164,7 +167,8 @@
       "clips_dir":         { "name": "Clips Dir" },
       "name_mode":         { "name": "Name Mode" },
       "filename_prefix":   { "name": "Output Filename Prefix" },
-      "trim_extends":      { "name": "Trim Extends" }
+      "trim_extends":      { "name": "Trim Extends" },
+      "save_sidecar":      { "name": "Save JSON" }
     },
     "outputs": {
       "filename": { "name": "Filename" }
@@ -175,6 +179,7 @@
     "display_name": "Join Strings",
     "inputs": {
       "join_mode":      { "name": "Join Mode" },
+      "custom_sep":     { "name": "Custom Separator" },
       "leading_blank":  { "name": "Leading Blank" },
       "trailing_blank": { "name": "Trailing Blank" },
       "prefix":         { "name": "Prefix" },

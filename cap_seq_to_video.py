@@ -12,6 +12,8 @@ import wave
 
 import folder_paths
 
+from .cap_save_sidecar import build_sidecar_payload, sidecar_path, write_sidecar
+
 log = logging.getLogger(__name__)
 
 _IMAGE_EXTS = ("jpg", "jpeg", "png", "webp", "bmp")
@@ -183,6 +185,21 @@ class CAP_SeqToVideo:
                     "multiline": True,
                     "tooltip": "逗号分隔的图片路径列表；优先级低于 images，高于序列帧目录。",
                 }),
+                "metadata": ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "tooltip": "写入同名 JSON 的 note 字段；可接入片段提示词。",
+                }),
+                "save_sidecar": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "保存 JSON",
+                    "label_off": "不保存",
+                    "tooltip": "在视频旁写入同名 JSON，记录提示词、模型、采样参数等。",
+                }),
+            },
+            "hidden": {
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
             },
         }
 
@@ -191,10 +208,14 @@ class CAP_SeqToVideo:
     OUTPUT_NODE = True
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
-    DESCRIPTION = "Compose image sequence and optional audio into MP4 using ffmpeg."
+    DESCRIPTION = (
+        "Compose image sequence and optional audio into MP4 using ffmpeg. "
+        "When save_sidecar is true, write a same-name JSON next to the video "
+        "with prompts, models, and sampler settings."
+    )
 
     @classmethod
-    def IS_CHANGED(cls, frames_dir, fps, filename_prefix, images=None, audio=None, image_paths=""):
+    def IS_CHANGED(cls, frames_dir, fps, filename_prefix, images=None, audio=None, image_paths="", **_kwargs):
         return float("nan")  # always re-run
 
     def _build_output_path(self, filename_prefix: str) -> tuple[str, str, str]:
@@ -248,7 +269,19 @@ class CAP_SeqToVideo:
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg 执行失败:\n{result.stderr[-2000:]}")
 
-    def execute(self, frames_dir: str, fps: float, filename_prefix: str, images=None, audio=None, image_paths=""):
+    def execute(
+        self,
+        frames_dir: str,
+        fps: float,
+        filename_prefix: str,
+        images=None,
+        audio=None,
+        image_paths="",
+        metadata="",
+        save_sidecar=True,
+        prompt=None,
+        extra_pnginfo=None,
+    ):
         output_filename, subfolder, output_path = self._build_output_path(filename_prefix)
         fps = float(fps)
 
@@ -323,6 +356,20 @@ class CAP_SeqToVideo:
                 shutil.rmtree(frames_tmp_dir, ignore_errors=True)
 
         log.info("[CAP_SeqToVideo] 输出: %s", output_path)
+        if save_sidecar:
+            write_sidecar(
+                sidecar_path(output_path),
+                build_sidecar_payload(
+                    output_filename,
+                    note=metadata,
+                    prompt=prompt,
+                    extra={
+                        "fps": fps,
+                        "frames": frame_count,
+                        "duration": round(video_duration, 6),
+                    },
+                ),
+            )
         rel_name = f"{subfolder}/{output_filename}" if subfolder else output_filename
 
         return {

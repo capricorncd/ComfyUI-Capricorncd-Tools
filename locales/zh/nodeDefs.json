@@ -118,6 +118,7 @@
       "quality":         { "name": "质量" },
       "dpi":             { "name": "DPI" },
       "save_as_zip":     { "name": "打包 ZIP" },
+      "save_sidecar":    { "name": "保存 JSON" },
       "metadata":        { "name": "元数据" }
     },
     "outputs": {
@@ -150,7 +151,9 @@
       "filename_prefix":   { "name": "文件名前缀" },
       "images":            { "name": "图像" },
       "audio":             { "name": "音频" },
-      "image_paths":       { "name": "图片文件列表" }
+      "image_paths":       { "name": "图片文件列表" },
+      "metadata":          { "name": "元数据" },
+      "save_sidecar":      { "name": "保存 JSON" }
     },
     "outputs": {
       "filename": { "name": "文件名" }
@@ -164,7 +167,8 @@
       "clips_dir":         { "name": "片段视频目录" },
       "name_mode":         { "name": "命名模式" },
       "filename_prefix":   { "name": "输出文件名前缀" },
-      "trim_extends":      { "name": "裁剪首尾扩展" }
+      "trim_extends":      { "name": "裁剪首尾扩展" },
+      "save_sidecar":      { "name": "保存 JSON" }
     },
     "outputs": {
       "filename": { "name": "文件名" }
@@ -175,6 +179,7 @@
     "display_name": "字符串拼接",
     "inputs": {
       "join_mode":      { "name": "拼接方式" },
+      "custom_sep":     { "name": "自定义分隔符" },
       "leading_blank":  { "name": "开始空行" },
       "trailing_blank": { "name": "结尾空行" },
       "prefix":         { "name": "前缀" },
