@@ -207,7 +207,7 @@ export function ensureRichPromptMirror(ta, mode = "overlay") {
     return ensureMirror(ta, mode);
 }
 
-function toggleComment(ta) {
+export function toggleComment(ta) {
     const text = ta.value;
     const selStart = ta.selectionStart;
     const selEnd = ta.selectionEnd;
@@ -318,6 +318,7 @@ export function detachRichPromptHandler(ta) {
     ta._capMirror = null;
     ta.parentElement?.classList.remove("cat-prompt-rich-wrap");
     if (ta._capRichKeydown) {
+        ta.removeEventListener("keydown", ta._capRichKeydown);
         window.removeEventListener("keydown", ta._capRichKeydown, true);
         ta._capRichKeydown = null;
     }
@@ -376,10 +377,11 @@ export function attachRichPromptHandler(ta, { mode = "widget" } = {}) {
             detachRichPromptHandler(ta);
             return;
         }
-        if (e.target !== ta) return;
+        const fromTa = e.target === ta || e.currentTarget === ta || document.activeElement === ta;
+        if (!fromTa) return;
 
         const mod = e.ctrlKey || e.metaKey;
-        if (mod && (e.key === "/" || e.code === "Slash")) {
+        if (mod && !e.altKey && (e.key === "/" || e.code === "Slash" || e.code === "NumpadDivide")) {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation?.();
@@ -388,6 +390,7 @@ export function attachRichPromptHandler(ta, { mode = "widget" } = {}) {
     };
     if (!ta._capRichKeydown) {
         ta._capRichKeydown = onKeydown;
+        ta.addEventListener("keydown", onKeydown);
         window.addEventListener("keydown", onKeydown, true);
     }
 

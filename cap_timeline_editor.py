@@ -11,7 +11,30 @@ import re
 import torch
 
 from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines
+from .cap_timeline_project_io import SCHEMA_VERSION, migrate_project, resolve_clip_media
 from .timecode import resolve_media_path
+
+
+def _use_media_prompt(flags, index: int) -> bool:
+    if not isinstance(flags, list) or index >= len(flags):
+        return True
+    return flags[index] is not False
+
+
+def _compose_clip_prompt(clip: dict, media_rows: list) -> str:
+    parts = [_strip_comment_lines(clip.get("prompt") or "").strip()]
+    flags = clip.get("use_media_prompts")
+    visual = [
+        row for row in (media_rows or [])
+        if isinstance(row, dict) and str(row.get("kind") or "image").lower() != "audio"
+    ]
+    for index, row in enumerate(visual):
+        if not _use_media_prompt(flags, index):
+            continue
+        text = _strip_comment_lines(row.get("prompt") or "").strip()
+        if text:
+            parts.append(text)
+    return "\n".join(part for part in parts if part)
 
 
 def _read_project_version() -> str:
@@ -71,14 +94,14 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                     {
                         "default": json.dumps({
                             "project_version": PROJECT_VERSION,
-                            "schema_version": PROJECT_VERSION,
+                            "schema_version": SCHEMA_VERSION,
                             "name": "未命名项目",
-                            "resources": [],
+                            "media": [],
                             "settings": {},
                             "tracks": [],
                         }, ensure_ascii=False),
                         "multiline": True,
-                        "tooltip": "Track-nested editable timeline project (schema version 1).",
+                        "tooltip": "Track-nested editable timeline project (schema version 2: media catalog + clip media_ids).",
                     },
                 ),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1}),
@@ -286,19 +309,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         try:
             value = json.loads(raw or "{}")
         except (json.JSONDecodeError, TypeError):
-            return {"project_version": PROJECT_VERSION, "schema_version": PROJECT_VERSION, "settings": {}, "tracks": []}
+            value = {}
         if not isinstance(value, dict):
-            return {"project_version": PROJECT_VERSION, "schema_version": PROJECT_VERSION, "settings": {}, "tracks": []}
-        value["project_version"] = PROJECT_VERSION
-        value["schema_version"] = PROJECT_VERSION
+            value = {}
         value.setdefault("settings", {})
         value.setdefault("tracks", [])
-        value.setdefault("resources", [])
         value.setdefault("name", "未命名项目")
         if not isinstance(value["settings"], dict):
             value["settings"] = {}
         if not isinstance(value["tracks"], list):
             value["tracks"] = []
+        value = migrate_project(value)
+        value["project_version"] = PROJECT_VERSION
         return value
 
     @staticmethod
@@ -321,6 +343,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         return source if isinstance(source, dict) else {}
 
     @staticmethod
+    def _clip_media_rows(project: dict, clip: dict) -> list[dict]:
+        return resolve_clip_media(project, clip)
+
+    @classmethod
+    def _clip_media_file(cls, project: dict, clip: dict) -> str:
+        rows = cls._clip_media_rows(project, clip)
+        if rows:
+            return str(rows[0].get("file") or "")
+        source = cls._source(clip)
+        return str(source.get("file") or clip.get("audio_file") or clip.get("start_image") or "")
+
+    @staticmethod
     def _track_active(track: dict) -> bool:
         return track.get("enabled", True) is not False and track.get("visible", True) is not False
 
@@ -329,7 +363,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         # Match timeline playback: audio export ignores track visibility/eye toggle.
         return track.get("enabled", True) is not False
 
-    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media) -> list[dict]:
+    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media, project: dict) -> list[dict]:
         result = []
         for audio in audio_clips:
             audio_start, audio_end = self._clip_range(audio)
@@ -339,12 +373,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             source = self._source(audio)
             source_in = max(0, int(source.get("in_ms", 0) or 0))
-            file_name = str(
-                source.get("file")
-                or audio.get("audio_file")
-                or audio.get("start_image")
-                or ""
-            )
+            file_name = self._clip_media_file(project, audio)
             row = {
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
@@ -409,7 +438,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                     if clip.get("visible", True) is False:
                         continue
                     visual_clips.append((track, clip, z_index))
-                    if clip_type == "video" and clip.get("has_audio", False) and not clip.get("muted", False):
+                    media_rows = resolve_clip_media(project, clip)
+                    has_video_item = any(str(row.get("kind") or "").lower() == "video" for row in media_rows)
+                    source_kind = str(self._source(clip).get("kind") or clip_type).lower()
+                    is_video = clip_type == "video" or source_kind == "video" or has_video_item
+                    if is_video and clip.get("has_audio", False) and not clip.get("muted", False):
                         embedded = dict(clip)
                         embedded["source"] = dict(self._source(clip), kind="video")
                         audio_clips.append(embedded)
@@ -421,9 +454,14 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
         runtime_clips = []
         for index, (clip, start, end, z_index) in enumerate(segments, start=1):
-            source = self._source(clip)
-            start_image = str(source.get("file") or clip.get("start_image") or "")
-            end_image = str(clip.get("end_image") or "")
+            media_rows = resolve_clip_media(project, clip)
+            image_files = [
+                str(row.get("file") or "").strip()
+                for row in media_rows
+                if str(row.get("kind") or "image").lower() != "audio" and str(row.get("file") or "").strip()
+            ]
+            start_image = image_files[0] if image_files else ""
+            end_image = image_files[-1] if len(image_files) >= 2 else ""
             try:
                 head_sec = max(0, int(clip.get("head_extend_sec", 0) or 0))
             except (TypeError, ValueError):
@@ -453,10 +491,10 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "generate_preview_video": bool(clip.get("generate_preview_video", False)),
                 "start_image": resolve_media(start_image),
                 "end_image": resolve_media(end_image) if end_image else "",
-                "prompt": _strip_comment_lines(clip.get("prompt") or ""),
+                "prompt": _compose_clip_prompt(clip, media_rows),
                 "use_global_prompt": _clip_use_global_prompt(clip),
                 "z_index": z_index,
-                "audios": self._audio_slices(ext_start, ext_end, audio_clips, resolve_media),
+                "audios": self._audio_slices(ext_start, ext_end, audio_clips, resolve_media, project),
             })
 
         total_frame_count = max(1, sum(

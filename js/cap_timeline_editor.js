@@ -64,8 +64,10 @@ function hookScalarWidgets(node) {
         w.callback = function (...args) {
             const ret = orig?.apply(this, args);
             node._teApp?._syncScalarsToProjectJson?.();
+            if (name === "global_prompt") node._teApp?._onNodeGlobalPromptInput?.();
             return ret;
         };
+        if (name === "global_prompt") node._teApp?._bindGlobalPromptWidget?.();
     }
 }
 

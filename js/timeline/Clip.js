@@ -221,8 +221,13 @@ export class Clip extends EventEmitter {
         if (liveTrack !== origTrack) liveTrack._setDropTarget(true);
         liveTrack.el.appendChild(this.el);
       }
+      const snapped = tl._snapMoveToClipEdges(this, desiredStart);
+      desiredStart = snapped.start;
       const valid = liveTrack._constrainClip(this, desiredStart, { homeStart: startTime });
       if (valid !== null) this.startTime = valid;
+      const guide = tl._alignedClipEdge(this);
+      if (guide != null) tl._showSnapGuide(guide);
+      else tl._hideSnapGuide();
       const color = this.color || liveTrack.color;
       this.el.style.cssText =
         `left:${this.startTime * tl.pixelsPerSecond}px;width:${this.duration * tl.pixelsPerSecond}px;--clip-color:${color}`;
@@ -246,6 +251,7 @@ export class Clip extends EventEmitter {
       if (raf) cancelAnimationFrame(raf);
       if (!dragging) return;
       apply();
+      tl._hideSnapGuide();
       this.el.classList.remove('dragging', 'no-transition');
       liveTrack._setDropTarget(false);
 
@@ -311,7 +317,7 @@ export class Clip extends EventEmitter {
         );
         const maxStart = origStart + origDur - MIN_DURATION;
         let newStart = this._snap(clamp(origStart + dt, minStart, maxStart));
-        // Snap can step outside the clamped range — re-clamp.
+        newStart = tl._snapEdgeTime(this, newStart);
         newStart = clamp(newStart, minStart, maxStart);
         this.duration = origDur - (newStart - origStart);
         this.sourceOffset = origSourceOffset + (newStart - origStart);
@@ -324,13 +330,17 @@ export class Clip extends EventEmitter {
           nextClip ? nextClip.startTime : tl.duration,
           sourceMax,
         );
-        const maxDur = Math.max(MIN_DURATION, maxEnd - origStart);
-        let newDur = this._snap(clamp(origDur + dt, MIN_DURATION, maxDur));
-        // Snap can round past the neighbor — re-clamp so we never overlap.
-        newDur = clamp(newDur, MIN_DURATION, maxDur);
-        this.duration = newDur;
+        const minEnd = origStart + MIN_DURATION;
+        let newEnd = this._snap(clamp(origStart + origDur + dt, minEnd, maxEnd));
+        newEnd = tl._snapEdgeTime(this, newEnd);
+        newEnd = clamp(newEnd, minEnd, maxEnd);
+        this.duration = newEnd - origStart;
       }
       this._applyPosition();
+      const edge = side === 'left' ? this.startTime : this.endTime;
+      const guide = tl._alignedClipEdge(this, edge);
+      if (guide != null) tl._showSnapGuide(guide);
+      else tl._hideSnapGuide();
       tl.emit('clip:resize', { clip: this, track: this.track });
     };
 
@@ -349,6 +359,7 @@ export class Clip extends EventEmitter {
       if (raf) cancelAnimationFrame(raf);
       if (!resizing) return;
       apply();
+      tl._hideSnapGuide();
       this.el.classList.remove('resizing', 'no-transition');
       tl.emit('clip:resizeend', {
         clip: this,
