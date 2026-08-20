@@ -11,7 +11,7 @@ import re
 import torch
 
 from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines
-from .cap_timeline_project_io import SCHEMA_VERSION, migrate_project, resolve_clip_media
+from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_project, resolve_clip_media
 from .timecode import resolve_media_path
 
 
@@ -21,20 +21,85 @@ def _use_media_prompt(flags, index: int) -> bool:
     return flags[index] is not False
 
 
-def _compose_clip_prompt(clip: dict, media_rows: list) -> str:
-    parts = [_strip_comment_lines(clip.get("prompt") or "").strip()]
-    flags = clip.get("use_media_prompts")
+def _media_enabled(flags, index: int) -> bool:
+    if not isinstance(flags, list) or index >= len(flags):
+        return True
+    return flags[index] is not False
+
+
+def _clip_visual_entries(project: dict, clip: dict) -> list[dict]:
+    rows = resolve_clip_media(project, clip)
     visual = [
-        row for row in (media_rows or [])
+        row for row in (rows or [])
         if isinstance(row, dict) and str(row.get("kind") or "image").lower() != "audio"
     ]
+    prompt_flags = clip.get("use_media_prompts") if isinstance(clip, dict) else None
+    enabled_flags = clip.get("media_enabled") if isinstance(clip, dict) else None
+    out = []
     for index, row in enumerate(visual):
-        if not _use_media_prompt(flags, index):
+        out.append({
+            "row": row,
+            "id": str(row.get("id") or ""),
+            "enabled": _media_enabled(enabled_flags, index),
+            "use_prompt": _use_media_prompt(prompt_flags, index),
+        })
+    return out
+
+
+def _compose_clip_prompt(clip: dict, entries: list) -> str:
+    parts = [_strip_comment_lines(clip.get("prompt") or "").strip()]
+    for entry in entries or []:
+        if not entry.get("enabled") or not entry.get("use_prompt"):
             continue
+        row = entry.get("row") if isinstance(entry.get("row"), dict) else {}
         text = _strip_comment_lines(row.get("prompt") or "").strip()
         if text:
             parts.append(text)
     return "\n".join(part for part in parts if part)
+
+
+def _clip_image_ids(entries: list) -> list[str]:
+    return [entry["id"] for entry in (entries or []) if entry.get("enabled") and entry.get("id")]
+
+
+def _material_row(row: dict, resolve_media) -> dict | None:
+    if not isinstance(row, dict):
+        return None
+    file = str(row.get("file") or "").strip()
+    if not file:
+        return None
+    kind = str(row.get("kind") or "image").lower()
+    if kind not in ("image", "video", "audio"):
+        kind = "image"
+    mid = str(row.get("id") or "").strip() or _media_id_for(kind, file)
+    tags = row.get("tags") if isinstance(row.get("tags"), list) else []
+    out = {
+        "id": mid,
+        "kind": kind,
+        "file": resolve_media(file),
+        "name": str(row.get("name") or file.replace("\\", "/").rsplit("/", 1)[-1]),
+        "prompt": _strip_comment_lines(row.get("prompt") or ""),
+        "media_type": str(row.get("media_type") or "").strip(),
+        "tags": [str(tag).strip() for tag in tags if str(tag).strip()],
+        "location": str(row.get("location") or "input"),
+    }
+    try:
+        stars = int(row.get("stars"))
+    except (TypeError, ValueError):
+        stars = 0
+    if 1 <= stars <= 5:
+        out["stars"] = stars
+    return out
+
+
+def _add_material(materials: list, seen: set, row: dict, resolve_media) -> str:
+    material = _material_row(row, resolve_media)
+    if not material:
+        return ""
+    if material["id"] not in seen:
+        seen.add(material["id"])
+        materials.append(material)
+    return material["id"]
 
 
 def _read_project_version() -> str:
@@ -149,6 +214,19 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 return os.path.normpath(again)
         return os.path.normpath(resolved or path)
 
+    @staticmethod
+    def _audio_slice_file(row: dict, materials: dict | None = None) -> str:
+        materials = materials if isinstance(materials, dict) else {}
+        mid = str(row.get("id") or "").strip()
+        if mid and mid in materials:
+            path = str(materials[mid].get("file") or "").strip()
+            if path:
+                return path
+        path = str(row.get("file") or "").strip()
+        if path and path in materials:
+            return str(materials[path].get("file") or path)
+        return path
+
     def _resample_waveform(self, waveform, sample_rate, target_sample_rate):
         if sample_rate == target_sample_rate:
             return waveform
@@ -178,6 +256,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         duration_ms: int,
         sample_rate: int = 44100,
         timeline_start_ms: int = 0,
+        materials: dict | None = None,
     ):
         n = max(1, int(round(duration_ms / 1000 * sample_rate)))
         mixed = torch.zeros(1, 2, n)
@@ -186,9 +265,13 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         for row in rows:
             if not isinstance(row, dict):
                 continue
+            mid = str(row.get("id") or "").strip()
+            mat = (materials or {}).get(mid) if mid else {}
+            if not isinstance(mat, dict):
+                mat = {}
             path = self._resolve_audio_file(
-                row.get("file"),
-                str(row.get("location") or "input"),
+                self._audio_slice_file(row, materials),
+                str(mat.get("location") or row.get("location") or "input"),
             )
             if not path:
                 continue
@@ -255,6 +338,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         self,
         runtime_clips: list[dict],
         sample_rate: int = 44100,
+        materials: list | None = None,
     ):
         """Merge per-visual-segment audio in runtime order (gaps without visuals dropped).
 
@@ -264,6 +348,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         if not runtime_clips:
             return self._silent_audio(sample_rate, 1000)
 
+        mat_map = {
+            str(row["id"]): row
+            for row in (materials or [])
+            if isinstance(row, dict) and row.get("id")
+        }
         pieces = []
         for clip in runtime_clips:
             start = int(clip.get("start_ms", 0) or 0)
@@ -289,6 +378,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 dur_ms,
                 sample_rate,
                 timeline_start_ms=0,
+                materials=mat_map,
             )
             if mixed is None:
                 if rows:
@@ -363,7 +453,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         # Match timeline playback: audio export ignores track visibility/eye toggle.
         return track.get("enabled", True) is not False
 
-    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media, project: dict) -> list[dict]:
+    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media, project: dict, materials: list, seen: set) -> list[dict]:
         result = []
         for audio in audio_clips:
             audio_start, audio_end = self._clip_range(audio)
@@ -373,18 +463,28 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             source = self._source(audio)
             source_in = max(0, int(source.get("in_ms", 0) or 0))
-            file_name = self._clip_media_file(project, audio)
-            row = {
+            media_rows = resolve_clip_media(project, audio)
+            media = media_rows[0] if media_rows else None
+            if not isinstance(media, dict):
+                file_name = self._clip_media_file(project, audio)
+                if not file_name:
+                    continue
+                media = {
+                    "kind": str(source.get("kind") or "audio"),
+                    "file": file_name,
+                    "location": str(source.get("location") or "input"),
+                }
+            mid = _add_material(materials, seen, media, resolve_media)
+            if not mid:
+                continue
+            result.append({
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
-                "file": resolve_media(file_name, str(source.get("location") or "input")),
-                "location": "input",
+                "id": mid,
                 "source_start_ms": source_in + overlap_start - audio_start,
                 "source_end_ms": source_in + overlap_end - audio_start,
                 "clip_offset_ms": overlap_start - start_ms,
-            }
-            if row["file"]:
-                result.append(row)
+            })
         return result
 
     def _visual_segments(self, visual_clips: list[tuple[dict, dict, int]]) -> list[tuple[dict, int, int, int]]:
@@ -453,15 +553,14 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             return resolve_media_path(name, assets_dir="", location="input")
 
         runtime_clips = []
+        materials = []
+        seen_materials = set()
         for index, (clip, start, end, z_index) in enumerate(segments, start=1):
-            media_rows = resolve_clip_media(project, clip)
-            image_files = [
-                str(row.get("file") or "").strip()
-                for row in media_rows
-                if str(row.get("kind") or "image").lower() != "audio" and str(row.get("file") or "").strip()
-            ]
-            start_image = image_files[0] if image_files else ""
-            end_image = image_files[-1] if len(image_files) >= 2 else ""
+            entries = _clip_visual_entries(project, clip)
+            for entry in entries:
+                if not entry.get("enabled"):
+                    continue
+                _add_material(materials, seen_materials, entry.get("row") or {}, resolve_media)
             try:
                 head_sec = max(0, int(clip.get("head_extend_sec", 0) or 0))
             except (TypeError, ValueError):
@@ -489,12 +588,13 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "head_extend_sec": head_sec,
                 "tail_extend_sec": tail_sec,
                 "generate_preview_video": bool(clip.get("generate_preview_video", False)),
-                "start_image": resolve_media(start_image),
-                "end_image": resolve_media(end_image) if end_image else "",
-                "prompt": _compose_clip_prompt(clip, media_rows),
+                "images": _clip_image_ids(entries),
+                "prompt": _compose_clip_prompt(clip, entries),
                 "use_global_prompt": _clip_use_global_prompt(clip),
                 "z_index": z_index,
-                "audios": self._audio_slices(ext_start, ext_end, audio_clips, resolve_media, project),
+                "audios": self._audio_slices(
+                    ext_start, ext_end, audio_clips, resolve_media, project, materials, seen_materials,
+                ),
             })
 
         total_frame_count = max(1, sum(
@@ -503,11 +603,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         ))
         # Concatenate audio for each visual runtime segment (no gap filler),
         # matching the frame sequence / total_frame_count timeline.
-        clips_audio_out = self._concat_runtime_clips_audio(runtime_clips)
+        clips_audio_out = self._concat_runtime_clips_audio(runtime_clips, materials=materials)
         frame_seq_dir = self._prepare_frame_seq_dir()
         # Filesystem-safe stamp shared by this execute; downstream nodes can
         # use it as a unified filename / folder prefix.
-        run_prefix = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         data_json = json.dumps({
             "project_version": PROJECT_VERSION,
             "schema_version": PROJECT_VERSION,
@@ -516,7 +616,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "height": height,
             "global_prompt": global_prompt,
             "total_frame_count": total_frame_count,
-            "run_prefix": run_prefix,
+            "run_timestamp": run_timestamp,
+            "materials": materials,
             "clips": runtime_clips,
         }, ensure_ascii=False)
 

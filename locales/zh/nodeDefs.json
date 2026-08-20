@@ -78,7 +78,7 @@
       "first_frame": { "name": "首帧" },
       "last_frame":  { "name": "尾帧" },
       "prompt":      { "name": "提示词" },
-      "run_prefix":  { "name": "运行前缀" },
+      "run_timestamp": { "name": "运行时间戳" },
       "generate_preview_video": { "name": "生成预览时长视频" },
       "from_start":  { "name": "FROM开始" },
       "from_preview_start": { "name": "FROM预览开始" },

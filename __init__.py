@@ -399,6 +399,32 @@ def _register_routes():
             logging.exception("[CapricorncdTools] import_project_zip error")
             return web.json_response({"error": str(exc)}, status=500)
 
+    @routes.get("/audio_keyframe_timeline/output_videos")
+    async def api_list_output_videos(_request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        root = os.path.abspath(_fp.get_output_directory())
+        rows = []
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d not in {".git", "__pycache__", "temp"}]
+                for name in filenames:
+                    if os.path.splitext(name)[1].lower() not in VIDEO_EXTENSIONS:
+                        continue
+                    full = os.path.join(dirpath, name)
+                    try:
+                        mtime = os.path.getmtime(full)
+                    except OSError:
+                        continue
+                    rel = os.path.relpath(full, root).replace("\\", "/")
+                    if not rel or rel.startswith(".."):
+                        continue
+                    rows.append((mtime, rel))
+        except OSError:
+            rows = []
+        rows.sort(key=lambda item: item[0], reverse=True)
+        files = [rel for _, rel in rows[:400]]
+        return web.json_response({"files": files, "count": len(files)})
+
     @routes.get("/cap/ffmpeg_status")
     async def api_ffmpeg_status(_request: web.Request) -> web.Response:
         path = shutil.which("ffmpeg")

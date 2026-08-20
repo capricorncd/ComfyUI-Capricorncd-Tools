@@ -78,7 +78,7 @@
       "first_frame": { "name": "First Frame" },
       "last_frame":  { "name": "Last Frame" },
       "prompt":      { "name": "Prompt" },
-      "run_prefix":  { "name": "Run Prefix" },
+      "run_timestamp": { "name": "Run Timestamp" },
       "generate_preview_video": { "name": "Generate Preview Video" },
       "from_start":  { "name": "FROM Start" },
       "from_preview_start": { "name": "FROM Preview Start" },

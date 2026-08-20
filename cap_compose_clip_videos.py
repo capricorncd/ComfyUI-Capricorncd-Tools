@@ -80,7 +80,7 @@ def _safe_under(base: str, candidate: str) -> str:
 
 
 class CAP_ComposeClipVideos:
-    """Compose per-clip MP4s (under output/run_prefix) into one timeline video."""
+    """Compose per-clip MP4s (under output/run_timestamp) into one timeline video."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -90,8 +90,8 @@ class CAP_ComposeClipVideos:
                 "clips_dir": ("STRING", {
                     "default": "",
                     "tooltip": (
-                        "片段视频目录。留空=ComfyUI output/{run_prefix}；"
-                        "相对路径相对 output；也可直接填 run_prefix。"
+                        "片段视频目录。留空=ComfyUI output/{run_timestamp}；"
+                        "相对路径相对 output；也可直接填 run_timestamp。"
                     ),
                 }),
                 "name_mode": (
@@ -133,7 +133,7 @@ class CAP_ComposeClipVideos:
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
-        "Compose multi-clip videos produced under output/run_prefix into one MP4. "
+        "Compose multi-clip videos produced under output/run_timestamp into one MP4. "
         "Optionally trims head/tail extend so the final cut matches preview duration. "
         "When save_sidecar is true, write a same-name JSON next to the video."
     )
@@ -149,14 +149,14 @@ class CAP_ComposeClipVideos:
             data = {}
         return data if isinstance(data, dict) else {}
 
-    def _resolve_clips_dir(self, clips_dir: str, run_prefix: str) -> str:
+    def _resolve_clips_dir(self, clips_dir: str, run_timestamp: str) -> str:
         output_dir = os.path.abspath(folder_paths.get_output_directory())
         raw = str(clips_dir or "").strip().replace("\\", "/")
-        prefix = str(run_prefix or "").strip().replace("\\", "/").strip("/")
+        prefix = str(run_timestamp or "").strip().replace("\\", "/").strip("/")
 
         if not raw:
             if not prefix:
-                raise ValueError("clips_dir 为空且 data_json 中没有 run_prefix")
+                raise ValueError("clips_dir 为空且 data_json 中没有 run_timestamp")
             path = os.path.join(output_dir, *prefix.split("/"))
             path = _safe_under(output_dir, path)
             if not os.path.isdir(path):
@@ -313,8 +313,8 @@ class CAP_ComposeClipVideos:
             raise ValueError("data_json 中没有可用 clips")
 
         fps = max(1.0, float(data.get("fps", 24.0) or 24.0))
-        run_prefix = str(data.get("run_prefix") or "").strip()
-        resolved_dir = self._resolve_clips_dir(clips_dir, run_prefix)
+        run_timestamp = str(data.get("run_timestamp") or data.get("run_prefix") or "").strip()
+        resolved_dir = self._resolve_clips_dir(clips_dir, run_timestamp)
         parser = CAP_DataJsonClipParser()
 
         sources: list[tuple[dict, int, str]] = []
