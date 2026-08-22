@@ -197,6 +197,17 @@
     }
   },
 
+  "CAP_ShowAnything": {
+    "display_name": "Show Anything",
+    "inputs": {
+      "anything": { "name": "Anything" },
+      "format_json": { "name": "Format JSON" }
+    },
+    "outputs": {
+      "output": { "name": "Output" }
+    }
+  },
+
   "CAP_ClearDirectory": {
     "display_name": "Clear Directory",
     "inputs": {

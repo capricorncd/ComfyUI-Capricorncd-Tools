@@ -51,6 +51,7 @@ from .cap_format_json import (
     NODE_CLASS_MAPPINGS as _CFJ_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CFJ_NAMES,
 )
+from .cap_show_anything import CAP_ShowAnything
 from .cap_prompt_group import (
     NODE_CLASS_MAPPINGS as _CPG_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CPG_NAMES,
@@ -91,6 +92,7 @@ NODE_CLASS_MAPPINGS = {
     **_CCD_CLASS,
     **_CSS_CLASS,
     **_CFJ_CLASS,
+    "CAP_ShowAnything": CAP_ShowAnything,
     **_CPG_CLASS,
     **_CMH_CLASS,
     **_CVP_CLASS,
@@ -110,6 +112,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CCD_NAMES,
     **_CSS_NAMES,
     **_CFJ_NAMES,
+    "CAP_ShowAnything": "Show Anything",
     **_CPG_NAMES,
     **_CMH_NAMES,
     **_CVP_NAMES,

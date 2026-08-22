@@ -197,6 +197,17 @@
     }
   },
 
+  "CAP_ShowAnything": {
+    "display_name": "展示任何",
+    "inputs": {
+      "anything": { "name": "输入任何" },
+      "format_json": { "name": "格式化 JSON" }
+    },
+    "outputs": {
+      "output": { "name": "输出" }
+    }
+  },
+
   "CAP_ClearDirectory": {
     "display_name": "清空目录",
     "inputs": {

@@ -29,6 +29,7 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 | **Clear Directory** | Deletes selected media files in a directory; supports Recycle Bin on Windows | [→](docs/clear-directory.md) · [中文](docs/zh/clear-directory.md) |
 | **Size Settings** | Size preset / scale / lock aspect / orientation → `width`, `height`, `count`, `fps` | [→](docs/size-settings.md) · [中文](docs/zh/size-settings.md) |
 | **Format JSON** | Pretty-print a JSON string in the graph UI | [→](docs/format-json.md) · [中文](docs/zh/format-json.md) |
+| **Show Anything** | Show any value on the node; persists across refresh; optional Format JSON | [→](docs/show-anything.md) · [中文](docs/zh/show-anything.md) |
 
 ---
 
@@ -98,6 +99,7 @@ docs/
 ├── clear-directory.md
 ├── size-settings.md
 ├── format-json.md
+├── show-anything.md
 └── zh/                  # 简体中文文档
     └── (same set)
 ```

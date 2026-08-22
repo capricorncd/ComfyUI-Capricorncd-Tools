@@ -29,6 +29,7 @@
 | **Clear Directory** | 删除目录中选定类型的媒体文件；Windows 支持回收站 | [→](docs/zh/clear-directory.md) |
 | **Size Settings** | 尺寸预设 / 倍数 / 锁定比例 / 方向 → `width`、`height`、`count`、`fps` | [→](docs/zh/size-settings.md) |
 | **Format JSON** | 在画布上格式化显示 JSON 字符串 | [→](docs/zh/format-json.md) |
+| **Show Anything** | 展示任意值；刷新后保留；可选格式化 JSON | [→](docs/zh/show-anything.md) |
 
 ---
 
