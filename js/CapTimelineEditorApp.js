@@ -3218,6 +3218,18 @@ export class CapTimelineEditorApp {
             name.title = row.file;
             name.addEventListener("click", () => this._openGenVideoModal(clip, index));
 
+            const mute = document.createElement("button");
+            mute.type = "button";
+            mute.className = "cat-te-clip-video-mute";
+            const muted = row.muted === true;
+            mute.innerHTML = muted ? ICONS.volumeOff : ICONS.volume;
+            mute.classList.toggle("active", muted);
+            mute.title = muted ? "解除禁音" : "禁音";
+            mute.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._setGeneratedVideoMuted(clip, row.id, !muted);
+            });
+
             const del = document.createElement("button");
             del.type = "button";
             del.className = "cat-te-clip-video-del";
@@ -3228,7 +3240,7 @@ export class CapTimelineEditorApp {
                 this._deleteGeneratedVideo(clip, row.id);
             });
 
-            item.append(enable, thumb, name, del);
+            item.append(enable, thumb, name, mute, del);
             this.clipVideosList.appendChild(item);
             void this._getOutputVideoThumbnail(row.file).then((url) => {
                 if (url && thumb.isConnected) thumb.src = url;
@@ -3253,6 +3265,27 @@ export class CapTimelineEditorApp {
         this._scheduleProgramPreview();
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         if (this._genVideoState?.clipId === clip.id) this._showGenVideoAt(this._genVideoState.index || 0);
+        this._saveToWidgets();
+    }
+
+    _setGeneratedVideoMuted(clip, videoId, muted) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        m.generatedVideos = this._clipGeneratedVideos(m);
+        const row = m.generatedVideos.find((item) => item.id === videoId);
+        if (!row || row.muted === muted) return;
+        this._recordUndo();
+        row.muted = muted === true;
+        this._meta.set(clip.id, m);
+        this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
+        if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
+        if (this._genVideoState?.clipId === clip.id) {
+            const cur = this._currentGenVideo();
+            if (cur?.row?.id === videoId && this.genVideoMutedCb) {
+                this.genVideoMutedCb.checked = row.muted === true;
+            }
+        }
         this._saveToWidgets();
     }
 
@@ -3365,17 +3398,7 @@ export class CapTimelineEditorApp {
     _onGenVideoMutedChange() {
         const cur = this._currentGenVideo();
         if (!cur || !this.genVideoMutedCb) return;
-        const muted = !!this.genVideoMutedCb.checked;
-        const m = this._ensureClipMeta(cur.clip);
-        m.generatedVideos = this._clipGeneratedVideos(m);
-        const row = m.generatedVideos.find((item) => item.id === cur.row.id) || m.generatedVideos[cur.index];
-        if (!row || row.muted === muted) return;
-        this._recordUndo();
-        row.muted = muted;
-        this._meta.set(cur.clip.id, m);
-        this._scheduleProgramPreview();
-        if (this._timeline?._playing) this._startAudioPlayback();
-        this._saveToWidgets();
+        this._setGeneratedVideoMuted(cur.clip, cur.row.id, !!this.genVideoMutedCb.checked);
     }
 
     _onGenVideoNoteChange() {
@@ -6657,6 +6680,16 @@ export class CapTimelineEditorApp {
                 { label: "查看素材", fn: () => this._openClipItemsModal(clip) },
                 { label: "添加生成的视频", fn: () => void this._openOutputVideosPicker(clip) },
             );
+            if (this._clipUsesGeneratedPreview(m)) {
+                const gen = this._firstEnabledGeneratedVideo(m);
+                if (gen) {
+                    const muted = gen.muted === true;
+                    items.push({
+                        label: muted ? "解除禁音" : "禁音",
+                        fn: () => this._setGeneratedVideoMuted(clip, gen.id, !muted),
+                    });
+                }
+            }
         }
         items.push(
             { label: "复制  Ctrl+C", fn: () => this._copySelectedClips() },

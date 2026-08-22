@@ -1426,7 +1426,8 @@ body.cat-te-media-dnd-over-tl {
     gap: 12px;
 }
 .cat-te-ctx-item:hover { background: rgba(91, 78, 255, 0.2); color: #fff; }
-.cat-te-ctx-item.danger:hover { background: rgba(255, 68, 102, 0.2); }
+.cat-te-ctx-item.danger { color: #ff7a90; }
+.cat-te-ctx-item.danger:hover { background: rgba(255, 68, 102, 0.2); color: #ff9aab; }
 .cat-te-ctx-item.strike { text-decoration: line-through; opacity: 0.72; }
 
 .cat-te-frame-preview {
@@ -2305,6 +2306,32 @@ body.cat-te-media-dnd-over-tl {
     padding: 0;
 }
 .cat-te-clip-video-name:hover { color: #fff; }
+.cat-te-clip-video-mute {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #8888b0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.cat-te-clip-video-mute svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+}
+.cat-te-clip-video-mute:hover {
+    color: #ddd;
+    background: rgba(255, 255, 255, 0.06);
+}
+.cat-te-clip-video-mute.active {
+    color: #f0a0a8;
+}
 .cat-te-clip-video-del {
     flex-shrink: 0;
     width: 18px;
