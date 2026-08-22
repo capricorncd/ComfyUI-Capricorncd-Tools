@@ -27,7 +27,11 @@ const DEFAULT_PROGRAM_PANEL_H = 240;
 const MAX_PROGRAM_PANEL_FRAC = 0.7;
 const STORAGE_MEDIA_LIST_VIEW = "cat-te-media-list-view";
 /** Per-node timeline viewport (scroll) when project settings lack it. */
-const STORAGE_VIEW_PREFIX = "cat-te-view:";
+const STORAGE_AI_PROMPT_MODEL = "cat-te-ai-prompt-model";
+const STORAGE_AI_PROMPT_SKILL = "cat-te-ai-prompt-skill";
+const STORAGE_AI_PROMPT_LANG = "cat-te-ai-prompt-lang";
+const AI_PROMPT_LANGUAGES = ["简体中文", "繁體中文", "English", "日本語"];
+const SKILL_URL_DEFAULT = "https://github.com/T8mars/minimax-h3-prompt-skill-T8";
 const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
@@ -56,6 +60,13 @@ const CLIP_AGENTS = [
     { id: "Wan", label: "Wan" },
     { id: "other", label: "其他" },
 ];
+const AI_AUDIO_MODES = [
+    { id: "none", label: "不使用背景音频" },
+    { id: "lipsync", label: "数字人对口型" },
+    { id: "perform", label: "只表演不对口型" },
+    { id: "auto", label: "其他（根据音频自由发挥）" },
+];
+const AI_AUDIO_MODE_IDS = new Set(AI_AUDIO_MODES.map((row) => row.id));
 const MEDIA_ASSET_TYPES = [
     { id: "character", label: "角色" },
     { id: "scene", label: "场景" },
@@ -122,6 +133,7 @@ function defaultImageMeta(trackIndex = 0) {
         clipType: "image",
         mediaKind: "clip",
         prompt: "",
+        aiPrompt: "",
         endImage: null,
         useGlobalPrompt: true,
         disabled: false,
@@ -138,6 +150,7 @@ function defaultImageMeta(trackIndex = 0) {
         items: [],
         generatedVideos: [],
         previewMode: "media",
+        aiAudioMode: "",
     };
 }
 
@@ -634,16 +647,17 @@ export class CapTimelineEditorApp {
     _showImportMenu(e) {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
-            { label: "从目录导入", fn: () => void this._importFromDirectory() },
-            { label: "从ZIP导入", fn: () => this._chooseZipImport() },
+            { label: "从目录导入项目", fn: () => void this._importFromDirectory() },
+            { label: "从ZIP导入项目", fn: () => this._chooseZipImport() },
         ], r.left, r.bottom + 4);
     }
 
     _showExportMenu(e) {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
-            { label: "导出到目录", fn: () => void this._exportToDirectory() },
-            { label: "导出为ZIP", fn: () => void this._exportAsZip() },
+            { label: "导出项目及素材到目录", fn: () => void this._exportToDirectory() },
+            { label: "导出项目及素材为ZIP", fn: () => void this._exportAsZip() },
+            { label: "合成视频", fn: () => void this._composeGeneratedVideosExport() },
         ], r.left, r.bottom + 4);
     }
 
@@ -856,6 +870,11 @@ export class CapTimelineEditorApp {
         }
     }
 
+    _composeGeneratedVideosExport() {
+        // TODO: 按时间轴顺序把各 clip 绑定的生成视频拼接成完整成片并导出。
+        alert("Coming soon — this feature is under development.");
+    }
+
     async _exportAsZip() {
         try {
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/export_zip"), {
@@ -1056,6 +1075,7 @@ export class CapTimelineEditorApp {
                         <video class="cat-te-clip-thumb-video" muted playsinline hidden></video>
                         <div class="cat-te-clip-thumb-empty" hidden>空 Clip</div>
                         <button type="button" class="cat-te-clip-thumb-sort" title="查看素材" hidden>${iconHtml("squareArrowOutUpRight", 12)}</button>
+                        <button type="button" class="cat-te-clip-thumb-delete" title="从 Clip 中移除" hidden>${iconHtml("trash", 12)}</button>
                       </div>
                       <button type="button" class="cat-te-clip-swiper-nav next" title="下一个素材" hidden>›</button>
                       <span class="cat-te-clip-item-index"></span>
@@ -1128,11 +1148,17 @@ export class CapTimelineEditorApp {
               </div>
               <div class="cat-te-prompt-wrap">
                 <div class="cat-te-prompt-label-row">
-                  <div class="cat-te-prompt-label">Keyframe Prompt</div>
-                  <button type="button" class="cat-te-prompt-comment-btn" title="注释 / 取消注释（Ctrl+/）" disabled>${iconHtml("comment", 12)}</button>
+                  <div class="cat-te-prompt-tabs">
+                    <button type="button" class="cat-te-prompt-tab is-active" data-tab="clip">Clip Prompt</button>
+                    <button type="button" class="cat-te-prompt-tab" data-tab="ai">AI Prompt</button>
+                  </div>
+                  <button type="button" class="cat-te-ai-optimize-btn" title="AI 优化提示词" disabled>${iconHtml("sparkles", 12)}<span>AI优化</span></button>
                 </div>
-                <div class="cat-te-prompt-input-wrap">
+                <div class="cat-te-prompt-input-wrap" data-prompt-tab="clip">
                   <textarea class="cat-te-prompt-input" placeholder="选中 Clip 后编辑提示词…" disabled></textarea>
+                </div>
+                <div class="cat-te-prompt-input-wrap" data-prompt-tab="ai" hidden>
+                  <textarea class="cat-te-ai-prompt-input" placeholder="AI 生成的提示词，可手动修改…" disabled></textarea>
                 </div>
               </div>
               <div class="cat-te-clip-videos" hidden>
@@ -1199,8 +1225,6 @@ export class CapTimelineEditorApp {
               <div class="cat-te-media-preview-footer">
                 <span class="cat-te-media-preview-hint">← → 切换 · 左键下一张 · 右键上一张 · 点击星星设置评级</span>
                 <div class="cat-te-media-preview-actions">
-                  <button type="button" class="cat-te-btn cat-te-media-preview-replace" hidden>替换</button>
-                  <button type="button" class="cat-te-btn cat-te-media-preview-end-frame" hidden>设为尾帧</button>
                   <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-media-preview-insert">插入到当前位置</button>
                 </div>
               </div>
@@ -1213,10 +1237,6 @@ export class CapTimelineEditorApp {
                 <button type="button" class="cat-te-modal-close cat-te-clip-items-close" title="关闭">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-clip-items-body"></div>
-              <div class="cat-te-clip-items-footer">
-                <span class="cat-te-clip-items-hint">修改序号后点应用，数字小的排前面</span>
-                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-clip-items-apply">应用</button>
-              </div>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-gen-video-modal" hidden>
@@ -1271,6 +1291,95 @@ export class CapTimelineEditorApp {
               </div>
             </div>
           </div>
+          <div class="cat-te-modal-backdrop cat-te-ai-optimize-modal" hidden>
+            <div class="cat-te-modal cat-te-ai-optimize-dialog">
+              <div class="cat-te-modal-header">
+                <span class="cat-te-ai-optimize-title">AI 优化提示词</span>
+                <button type="button" class="cat-te-modal-close cat-te-ai-optimize-close" title="关闭">${iconHtml("close", 16)}</button>
+              </div>
+              <div class="cat-te-ai-optimize-body">
+                <div class="cat-te-ai-optimize-left">
+                  <div class="cat-te-ai-optimize-tabs">
+                    <button type="button" class="cat-te-ai-src-tab is-active" data-src="media">素材提示词</button>
+                    <button type="button" class="cat-te-ai-src-tab" data-src="clip">Clip Prompt</button>
+                    <button type="button" class="cat-te-ai-src-tab" data-src="global">全局提示词</button>
+                  </div>
+                  <textarea class="cat-te-ai-src-text" readonly></textarea>
+                </div>
+                <div class="cat-te-ai-optimize-right">
+                  <div class="cat-te-ai-field-row">
+                    <div class="cat-te-ai-field">
+                      <span class="cat-te-ai-field-label">
+                        模型
+                        <span class="cat-te-info-tip" tabindex="0" aria-label="模型说明">
+                          ${iconHtml("info", 12)}
+                          <span class="cat-te-info-tip-pop">
+                            将 Qwen3-VL 模型文件夹放到：<br />
+                            <code>ComfyUI/models/prompt_generator/</code><br />
+                            也可放在 <code>ComfyUI/models/LLM/</code>。<br />
+                            目录内需有 <code>config.json</code>（Hugging Face 完整仓库）。<br /><br />
+                            下载示例：<br />
+                            <a href="https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct" target="_blank" rel="noopener">Hugging Face · Qwen3-VL-4B-Instruct</a><br />
+                            <a href="https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct" target="_blank" rel="noopener">Hugging Face · Qwen3-VL-2B-Instruct</a><br />
+                            <a href="https://modelscope.cn/models/Qwen/Qwen3-VL-4B-Instruct" target="_blank" rel="noopener">ModelScope · Qwen3-VL-4B-Instruct</a>
+                          </span>
+                        </span>
+                      </span>
+                      <select class="cat-te-ai-model"></select>
+                    </div>
+                    <label class="cat-te-ai-field">
+                      <span>输出语言</span>
+                      <select class="cat-te-ai-lang">
+                        <option value="简体中文" selected>简体中文</option>
+                        <option value="繁體中文">繁體中文</option>
+                        <option value="English">English</option>
+                        <option value="日本語">日本語</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="cat-te-ai-field">
+                    <span>背景音频</span>
+                    <select class="cat-te-ai-audio-mode">
+                      <option value="none">不使用背景音频</option>
+                      <option value="lipsync">数字人对口型</option>
+                      <option value="perform">只表演不对口型</option>
+                      <option value="auto">其他（根据音频自由发挥）</option>
+                    </select>
+                    <span class="cat-te-ai-audio-hint"></span>
+                  </div>
+                  <label class="cat-te-ai-field">
+                    <span>Agent 提示词</span>
+                    <textarea class="cat-te-ai-system" rows="6"></textarea>
+                  </label>
+                  <div class="cat-te-ai-skill-head">
+                    <span>Prompt Skill</span>
+                    <div class="cat-te-ai-skill-actions">
+                      <button type="button" class="cat-te-btn cat-te-skill-pick-btn">选择</button>
+                      <button type="button" class="cat-te-btn cat-te-skill-sync-btn" title="从 GitHub 同步最新 Skill">${iconHtml("refresh", 12)}<span>更新</span></button>
+                    </div>
+                  </div>
+                  <textarea class="cat-te-ai-skill" rows="3" placeholder="可选。点击「选择」从本地 Skill 库填入…"></textarea>
+                  <label class="cat-te-ai-field cat-te-ai-result-field">
+                    <span>生成后的提示词</span>
+                    <textarea class="cat-te-ai-result" rows="8" placeholder="点击生成后显示，可手动修改"></textarea>
+                  </label>
+                  <div class="cat-te-ai-optimize-actions">
+                    <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>生成</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="cat-te-modal-backdrop cat-te-skill-picker-modal" hidden>
+            <div class="cat-te-modal cat-te-skill-picker-dialog">
+              <div class="cat-te-modal-header">
+                <span>选择 Prompt Skill</span>
+                <input class="cat-te-skill-picker-filter" type="search" placeholder="搜索名称…" />
+                <button type="button" class="cat-te-modal-close cat-te-skill-picker-close" title="关闭">${iconHtml("close", 16)}</button>
+              </div>
+              <div class="cat-te-skill-picker-body"></div>
+            </div>
+          </div>
           <div class="cat-te-modal-backdrop cat-te-settings-modal" hidden>
             <div class="cat-te-modal">
               <div class="cat-te-modal-header">
@@ -1316,7 +1425,10 @@ export class CapTimelineEditorApp {
         this.programMeta = el.querySelector(".cat-te-program-meta");
         this.promptInput = el.querySelector(".cat-te-clip-panel .cat-te-prompt-input");
         attachRichPromptHandler(this.promptInput, { mode: "widget" });
-        this.promptCommentBtn = el.querySelector(".cat-te-clip-panel .cat-te-prompt-comment-btn");
+        this.aiPromptInput = el.querySelector(".cat-te-clip-panel .cat-te-ai-prompt-input");
+        attachRichPromptHandler(this.aiPromptInput, { mode: "widget" });
+        this.aiOptimizeBtn = el.querySelector(".cat-te-ai-optimize-btn");
+        this.clipPromptTabs = el.querySelectorAll(".cat-te-clip-panel .cat-te-prompt-tab");
         attachRichPromptHandler(this.globalPromptInput, { mode: "widget" });
         this.useGlobalCb = el.querySelector(".cat-te-use-global-cb");
         this.useMediaPromptCb = el.querySelector(".cat-te-use-media-prompt-cb");
@@ -1338,6 +1450,7 @@ export class CapTimelineEditorApp {
         this.clipThumbVideo = el.querySelector(".cat-te-clip-thumb-video");
         this.clipThumbEmpty = el.querySelector(".cat-te-clip-thumb-empty");
         this.clipThumbSortBtn = el.querySelector(".cat-te-clip-thumb-sort");
+        this.clipThumbDeleteBtn = el.querySelector(".cat-te-clip-thumb-delete");
         this.clipVideosHost = el.querySelector(".cat-te-clip-videos");
         this.clipVideosList = el.querySelector(".cat-te-clip-videos-list");
         this.clipVideosOpenBtn = el.querySelector(".cat-te-clip-videos-open");
@@ -1357,8 +1470,6 @@ export class CapTimelineEditorApp {
         this.mediaPreviewPrevBtn = el.querySelector(".cat-te-media-preview-nav.prev");
         this.mediaPreviewNextBtn = el.querySelector(".cat-te-media-preview-nav.next");
         this.mediaPreviewInsertBtn = el.querySelector(".cat-te-media-preview-insert");
-        this.mediaPreviewReplaceBtn = el.querySelector(".cat-te-media-preview-replace");
-        this.mediaPreviewEndFrameBtn = el.querySelector(".cat-te-media-preview-end-frame");
         this.mediaPreviewFooter = el.querySelector(".cat-te-media-preview-footer");
         this.mediaPreviewHint = el.querySelector(".cat-te-media-preview-hint");
         this.mediaPreviewDesc = el.querySelector(".cat-te-media-preview-desc");
@@ -1370,7 +1481,6 @@ export class CapTimelineEditorApp {
         this.clipItemsModal = el.querySelector(".cat-te-clip-items-modal");
         this.clipItemsTitle = el.querySelector(".cat-te-clip-items-title");
         this.clipItemsBody = el.querySelector(".cat-te-clip-items-body");
-        this.clipItemsApplyBtn = el.querySelector(".cat-te-clip-items-apply");
         this.addMaterialModal = el.querySelector(".cat-te-add-material-modal");
         this.addMaterialPreview = el.querySelector(".cat-te-add-material-preview");
         this.addMaterialTitle = el.querySelector(".cat-te-add-material-title");
@@ -1387,6 +1497,23 @@ export class CapTimelineEditorApp {
         this.outputVideosModal = el.querySelector(".cat-te-output-videos-modal");
         this.outputVideosBody = el.querySelector(".cat-te-output-videos-body");
         this.outputVideosFilter = el.querySelector(".cat-te-output-videos-filter");
+        this.aiOptimizeModal = el.querySelector(".cat-te-ai-optimize-modal");
+        this.aiOptimizeTitle = el.querySelector(".cat-te-ai-optimize-title");
+        this.aiModelSelect = el.querySelector(".cat-te-ai-model");
+        this.aiLangSelect = el.querySelector(".cat-te-ai-lang");
+        this.aiAudioModeSelect = el.querySelector(".cat-te-ai-audio-mode");
+        this.aiAudioHint = el.querySelector(".cat-te-ai-audio-hint");
+        this.aiSystemInput = el.querySelector(".cat-te-ai-system");
+        this.aiSkillInput = el.querySelector(".cat-te-ai-skill");
+        this.skillPickBtn = el.querySelector(".cat-te-skill-pick-btn");
+        this.skillSyncBtn = el.querySelector(".cat-te-skill-sync-btn");
+        this.skillPickerModal = el.querySelector(".cat-te-skill-picker-modal");
+        this.skillPickerBody = el.querySelector(".cat-te-skill-picker-body");
+        this.skillPickerFilter = el.querySelector(".cat-te-skill-picker-filter");
+        this.aiResultInput = el.querySelector(".cat-te-ai-result");
+        this.aiGenerateBtn = el.querySelector(".cat-te-ai-generate");
+        this.aiSrcText = el.querySelector(".cat-te-ai-src-text");
+        this.aiSrcTabs = el.querySelectorAll(".cat-te-ai-src-tab");
 
         this.settingsModal = el.querySelector(".cat-te-settings-modal");
         this.langSelect = el.querySelector(".cat-te-lang-select");
@@ -1419,14 +1546,6 @@ export class CapTimelineEditorApp {
         this.mediaPreviewInsertBtn?.addEventListener("click", (e) => {
             e.stopPropagation();
             void this._insertMediaPreviewAtSeek();
-        });
-        this.mediaPreviewReplaceBtn?.addEventListener("click", (e) => {
-            e.stopPropagation();
-            this._replaceSelectedClipFromPreview();
-        });
-        this.mediaPreviewEndFrameBtn?.addEventListener("click", (e) => {
-            e.stopPropagation();
-            this._setEndFrameFromPreview();
         });
         this.mediaPreviewBody?.addEventListener("mousedown", (e) => {
             if (this.mediaPreviewModal.hidden) return;
@@ -1488,11 +1607,15 @@ export class CapTimelineEditorApp {
         this.promptInput.addEventListener("focus", () => { this._promptUndoArmed = true; });
         this.promptInput.addEventListener("blur", () => { this._promptUndoArmed = false; });
         this.promptInput.addEventListener("input", () => this._onPromptInput());
-        this.promptCommentBtn?.addEventListener("click", () => {
-            if (this.promptInput?.disabled) return;
-            this.promptInput.focus();
-            toggleComment(this.promptInput);
-            this._onPromptInput();
+        this.aiPromptInput?.addEventListener("focus", () => { this._aiPromptUndoArmed = true; });
+        this.aiPromptInput?.addEventListener("blur", () => { this._aiPromptUndoArmed = false; });
+        this.aiPromptInput?.addEventListener("input", () => this._onAiPromptInput());
+        this.clipPromptTabs?.forEach((tab) => {
+            tab.addEventListener("click", () => this._setClipPromptTab(tab.dataset.tab));
+        });
+        this.aiOptimizeBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            void this._openAiOptimizeModal();
         });
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
         this.useMediaPromptCb?.addEventListener("change", () => this._onUseMediaPromptChange());
@@ -1522,6 +1645,10 @@ export class CapTimelineEditorApp {
             e.stopPropagation();
             const clip = this._selClip;
             if (clip) this._openClipItemsModal(clip);
+        });
+        this.clipThumbDeleteBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this._removeCurrentClipItem();
         });
         this.clipVideosOpenBtn?.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -1561,7 +1688,41 @@ export class CapTimelineEditorApp {
         this.clipItemsModal?.addEventListener("click", (e) => {
             if (e.target === this.clipItemsModal) this._closeClipItemsModal();
         });
-        el.querySelector(".cat-te-clip-items-apply")?.addEventListener("click", () => this._applyClipItemsOrderInput());
+        el.querySelector(".cat-te-ai-optimize-close")?.addEventListener("click", () => this._closeAiOptimizeModal());
+        this.aiOptimizeModal?.addEventListener("click", (e) => {
+            if (e.target === this.aiOptimizeModal) this._closeAiOptimizeModal();
+        });
+        this.aiSrcTabs?.forEach((tab) => {
+            tab.addEventListener("click", () => this._setAiOptimizeSrcTab(tab.dataset.src));
+        });
+        this.aiGenerateBtn?.addEventListener("click", () => void this._runAiOptimize());
+        this.aiResultInput?.addEventListener("input", () => this._onAiResultInput());
+        this.aiLangSelect?.addEventListener("change", () => {
+            const lang = this._aiOutputLanguage();
+            localStorage.setItem(STORAGE_AI_PROMPT_LANG, lang);
+        });
+        this.aiAudioModeSelect?.addEventListener("change", () => this._onAiAudioModeChange());
+        this.skillPickBtn?.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this._openSkillPicker();
+        });
+        this.skillSyncBtn?.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this._syncH3Skills();
+        });
+        el.querySelector(".cat-te-skill-picker-close")?.addEventListener("click", () => this._closeSkillPicker());
+        this.skillPickerModal?.addEventListener("click", (e) => {
+            if (e.target === this.skillPickerModal) this._closeSkillPicker();
+        });
+        this.skillPickerFilter?.addEventListener("input", () => this._renderSkillPicker());
+        this.skillPickerBody?.addEventListener("click", (e) => {
+            const btn = e.target.closest?.(".cat-te-skill-apply");
+            if (!btn) return;
+            e.preventDefault();
+            void this._applyH3Skill(btn.dataset.skillId);
+        });
 
         el.addEventListener("keydown", e => {
             const typing = !!e.target?.closest?.("input, textarea, select, [contenteditable='true']");
@@ -1584,6 +1745,8 @@ export class CapTimelineEditorApp {
                 if (!this.addMaterialModal.hidden) { this._closeAddMaterial(); e.stopPropagation(); return; }
                 if (!this.mediaPreviewModal.hidden) { this._closeMediaPreview(); e.stopPropagation(); return; }
                 if (!this.clipItemsModal?.hidden) { this._closeClipItemsModal(); e.stopPropagation(); return; }
+                if (!this.skillPickerModal?.hidden) { this._closeSkillPicker(); e.stopPropagation(); return; }
+                if (!this.aiOptimizeModal?.hidden) { this._closeAiOptimizeModal(); e.stopPropagation(); return; }
                 if (!this.settingsModal.hidden) { this._closeSettings(); e.stopPropagation(); return; }
                 if (this._removeCtxMenu()) { e.stopPropagation(); return; }
                 if (this._closeMediaFilterPanel()) { e.stopPropagation(); return; }
@@ -3188,7 +3351,7 @@ export class CapTimelineEditorApp {
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
     }
 
-    _insertItemIntoClip(clip, file, kind, where = "end") {
+    _insertItemIntoClip(clip, file, kind) {
         if (!clip || !file || clip.track?.type === "audio") return;
         this._recordUndo();
         const m = this._ensureClipMeta(clip);
@@ -3198,13 +3361,14 @@ export class CapTimelineEditorApp {
             ? { id: media.id, kind: media.kind, file: media.file, useMediaPrompt: true, enabled: true }
             : normalizeClipItem({ kind, file });
         if (!item) return;
-        if (where === "start") m.items.unshift(item);
-        else m.items.push(item);
+        m.items.push(item);
         this._meta.set(clip.id, m);
-        this._setClipPreviewItemIndex(clip, where === "start" ? 0 : m.items.length - 1);
+        this._setClipPreviewItemIndex(clip, m.items.length - 1);
         this._syncClipPrimaryAppearance(clip);
         this._renderMediaGrid();
         this._saveToWidgets();
+        if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
+        if (this._clipItemsModalClipId === clip.id) this._renderClipItemsModal(clip);
     }
 
     _applyClipItemOrder(clip, orderedItems) {
@@ -3226,11 +3390,40 @@ export class CapTimelineEditorApp {
         m.mediaIds = m.items.map((item) => item.id).filter(Boolean);
         this._normalizeVisualMeta(clip, m, { seedFromClip: false });
         this._meta.set(clip.id, m);
-        this._setClipPreviewItemIndex(clip, 0);
         this._syncClipPrimaryAppearance(clip);
         this._scheduleProgramPreview();
         this._saveToWidgets();
         return true;
+    }
+
+    _removeCurrentClipItem() {
+        const clip = this._selClip;
+        if (!clip || clip.track?.type === "audio") return;
+        const m = this._ensureClipMeta(clip);
+        this._normalizeVisualMeta(clip, m, { seedFromClip: false });
+        const items = this._clipItems(m);
+        const idx = this._clipPreviewItemIndex(clip, m);
+        const current = items[idx];
+        if (!current) return;
+        const name = current.file.split(/[\\/]/).pop() || current.file;
+        if (!confirm(`确定从 clip 中移除「${name}」？\n不会删除磁盘文件。`)) return;
+        this._recordUndo();
+        m.items = items.filter((_, i) => i !== idx).map((item) => ({
+            id: item.id,
+            kind: item.kind,
+            file: item.file,
+            useMediaPrompt: item.useMediaPrompt !== false,
+            enabled: item.enabled !== false,
+        }));
+        m.mediaIds = m.items.map((item) => item.id).filter(Boolean);
+        this._normalizeVisualMeta(clip, m, { seedFromClip: false });
+        this._meta.set(clip.id, m);
+        this._setClipPreviewItemIndex(clip, Math.min(idx, Math.max(0, m.items.length - 1)));
+        this._syncClipPrimaryAppearance(clip);
+        this._scheduleProgramPreview();
+        this._saveToWidgets();
+        this._updateClipInfoPanel(clip);
+        if (this._clipItemsModalClipId === clip.id) this._renderClipItemsModal(clip);
     }
 
     _activeMediaFilterCount() {
@@ -3977,11 +4170,8 @@ export class CapTimelineEditorApp {
         this._dndHoverClip = null;
 
         if (targetClip && (kind === "image" || kind === "video") && targetClip.track.type === "image") {
-            // Defer past the click synthesized after pointerup — otherwise the
-            // document click listener removes the menu in the same gesture.
-            const x = clientX;
-            const y = clientY;
-            setTimeout(() => this._showDropActionMenu(file, targetClip, x, y, kind), 0);
+            this._timeline.selectClip(targetClip);
+            this._insertItemIntoClip(targetClip, file, kind);
             return;
         }
         const t = tl.currentTime;
@@ -4803,6 +4993,7 @@ export class CapTimelineEditorApp {
                 ...defaultImageMeta(trackIdx),
                 mediaKind: "clip",
                 prompt: c.prompt ?? "",
+                aiPrompt: c.ai_prompt ?? "",
                 useGlobalPrompt: c.use_global_prompt !== false,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
@@ -4817,6 +5008,9 @@ export class CapTimelineEditorApp {
                 generatePreviewVideo: !!c.generate_preview_video,
                 generatedVideos: this._generatedVideosFromJson(c),
                 previewMode: this._previewModeFromJson(c),
+                aiAudioMode: AI_AUDIO_MODE_IDS.has(String(c.ai_audio_mode || "").trim())
+                    ? String(c.ai_audio_mode).trim()
+                    : "",
             };
             if (first?.kind === "video") {
                 meta.sourceDuration = sourceDur;
@@ -4870,6 +5064,7 @@ export class CapTimelineEditorApp {
                 agent: c.agent || "MiniMaxH3",
                 agentCustom: c.agent_custom ?? "",
                 prompt: c.prompt ?? "",
+                aiPrompt: c.ai_prompt ?? "",
                 endImage: c.end_image ?? null,
                 useGlobalPrompt: c.use_global_prompt !== false,
                 disabled: !!c.disabled,
@@ -4914,6 +5109,7 @@ export class CapTimelineEditorApp {
             agent: c.agent || "MiniMaxH3",
             agentCustom: c.agent_custom ?? "",
             prompt: c.prompt ?? "",
+            aiPrompt: c.ai_prompt ?? "",
             endImage: c.end_image ?? null,
             useGlobalPrompt: c.use_global_prompt !== false,
             disabled: !!c.disabled,
@@ -5080,68 +5276,6 @@ export class CapTimelineEditorApp {
         this._decorateClip(clip);
     }
 
-    _replaceClipMedia(clip, filename, kind) {
-        if (!clip || !filename) return;
-        this._recordUndo();
-        const media = this._ensureMedia(kind, filename);
-        const item = media
-            ? { id: media.id, kind: media.kind, file: media.file }
-            : normalizeClipItem({ kind, file: filename });
-        if (clip.track?.type === "audio" || kind === "audio") {
-            clip.src = filename;
-            clip.name = filename.split(/[\\/]/).pop() || clip.name;
-            const m = this._meta.get(clip.id) ?? defaultAudioMeta();
-            if (media) m.mediaId = media.id;
-            this._meta.set(clip.id, m);
-            void this._fetchPeaks(this._audioUrl(filename)).then((r) => {
-                clip.waveformPeaks = r.peaks[0];
-                clip._audioBuffer = r.buffer;
-                clip.sourceDuration = r.duration;
-                m.sourceDuration = r.duration;
-                this._meta.set(clip.id, m);
-                this._refreshClipAppearance(clip);
-                this._saveToWidgets();
-            }).catch(() => this._refreshClipAppearance(clip));
-            this._refreshClipAppearance(clip);
-        } else {
-            const m = this._ensureClipMeta(clip);
-            this._normalizeVisualMeta(clip, m, { seedFromClip: false });
-            const idx = this._clipPreviewItemIndex(clip, m);
-            if (!item) return;
-            const prev = m.items[Math.min(idx, Math.max(0, m.items.length - 1))];
-            item.useMediaPrompt = prev?.useMediaPrompt !== false;
-            item.enabled = prev?.enabled !== false;
-            if (!m.items.length) m.items.push(item);
-            else m.items[Math.min(idx, m.items.length - 1)] = item;
-            m.mediaIds = m.items.map((row) => row.id).filter(Boolean);
-            this._meta.set(clip.id, m);
-            this._syncClipPrimaryAppearance(clip);
-            const first = this._clipItems(m)[0];
-            if (first?.kind === "video") {
-                const url = this._videoUrl(first.file);
-                void this._probeVideoDuration(url).then((d) => {
-                    if (!Number.isFinite(d) || d <= 0) return;
-                    clip.sourceDuration = d;
-                    if (clip.duration > d) clip.duration = d;
-                    clip.sourceOffset = Math.min(clip.sourceOffset || 0, Math.max(0, d - clip.duration));
-                    m.sourceDuration = d;
-                    this._meta.set(clip.id, m);
-                    clip._applyPosition();
-                    this._refreshTimelineDuration();
-                    this._saveToWidgets();
-                }).catch(() => { /* keep existing */ });
-            } else {
-                clip.sourceDuration = Infinity;
-                clip.sourceOffset = 0;
-                delete m.sourceDuration;
-            }
-        }
-
-        if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
-        this._renderMediaGrid();
-        this._saveToWidgets();
-    }
-
     _startFramePreviewSrc(clip, meta) {
         if (clip.thumbnail) return clip.thumbnail;
         if (!clip.src) return "";
@@ -5273,120 +5407,7 @@ export class CapTimelineEditorApp {
 
         if (libraryBrowse) {
             this._updateMediaPreviewInsertBtn();
-            this._updateMediaPreviewClipActions();
-        } else {
-            if (this.mediaPreviewReplaceBtn) this.mediaPreviewReplaceBtn.hidden = true;
-            if (this.mediaPreviewEndFrameBtn) this.mediaPreviewEndFrameBtn.hidden = true;
         }
-    }
-
-    _clipAcceptsPreviewMedia(clip, kind) {
-        if (!clip) return false;
-        if (clip.track?.type === "audio") return kind === "audio";
-        if (kind === "audio") return false;
-        return kind === "image" || kind === "video";
-    }
-
-    _previewTargetClip() {
-        const state = this._mediaPreviewState;
-        if (state?.targetClipId) {
-            const pinned = this._findClipById(state.targetClipId);
-            if (pinned) return pinned;
-        }
-        return this.getSelectedClip();
-    }
-
-    _canSetEndFrameFromPreview(clip, kind) {
-        if (kind !== "image" || !clip || clip.track?.type === "audio") return false;
-        return true;
-    }
-
-    _updateMediaPreviewClipActions() {
-        const state = this._mediaPreviewState;
-        const replaceBtn = this.mediaPreviewReplaceBtn;
-        const endFrameBtn = this.mediaPreviewEndFrameBtn;
-        if (!replaceBtn || !endFrameBtn || state?.browse === false) return;
-        if (this._mediaPreviewIsClipSource()) {
-            replaceBtn.hidden = true;
-            endFrameBtn.hidden = true;
-            return;
-        }
-
-        // Keep the clip pinned when preview opened; only refresh the pin when
-        // the user explicitly selects another clip (don't clear on deselect).
-        const selected = this.getSelectedClip();
-        if (selected && state) state.targetClipId = selected.id;
-        const clip = this._previewTargetClip();
-        const item = this._mediaPreviewItem();
-
-        if (!clip || !item) {
-            replaceBtn.hidden = true;
-            replaceBtn.disabled = true;
-            endFrameBtn.hidden = true;
-            endFrameBtn.disabled = true;
-            return;
-        }
-
-        const file = item.file;
-        const kind = item.kind;
-        const status = this._mediaStatus.get(`${kind}:${file}`);
-        const missing = status?.location === "missing";
-        const canReplace = this._clipAcceptsPreviewMedia(clip, kind);
-
-        replaceBtn.hidden = !canReplace;
-        replaceBtn.disabled = missing || !canReplace;
-        replaceBtn.title = missing ? "素材文件缺失" : "用当前预览素材替换选中片段";
-
-        const canEndFrame = this._canSetEndFrameFromPreview(clip, kind);
-        endFrameBtn.hidden = !canEndFrame;
-        endFrameBtn.disabled = missing || !canEndFrame;
-        endFrameBtn.title = missing ? "素材文件缺失" : "将当前预览图片设为选中片段的尾帧";
-    }
-
-    _replaceSelectedClipFromPreview() {
-        const item = this._mediaPreviewItem();
-        if (!item) return;
-        const clip = this._previewTargetClip();
-        if (!clip) {
-            alert("请先在时间轴上选中要替换的片段");
-            return;
-        }
-        const { file, kind } = item;
-        if (!this._clipAcceptsPreviewMedia(clip, kind)) {
-            alert(kind === "audio" ? "当前选中的不是音频片段" : "当前选中的片段无法替换为该素材");
-            return;
-        }
-        const status = this._mediaStatus.get(`${kind}:${file}`);
-        if (status?.location === "missing") {
-            alert("素材文件缺失，无法替换");
-            return;
-        }
-        this._replaceClipMedia(clip, file, kind);
-        this._closeMediaPreview();
-        this._saveToWidgets();
-    }
-
-    _setEndFrameFromPreview() {
-        const item = this._mediaPreviewItem();
-        if (!item) return;
-        const clip = this._previewTargetClip();
-        if (!clip) {
-            alert("请先在时间轴上选中要设置尾帧的片段");
-            return;
-        }
-        const { file, kind } = item;
-        if (!this._canSetEndFrameFromPreview(clip, kind)) {
-            alert("仅图片片段可设置尾帧");
-            return;
-        }
-        const status = this._mediaStatus.get(`${kind}:${file}`);
-        if (status?.location === "missing") {
-            alert("素材文件缺失，无法设为尾帧");
-            return;
-        }
-        this._setEndImage(clip, file);
-        this._closeMediaPreview();
-        this._saveToWidgets();
     }
 
     _updateMediaPreviewInsertBtn() {
@@ -5466,7 +5487,6 @@ export class CapTimelineEditorApp {
         media.className = `cat-te-media-preview-content cat-te-media-preview-${kind}`;
         this.mediaPreviewStage.appendChild(media);
         this.mediaPreviewModal.hidden = false;
-        this._updateMediaPreviewClipActions();
     }
 
     _stepMediaPreview(delta) {
@@ -5499,17 +5519,16 @@ export class CapTimelineEditorApp {
     }
 
     _openMediaPreview(file, kind) {
-        const targetClipId = this.getSelectedClip()?.id ?? null;
         const items = this._visibleMediaEntries();
         let index = file ? items.findIndex((e) => e.file === file && e.kind === kind) : -1;
         if (index < 0 && file) {
-            this._mediaPreviewState = { items: [{ file, kind }], index: 0, browse: true, source: "library", targetClipId };
+            this._mediaPreviewState = { items: [{ file, kind }], index: 0, browse: true, source: "library" };
             this._showMediaPreviewAt(0);
             return;
         }
         if (!items.length) return;
         if (index < 0) index = 0;
-        this._mediaPreviewState = { items, index, browse: true, source: "library", targetClipId };
+        this._mediaPreviewState = { items, index, browse: true, source: "library" };
         this._showMediaPreviewAt(index);
     }
 
@@ -5539,7 +5558,6 @@ export class CapTimelineEditorApp {
             browse: true,
             source: "clip",
             clipId: clip.id,
-            targetClipId: clip.id,
         };
         this._showMediaPreviewAt(index);
     }
@@ -5783,7 +5801,9 @@ export class CapTimelineEditorApp {
             || (this.clipItemsModal && !this.clipItemsModal.hidden)
             || (this.genVideoModal && !this.genVideoModal.hidden)
             || (this.outputVideosModal && !this.outputVideosModal.hidden)
-            || (this.settingsModal && !this.settingsModal.hidden),
+            || (this.settingsModal && !this.settingsModal.hidden)
+            || (this.aiOptimizeModal && !this.aiOptimizeModal.hidden)
+            || (this.skillPickerModal && !this.skillPickerModal.hidden),
         );
     }
 
@@ -5946,27 +5966,7 @@ export class CapTimelineEditorApp {
         const visual = uploaded.filter((u) => u.kind === "image" || u.kind === "video");
         if (targetClip && visual.length) {
             this._timeline?.selectClip(targetClip);
-            const first = visual[0];
-            if (visual.length === 1) {
-                setTimeout(() => this._showDropActionMenu(first.file, targetClip, window.innerWidth / 2, window.innerHeight / 2, first.kind), 0);
-            } else {
-                setTimeout(() => {
-                    this._buildCtxMenu([
-                        {
-                            label: "全部插入到首",
-                            fn: () => {
-                                for (const u of [...visual].reverse()) this._insertItemIntoClip(targetClip, u.file, u.kind, "start");
-                            },
-                        },
-                        {
-                            label: "全部插入到尾",
-                            fn: () => {
-                                for (const u of visual) this._insertItemIntoClip(targetClip, u.file, u.kind, "end");
-                            },
-                        },
-                    ], window.innerWidth / 2, window.innerHeight / 2);
-                }, 0);
-            }
+            for (const u of visual) this._insertItemIntoClip(targetClip, u.file, u.kind);
         } else if (insertToTimeline && this._timeline) {
             let at = this._timeline.currentTime;
             for (const u of uploaded) {
@@ -6579,15 +6579,6 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _showDropActionMenu(file, clip, x, y, kind = "image") {
-        this._timeline.selectClip(clip);
-        const mediaKind = kind === "video" ? "video" : "image";
-        this._buildCtxMenu([
-            { label: "插入到首", fn: () => this._insertItemIntoClip(clip, file, mediaKind, "start") },
-            { label: "插入到尾", fn: () => this._insertItemIntoClip(clip, file, mediaKind, "end") },
-        ], x, y);
-    }
-
     _toggleDisableClip(clip) {
         this._recordUndo();
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
@@ -6702,7 +6693,6 @@ export class CapTimelineEditorApp {
         const m = this._ensureClipMeta(clip);
         const items = this._clipItems(m);
         this.clipItemsBody.replaceChildren();
-        if (this.clipItemsApplyBtn) this.clipItemsApplyBtn.disabled = !items.length;
         if (!items.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-clip-items-empty";
@@ -6715,18 +6705,29 @@ export class CapTimelineEditorApp {
             row.className = "cat-te-clip-item-row";
             row.dataset.index = String(index);
 
-            const order = document.createElement("input");
-            order.type = "number";
-            order.className = "cat-te-clip-item-order";
-            order.min = "1";
-            order.step = "1";
-            order.value = String(index + 1);
-            order.title = "序号，数字小的排前面";
-            order.addEventListener("keydown", (e) => {
-                if (e.key !== "Enter") return;
-                e.preventDefault();
-                this._applyClipItemsOrderInput();
+            const move = document.createElement("div");
+            move.className = "cat-te-clip-item-move";
+            const up = document.createElement("button");
+            up.type = "button";
+            up.className = "cat-te-clip-item-move-btn";
+            up.title = "上移";
+            up.innerHTML = iconHtml("arrowUp", 12);
+            up.disabled = index === 0;
+            up.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._moveClipItem(clip, index, -1);
             });
+            const down = document.createElement("button");
+            down.type = "button";
+            down.className = "cat-te-clip-item-move-btn";
+            down.title = "下移";
+            down.innerHTML = iconHtml("arrowDown", 12);
+            down.disabled = index === items.length - 1;
+            down.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._moveClipItem(clip, index, 1);
+            });
+            move.append(up, down);
 
             const thumb = document.createElement(item.kind === "video" ? "video" : "img");
             thumb.className = "cat-te-clip-item-thumb";
@@ -6760,7 +6761,7 @@ export class CapTimelineEditorApp {
             enable.append(enableCb, enableText);
 
             if (item.enabled === false) row.classList.add("is-disabled");
-            row.append(order, thumb, name, kind, enable);
+            row.append(move, thumb, name, kind, enable);
             this.clipItemsBody.appendChild(row);
         });
     }
@@ -6782,45 +6783,20 @@ export class CapTimelineEditorApp {
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
     }
 
-    _applyClipItemsOrderInput() {
-        const clip = this._findClipById(this._clipItemsModalClipId);
-        if (!clip || !this.clipItemsBody) return;
+    _moveClipItem(clip, index, delta) {
+        if (!clip || clip.track?.type === "audio" || !delta) return;
         const m = this._ensureClipMeta(clip);
+        this._normalizeVisualMeta(clip, m, { seedFromClip: false });
         const items = this._clipItems(m);
-        const rows = [...this.clipItemsBody.querySelectorAll(".cat-te-clip-item-row")];
-        if (!items.length || rows.length !== items.length) return;
-        const keyed = rows.map((row, index) => {
-            const raw = Number(row.querySelector(".cat-te-clip-item-order")?.value);
-            return { item: items[index], order: raw, index };
-        });
-        if (keyed.some((row) => !Number.isFinite(row.order))) {
-            alert("请输入有效序号");
-            return;
-        }
-        keyed.sort((a, b) => a.order - b.order || a.index - b.index);
-        const next = keyed.map((row) => row.item);
-        if (!this._applyClipItemOrder(clip, next)) {
-            this._renderClipItemsModal(clip);
-            return;
-        }
+        const nextIndex = index + delta;
+        if (nextIndex < 0 || nextIndex >= items.length) return;
+        const next = items.slice();
+        const [moved] = next.splice(index, 1);
+        next.splice(nextIndex, 0, moved);
+        if (!this._applyClipItemOrder(clip, next)) return;
+        this._setClipPreviewItemIndex(clip, nextIndex);
         this._renderClipItemsModal(clip);
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
-    }
-
-    _setEndImage(clip, filename) {
-        if (!clip || !filename) return;
-        this._insertItemIntoClip(clip, filename, "image", "end");
-    }
-
-    _clearEndImage(clip) {
-        this._recordUndo();
-        const m = this._ensureClipMeta(clip);
-        this._normalizeVisualMeta(clip, m);
-        if (m.items.length >= 2) m.items.pop();
-        m.endImage = null;
-        this._meta.set(clip.id, m);
-        this._syncClipPrimaryAppearance(clip);
-        this._renderMediaGrid();
     }
 
     _deleteClip(clip) {
@@ -7269,7 +7245,6 @@ export class CapTimelineEditorApp {
             this._selClips = selected ?? tl.getSelectedClips();
             this._syncSelectedClip();
             this._updatePromptPanel();
-            this._updateMediaPreviewClipActions();
             this._overlay?.focus();
         });
         tl.on("clip:add", ({ clip }) => {
@@ -7281,7 +7256,6 @@ export class CapTimelineEditorApp {
             this._selClip = null;
             this._selClips = [];
             this._updatePromptPanel();
-            this._updateMediaPreviewClipActions();
         });
         tl.on("clip:remove", ({ clipId, trackId }) => {
             this._meta.delete(clipId);
@@ -7386,6 +7360,7 @@ export class CapTimelineEditorApp {
         this.clipSwiperPrev && (this.clipSwiperPrev.hidden = true);
         this.clipSwiperNext && (this.clipSwiperNext.hidden = true);
         if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = true;
+        if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = true;
         if (this.clipVideosHost) this.clipVideosHost.hidden = true;
         this.clipVideosList?.replaceChildren();
         this._syncCurrentMediaPromptUi(null, false);
@@ -7460,6 +7435,7 @@ export class CapTimelineEditorApp {
         if (this.clipSwiperPrev) this.clipSwiperPrev.hidden = !multi;
         if (this.clipSwiperNext) this.clipSwiperNext.hidden = !multi;
         if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = isAudio;
+        if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = isAudio || !current;
         this._renderClipGeneratedVideosList(clip, m, isAudio);
         this._syncCurrentMediaPromptUi(current, !isAudio);
     }
@@ -7565,7 +7541,7 @@ export class CapTimelineEditorApp {
         }
         this.clipRoleCustomRow && (this.clipRoleCustomRow.hidden = !enabled || m?.clipRole !== "other");
         this.clipAgentCustomRow && (this.clipAgentCustomRow.hidden = !enabled || m?.agent !== "other");
-        if (this.promptCommentBtn) this.promptCommentBtn.disabled = disabled;
+        if (this.aiOptimizeBtn) this.aiOptimizeBtn.disabled = !enabled;
     }
 
     _updatePromptPanel() {
@@ -7575,39 +7551,42 @@ export class CapTimelineEditorApp {
         this._updateClipInfoPanel(clip);
         const isAudio = clip?.track?.type === "audio";
         const m = clip ? this._ensureClipMeta(clip) : null;
-        const label = this.clipPanel?.querySelector(".cat-te-prompt-label");
         if (!clip) {
             this._setVisualSettingsEnabled(false);
             if (this.promptInput) this.promptInput.disabled = true;
+            if (this.aiPromptInput) this.aiPromptInput.disabled = true;
             if (this.useGlobalCb) this.useGlobalCb.disabled = true;
             if (this.useMediaPromptCb) {
                 this.useMediaPromptCb.disabled = true;
                 this.useMediaPromptCb.checked = true;
             }
             setRichPromptValue(this.promptInput, "", false);
-            if (label) label.textContent = "Keyframe Prompt";
+            setRichPromptValue(this.aiPromptInput, "", false);
+            this._setClipPromptTab("clip");
             return;
         }
         const isVisual = !isAudio;
         if (isVisual) {
             this._setVisualSettingsEnabled(true, m);
             if (this.promptInput) this.promptInput.disabled = false;
+            if (this.aiPromptInput) this.aiPromptInput.disabled = false;
             if (this.useGlobalCb) {
                 this.useGlobalCb.disabled = false;
                 this.useGlobalCb.checked = m.useGlobalPrompt !== false;
             }
             setRichPromptValue(this.promptInput, m.prompt ?? "", true);
-            if (label) label.textContent = "Keyframe Prompt";
+            setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
         } else {
             this._setVisualSettingsEnabled(false);
             if (this.promptInput) this.promptInput.disabled = true;
+            if (this.aiPromptInput) this.aiPromptInput.disabled = true;
             if (this.useGlobalCb) this.useGlobalCb.disabled = true;
             if (this.useMediaPromptCb) {
                 this.useMediaPromptCb.disabled = true;
                 this.useMediaPromptCb.checked = true;
             }
             setRichPromptValue(this.promptInput, "", false);
-            if (label) label.textContent = "音频素材（无提示词）";
+            setRichPromptValue(this.aiPromptInput, "", false);
         }
     }
 
@@ -7695,11 +7674,497 @@ export class CapTimelineEditorApp {
         if (!this._selClip) return;
         if (this._promptUndoArmed) {
             this._recordUndo();
-            this._promptUndoArmed = false; // one undo step per focus session, not per keystroke
+            this._promptUndoArmed = false;
         }
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
         m.prompt = this.promptInput.value;
         this._meta.set(this._selClip.id, m);
+    }
+
+    _onAiPromptInput() {
+        if (!this._selClip) return;
+        if (this._aiPromptUndoArmed) {
+            this._recordUndo();
+            this._aiPromptUndoArmed = false;
+        }
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.aiPrompt = this.aiPromptInput?.value ?? "";
+        this._meta.set(this._selClip.id, m);
+    }
+
+    _setClipPromptTab(tab) {
+        const next = tab === "ai" ? "ai" : "clip";
+        this.clipPromptTabs?.forEach((btn) => {
+            btn.classList.toggle("is-active", btn.dataset.tab === next);
+        });
+        this.clipPanel?.querySelectorAll("[data-prompt-tab]").forEach((wrap) => {
+            wrap.hidden = wrap.dataset.promptTab !== next;
+        });
+    }
+
+    _mediaPromptBlock(clip) {
+        const m = this._ensureClipMeta(clip);
+        const items = this._clipItems(m);
+        const lines = [];
+        items.forEach((item, index) => {
+            if (item.enabled === false) return;
+            const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
+            const name = (item.file || "").split(/[\\/]/).pop() || item.file || `素材 ${index + 1}`;
+            const kind = item.kind === "video" ? "视频" : "图片";
+            const type = media?.media_type || "";
+            const tags = Array.isArray(media?.tags) ? media.tags.filter(Boolean).join(", ") : "";
+            const prompt = item.useMediaPrompt === false ? "" : String(media?.prompt || "");
+            const meta = [kind, type, tags].filter(Boolean).join(" · ");
+            lines.push(`${index + 1}. ${name}${meta ? `（${meta}）` : ""}`);
+            if (item.useMediaPrompt === false) lines.push("（未使用素材提示词）");
+            else lines.push(prompt || "（空）");
+            lines.push("");
+        });
+        const audios = this._overlappingBackgroundAudio(clip);
+        if (audios.length) {
+            lines.push("时间段内背景音频：");
+            audios.forEach((row, index) => {
+                const name = (row.file || "").split(/[\\/]/).pop() || `音频 ${index + 1}`;
+                lines.push(`${index + 1}. ${name}`);
+            });
+        } else {
+            lines.push("时间段内没有背景音频。");
+        }
+        return lines.join("\n").trim() || "（当前 clip 没有素材提示词）";
+    }
+
+    _clipAiOptimizeFiles(clip, { includeTimelineAudio = false } = {}) {
+        const m = this._ensureClipMeta(clip);
+        const files = this._clipItems(m)
+            .filter((item) => item.enabled !== false)
+            .map((item) => {
+            const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
+            const status = this._mediaStatus.get(`${item.kind}:${item.file}`);
+            return {
+                kind: item.kind,
+                file: item.file,
+                location: status?.location || media?.location || "input",
+                prompt: item.useMediaPrompt === false ? "" : String(media?.prompt || ""),
+                media_type: String(media?.media_type || ""),
+                tags: Array.isArray(media?.tags) ? media.tags : [],
+                use_prompt: item.useMediaPrompt !== false,
+            };
+        });
+        if (!includeTimelineAudio) return files;
+        for (const row of this._overlappingBackgroundAudio(clip)) {
+            if (files.some((item) => item.kind === "audio" && item.file === row.file)) continue;
+            files.push({
+                kind: "audio",
+                file: row.file,
+                location: row.location || "input",
+                prompt: row.prompt || "",
+                media_type: row.media_type || "",
+                tags: row.tags || [],
+                use_prompt: true,
+            });
+        }
+        return files;
+    }
+
+    _clipRange(clip) {
+        const start = Number(clip?.startTime) || 0;
+        const duration = Number(clip?.duration);
+        const end = Number.isFinite(Number(clip?.endTime))
+            ? Number(clip.endTime)
+            : start + (Number.isFinite(duration) ? duration : 0);
+        return { start, end };
+    }
+
+    _rangesOverlap(a0, a1, b0, b1) {
+        return a0 < b1 - 1e-6 && b0 < a1 - 1e-6;
+    }
+
+    _overlappingBackgroundAudio(clip) {
+        if (!clip || clip.track?.type === "audio") return [];
+        const { start, end } = this._clipRange(clip);
+        const out = [];
+        const seen = new Set();
+        for (const track of this._allAudioTracks()) {
+            if (track.muted) continue;
+            for (const audioClip of track.clips || []) {
+                const meta = this._meta.get(audioClip.id);
+                if (meta?.muted || meta?.disabled) continue;
+                const range = this._clipRange(audioClip);
+                if (!this._rangesOverlap(start, end, range.start, range.end)) continue;
+                const file = String(audioClip.src || "").trim();
+                if (!file || seen.has(`audio:${file}`)) continue;
+                seen.add(`audio:${file}`);
+                const media = (meta?.mediaId && this._findMediaById(meta.mediaId))
+                    || this._findMedia("audio", file);
+                const status = this._mediaStatus.get(`audio:${file}`);
+                out.push({
+                    file,
+                    location: status?.location || media?.location || "input",
+                    prompt: String(media?.prompt || ""),
+                    media_type: String(media?.media_type || ""),
+                    tags: Array.isArray(media?.tags) ? media.tags : [],
+                    name: file.split(/[\\/]/).pop() || file,
+                });
+            }
+        }
+        return out;
+    }
+
+    _resolvedAiAudioMode(clip, meta = null) {
+        const m = meta || (clip ? this._ensureClipMeta(clip) : null);
+        const saved = AI_AUDIO_MODE_IDS.has(String(m?.aiAudioMode || "").trim())
+            ? String(m.aiAudioMode).trim()
+            : "";
+        if (saved) return saved;
+        return this._overlappingBackgroundAudio(clip).length ? "auto" : "none";
+    }
+
+    _syncAiAudioModeUi(clip) {
+        const hasAudio = this._overlappingBackgroundAudio(clip).length > 0;
+        const mode = this._resolvedAiAudioMode(clip);
+        if (this.aiAudioModeSelect) this.aiAudioModeSelect.value = mode;
+        if (this.aiAudioHint) {
+            if (!hasAudio) {
+                this.aiAudioHint.textContent = "当前 clip 时间段内没有背景音频";
+            } else {
+                const names = this._overlappingBackgroundAudio(clip).map((row) => row.name).join("、");
+                this.aiAudioHint.textContent = `检测到背景音频：${names}`;
+            }
+        }
+    }
+
+    _onAiAudioModeChange() {
+        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
+        if (!clip || clip.track?.type === "audio") return;
+        const mode = AI_AUDIO_MODE_IDS.has(this.aiAudioModeSelect?.value)
+            ? this.aiAudioModeSelect.value
+            : "none";
+        this._recordUndo();
+        const meta = this._ensureClipMeta(clip);
+        meta.aiAudioMode = mode;
+        this._meta.set(clip.id, meta);
+        this._saveToWidgets();
+        this._syncAiAudioModeUi(clip);
+    }
+
+    _setAiOptimizeSrcTab(tab) {
+        const next = tab === "clip" || tab === "global" ? tab : "media";
+        this._aiOptimizeSrc = next;
+        this.aiSrcTabs?.forEach((btn) => {
+            btn.classList.toggle("is-active", btn.dataset.src === next);
+        });
+        const globalTab = this.aiOptimizeModal?.querySelector('.cat-te-ai-src-tab[data-src="global"]');
+        if (globalTab) {
+            const clip = this._findClipById(this._aiOptimizeClipId);
+            const meta = clip ? this._ensureClipMeta(clip) : null;
+            globalTab.hidden = !clip || meta?.useGlobalPrompt === false;
+            if (globalTab.hidden && next === "global") {
+                this._aiOptimizeSrc = "media";
+                this.aiSrcTabs?.forEach((btn) => {
+                    btn.classList.toggle("is-active", btn.dataset.src === "media");
+                });
+            }
+        }
+        this._fillAiOptimizeSrc();
+    }
+
+    _fillAiOptimizeSrc() {
+        if (!this.aiSrcText) return;
+        const clip = this._findClipById(this._aiOptimizeClipId);
+        if (!clip) {
+            this.aiSrcText.value = "";
+            return;
+        }
+        const meta = this._ensureClipMeta(clip);
+        const tab = this._aiOptimizeSrc || "media";
+        if (tab === "clip") this.aiSrcText.value = String(meta.prompt || "") || "（空）";
+        else if (tab === "global") this.aiSrcText.value = this._readGlobalPromptFromWidget() || "（空）";
+        else this.aiSrcText.value = this._mediaPromptBlock(clip);
+    }
+
+    _restoreAiOutputLanguage() {
+        if (!this.aiLangSelect) return;
+        const saved = localStorage.getItem(STORAGE_AI_PROMPT_LANG) || "简体中文";
+        this.aiLangSelect.value = AI_PROMPT_LANGUAGES.includes(saved) ? saved : "简体中文";
+    }
+
+    _aiOutputLanguage() {
+        const value = String(this.aiLangSelect?.value || "").trim();
+        return AI_PROMPT_LANGUAGES.includes(value) ? value : "简体中文";
+    }
+
+    async _openAiOptimizeModal() {
+        const clip = this._selClip;
+        if (!clip || clip.track?.type === "audio" || !this.aiOptimizeModal) return;
+        const meta = this._ensureClipMeta(clip);
+        this._aiOptimizeClipId = clip.id;
+        this.aiOptimizeModal.hidden = false;
+        if (this.aiOptimizeTitle) {
+            this.aiOptimizeTitle.textContent = `AI 优化 · ${clip.name || DEFAULT_CLIP_NAME}`;
+        }
+        if (this.aiResultInput) this.aiResultInput.value = String(meta.aiPrompt || "");
+        if (this.aiSkillInput && !String(this.aiSkillInput.value || "").trim()) {
+            this.aiSkillInput.value = localStorage.getItem(STORAGE_AI_PROMPT_SKILL) || "";
+        }
+        this._restoreAiOutputLanguage();
+        this._syncAiAudioModeUi(clip);
+        this._setAiOptimizeSrcTab("media");
+        await this._loadAiOptimizeModels();
+        await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
+    }
+
+    _closeAiOptimizeModal() {
+        if (!this.aiOptimizeModal) return;
+        this.aiOptimizeModal.hidden = true;
+        this._aiOptimizeClipId = null;
+    }
+
+    async _loadAiOptimizeModels() {
+        if (!this.aiModelSelect) return;
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/vl_models"));
+            const data = await response.json();
+            const models = Array.isArray(data.models) ? data.models : [];
+            if (data.skill_url && this.aiSkillLink) this.aiSkillLink.href = data.skill_url;
+            const saved = localStorage.getItem(STORAGE_AI_PROMPT_MODEL) || "";
+            this.aiModelSelect.replaceChildren();
+            if (!models.length) {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "未找到本地 VL 模型";
+                this.aiModelSelect.appendChild(opt);
+                this.aiModelSelect.disabled = true;
+                return;
+            }
+            this.aiModelSelect.disabled = false;
+            for (const name of models) {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.textContent = name;
+                this.aiModelSelect.appendChild(opt);
+            }
+            this.aiModelSelect.value = models.includes(saved) ? saved : models[0];
+        } catch {
+            this.aiModelSelect.replaceChildren();
+            const opt = document.createElement("option");
+            opt.value = "";
+            opt.textContent = "无法加载模型列表";
+            this.aiModelSelect.appendChild(opt);
+            this.aiModelSelect.disabled = true;
+        }
+    }
+
+    async _loadAiAgentPrompt(agent, clipRole) {
+        if (!this.aiSystemInput) return;
+        try {
+            const query = `agent=${encodeURIComponent(agent || "MiniMaxH3")}&clip_role=${encodeURIComponent(clipRole || "multi_ref")}`;
+            const response = await fetch(api.apiURL(`/audio_keyframe_timeline/clip_prompt_agent?${query}`));
+            const data = await response.json();
+            this.aiSystemInput.value = String(data.system_prompt || "");
+            if (data.skill_url && this.aiSkillLink) this.aiSkillLink.href = data.skill_url;
+        } catch {
+            this.aiSystemInput.value = "";
+        }
+    }
+
+    _setAiOptimizeBusy(busy) {
+        this._aiOptimizeBusy = !!busy;
+        const label = busy ? "处理中…" : "AI优化";
+        const genLabel = busy ? "生成中…" : "生成";
+        if (this.aiOptimizeBtn) {
+            this.aiOptimizeBtn.disabled = busy || !this._selClip || this._selClip.track?.type === "audio";
+            this.aiOptimizeBtn.classList.toggle("is-loading", busy);
+            const span = this.aiOptimizeBtn.querySelector("span");
+            if (span) span.textContent = label;
+        }
+        if (this.aiGenerateBtn) {
+            this.aiGenerateBtn.disabled = busy;
+            this.aiGenerateBtn.classList.toggle("is-loading", busy);
+            const span = this.aiGenerateBtn.querySelector("span");
+            if (span) span.textContent = genLabel;
+        }
+    }
+
+    _onAiResultInput() {
+        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
+        if (!clip) return;
+        const meta = this._ensureClipMeta(clip);
+        meta.aiPrompt = this.aiResultInput?.value ?? "";
+        this._meta.set(clip.id, meta);
+        if (this._selClip?.id === clip.id) {
+            setRichPromptValue(this.aiPromptInput, meta.aiPrompt, true);
+        }
+    }
+
+    async _runAiOptimize() {
+        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
+        if (!clip || clip.track?.type === "audio" || this._aiOptimizeBusy) return;
+        const meta = this._ensureClipMeta(clip);
+        const model = String(this.aiModelSelect?.value || "").trim();
+        if (!model) {
+            alert("未找到本地 Qwen3-VL 模型。请放到 ComfyUI/models/prompt_generator/ 后重试。");
+            return;
+        }
+        localStorage.setItem(STORAGE_AI_PROMPT_MODEL, model);
+        const skill = String(this.aiSkillInput?.value || "");
+        localStorage.setItem(STORAGE_AI_PROMPT_SKILL, skill);
+        const outputLanguage = this._aiOutputLanguage();
+        localStorage.setItem(STORAGE_AI_PROMPT_LANG, outputLanguage);
+        const fromSelect = AI_AUDIO_MODE_IDS.has(this.aiAudioModeSelect?.value)
+            ? this.aiAudioModeSelect.value
+            : "";
+        const audioMode = fromSelect || this._resolvedAiAudioMode(clip, meta);
+        meta.aiAudioMode = audioMode;
+        this._meta.set(clip.id, meta);
+        const useTimelineAudio = audioMode !== "none";
+        this._setAiOptimizeBusy(true);
+        try {
+            const payload = {
+                model,
+                system_prompt: String(this.aiSystemInput?.value || ""),
+                skill,
+                output_language: outputLanguage,
+                agent: meta.agent || "MiniMaxH3",
+                clip_role: meta.clipRole || "multi_ref",
+                audio_mode: audioMode,
+                duration_sec: Number(clip.duration) || 0,
+                clip_prompt: String(meta.prompt || ""),
+                global_prompt: meta.useGlobalPrompt === false ? "" : this._readGlobalPromptFromWidget(),
+                files: this._clipAiOptimizeFiles(clip, { includeTimelineAudio: useTimelineAudio }),
+                keep_loaded: true,
+            };
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/optimize_clip_prompt"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            const text = String(data.prompt || "").trim();
+            if (!text) throw new Error("模型没有返回提示词");
+            this._recordUndo();
+            meta.aiPrompt = text;
+            this._meta.set(clip.id, meta);
+            if (this.aiResultInput) this.aiResultInput.value = text;
+            if (this._selClip?.id === clip.id) {
+                setRichPromptValue(this.aiPromptInput, text, true);
+                this._setClipPromptTab("ai");
+            }
+            this._saveToWidgets();
+        } catch (error) {
+            alert(`AI 优化失败：${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            this._setAiOptimizeBusy(false);
+        }
+    }
+
+    _closeSkillPicker() {
+        if (this.skillPickerModal) this.skillPickerModal.hidden = true;
+    }
+
+    _setSkillSyncBusy(busy) {
+        this._skillSyncBusy = !!busy;
+        if (!this.skillSyncBtn) return;
+        this.skillSyncBtn.disabled = !!busy;
+        this.skillSyncBtn.classList.toggle("is-loading", !!busy);
+        const span = this.skillSyncBtn.querySelector("span");
+        if (span) span.textContent = busy ? "同步中…" : "更新";
+    }
+
+    async _syncH3Skills() {
+        if (this._skillSyncBusy) return;
+        this._setSkillSyncBusy(true);
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/h3_skills_sync"), { method: "POST" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            this._h3Skills = Array.isArray(data.skills) ? data.skills : [];
+            if (!this.skillPickerModal?.hidden) this._renderSkillPicker();
+            alert(`已同步 ${this._h3Skills.length} 个 Prompt Skill`);
+        } catch (error) {
+            alert(`同步失败：${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            this._setSkillSyncBusy(false);
+        }
+    }
+
+    async _openSkillPicker() {
+        if (!this.skillPickerModal) return;
+        this.skillPickerModal.hidden = false;
+        if (this.skillPickerFilter) this.skillPickerFilter.value = "";
+        this.skillPickerBody && (this.skillPickerBody.textContent = "加载中…");
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/h3_skills"));
+            const data = await response.json().catch(() => ({}));
+            this._h3Skills = Array.isArray(data.skills) ? data.skills : [];
+            this._renderSkillPicker();
+        } catch (error) {
+            if (this.skillPickerBody) {
+                this.skillPickerBody.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
+            }
+        }
+    }
+
+    _renderSkillPicker() {
+        const body = this.skillPickerBody;
+        if (!body) return;
+        const query = String(this.skillPickerFilter?.value || "").trim().toLowerCase();
+        const rows = (this._h3Skills || []).filter((row) => {
+            if (!query) return true;
+            const title = String(row.title || "").toLowerCase();
+            const name = String(row.name || row.id || "").toLowerCase();
+            return title.includes(query) || name.includes(query);
+        });
+        body.replaceChildren();
+        if (!rows.length) {
+            const empty = document.createElement("div");
+            empty.className = "cat-te-skill-picker-empty";
+            empty.textContent = (this._h3Skills || []).length
+                ? "没有匹配的 Skill"
+                : "本地还没有 Skill。点击右侧「更新」从 GitHub 同步。";
+            body.appendChild(empty);
+            return;
+        }
+        const grid = document.createElement("div");
+        grid.className = "cat-te-skill-picker-grid";
+        for (const row of rows) {
+            const card = document.createElement("div");
+            card.className = "cat-te-skill-card";
+            const img = document.createElement("img");
+            img.alt = "";
+            img.loading = "lazy";
+            if (row.has_preview) {
+                img.src = api.apiURL(`/audio_keyframe_timeline/h3_skill_preview?id=${encodeURIComponent(row.id)}`);
+            }
+            const name = document.createElement("div");
+            name.className = "cat-te-skill-card-name";
+            name.textContent = row.title || row.name || row.id;
+            name.title = row.summary || name.textContent;
+            const apply = document.createElement("button");
+            apply.type = "button";
+            apply.className = "cat-te-btn cat-te-btn-primary cat-te-skill-apply";
+            apply.dataset.skillId = row.id;
+            apply.textContent = "应用";
+            card.append(img, name, apply);
+            grid.appendChild(card);
+        }
+        body.appendChild(grid);
+    }
+
+    async _applyH3Skill(skillId) {
+        const id = String(skillId || "").trim();
+        if (!id) return;
+        try {
+            const response = await fetch(api.apiURL(`/audio_keyframe_timeline/h3_skill?id=${encodeURIComponent(id)}`));
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            const text = String(data.text || "");
+            if (this.aiSkillInput) this.aiSkillInput.value = text;
+            localStorage.setItem(STORAGE_AI_PROMPT_SKILL, text);
+            this._closeSkillPicker();
+        } catch (error) {
+            alert(`应用 Skill 失败：${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     _onUseGlobalChange() {
@@ -7828,6 +8293,7 @@ export class CapTimelineEditorApp {
                 } else {
                     row.name = clip.name || DEFAULT_CLIP_NAME;
                     row.prompt = m.prompt ?? "";
+                    row.ai_prompt = m.aiPrompt ?? "";
                     row.use_global_prompt = m.useGlobalPrompt !== false;
                     row.use_media_prompts = items.map((item) => item.useMediaPrompt !== false);
                     row.media_enabled = items.map((item) => item.enabled !== false);
@@ -7838,6 +8304,9 @@ export class CapTimelineEditorApp {
                     row.clip_role_custom = m.clipRole === "other" ? (m.clipRoleCustom || "") : "";
                     row.agent = m.agent || "MiniMaxH3";
                     row.agent_custom = m.agent === "other" ? (m.agentCustom || "") : "";
+                    row.ai_audio_mode = AI_AUDIO_MODE_IDS.has(String(m.aiAudioMode || "").trim())
+                        ? m.aiAudioMode
+                        : "";
                     const generated = this._clipGeneratedVideos(m);
                     if (generated.length) {
                         row.generated_videos = generated.map((v) => ({

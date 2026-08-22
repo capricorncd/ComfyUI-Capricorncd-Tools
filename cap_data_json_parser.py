@@ -30,7 +30,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -42,14 +42,20 @@ class CAP_DataJsonClipParser:
         "from_start",
         "from_preview_start",
         "seq_filename_prefix",
+        "images",
+        "clip_role",
+        "agent",
+        "ai_prompt",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "Parse data_json from Audio Timeline or Timeline Editor and extract a clip by index. "
         "Outputs the clip audio segment, frame count, first/last keyframe images, prompt, "
-        "run_timestamp, generate_preview_video, FROM_ tags, and seq_filename_prefix "
-        "(run_timestamp/from_start or run_timestamp/index) for Seq To Video."
+        "run_timestamp, generate_preview_video, FROM_ tags, seq_filename_prefix "
+        "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
+        "images (all clip images in editor order as one IMAGE batch), "
+        "clip_role, agent, and ai_prompt."
     )
 
     @classmethod
@@ -109,9 +115,33 @@ class CAP_DataJsonClipParser:
     def _load_image(self, path: str) -> torch.Tensor | None:
         if not path or not os.path.isfile(path):
             return None
-        img = Image.open(path).convert("RGB")
+        try:
+            img = Image.open(path).convert("RGB")
+        except Exception:
+            return None
         arr = np.array(img).astype(np.float32) / 255.0
         return torch.from_numpy(arr).unsqueeze(0)
+
+    def _match_image_size(self, image: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        if image.shape[1] == height and image.shape[2] == width:
+            return image
+        nchw = image.permute(0, 3, 1, 2)
+        nchw = torch.nn.functional.interpolate(
+            nchw, size=(height, width), mode="bilinear", align_corners=False,
+        )
+        return nchw.permute(0, 2, 3, 1)
+
+    def _load_images_batch(self, refs, materials: dict, blank: torch.Tensor) -> torch.Tensor:
+        frames = []
+        for ref in refs:
+            img = self._load_image(self._ref_file(ref, materials))
+            if img is not None:
+                frames.append(img)
+        if not frames:
+            return blank
+        height, width = int(frames[0].shape[1]), int(frames[0].shape[2])
+        aligned = [self._match_image_size(frame, height, width) for frame in frames]
+        return torch.cat(aligned, dim=0)
 
     def _clip_use_global_prompt(self, clip: dict) -> bool:
         if "use_global_prompt" in clip:
@@ -124,14 +154,39 @@ class CAP_DataJsonClipParser:
             if not line.startswith("#")
         )
 
-    def _compose_prompt(self, clip: dict, global_prompt: str) -> str:
+    def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None) -> str:
+        ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
+        if ai_prompt:
+            return ai_prompt
         clip_prompt = self._strip_comment_lines(clip.get("prompt") or "")
         global_prompt = self._strip_comment_lines(global_prompt)
-        if not self._clip_use_global_prompt(clip):
-            return clip_prompt
-        if global_prompt and clip_prompt:
-            return f"{global_prompt}\n{clip_prompt}"
-        return global_prompt or clip_prompt
+        parts = []
+        if self._clip_use_global_prompt(clip) and global_prompt.strip():
+            parts.append(global_prompt.strip())
+        if clip_prompt.strip():
+            parts.append(clip_prompt.strip())
+        materials = materials if isinstance(materials, dict) else {}
+        for ref in self._ref_list(clip.get("images")):
+            if not self._ref_use_media_prompt(ref):
+                continue
+            mid = self._ref_id(ref)
+            row = materials.get(mid) if mid else None
+            text = ""
+            if isinstance(row, dict):
+                text = self._strip_comment_lines(row.get("prompt") or "").strip()
+            if text:
+                parts.append(text)
+        return "\n".join(part for part in parts if part)
+
+    def _ref_id(self, ref) -> str:
+        if isinstance(ref, dict):
+            return str(ref.get("id") or "").strip()
+        return str(ref or "").strip()
+
+    def _ref_use_media_prompt(self, ref) -> bool:
+        if isinstance(ref, dict):
+            return ref.get("use_media_prompt") is not False
+        return True
 
     def _frame_count(self, start_ms: int, end_ms: int, fps: float) -> int:
         duration_ms = max(0, int(end_ms) - int(start_ms))
@@ -331,7 +386,7 @@ class CAP_DataJsonClipParser:
         clip_start_ms = int(clip.get("start_ms", 0) or 0)
         clip_end_ms = int(clip.get("end_ms", clip_start_ms) or clip_start_ms)
         frame_count = self._frame_count(clip_start_ms, clip_end_ms, fps)
-        prompt = self._compose_prompt(clip, global_prompt)
+        prompt = self._compose_prompt(clip, global_prompt, materials)
         generate_preview_video = bool(clip.get("generate_preview_video", False))
 
         preview_start_ms = clip.get("preview_start_ms", None)
@@ -365,6 +420,10 @@ class CAP_DataJsonClipParser:
             first_frame = blank
         if last_frame is None:
             last_frame = blank
+        images = self._load_images_batch(refs, materials, blank)
+        clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
+        agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
+        ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
 
         return (
             audio_out,
@@ -377,6 +436,10 @@ class CAP_DataJsonClipParser:
             from_start,
             from_preview_start,
             seq_filename_prefix,
+            images,
+            clip_role,
+            agent,
+            ai_prompt,
         )
 
 

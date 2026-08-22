@@ -46,20 +46,37 @@ def _clip_visual_entries(project: dict, clip: dict) -> list[dict]:
     return out
 
 
-def _compose_clip_prompt(clip: dict, entries: list) -> str:
-    parts = [_strip_comment_lines(clip.get("prompt") or "").strip()]
+def _clip_image_refs(entries: list) -> list[dict]:
+    out = []
     for entry in entries or []:
-        if not entry.get("enabled") or not entry.get("use_prompt"):
+        mid = str(entry.get("id") or "").strip()
+        if not entry.get("enabled") or not mid:
             continue
-        row = entry.get("row") if isinstance(entry.get("row"), dict) else {}
-        text = _strip_comment_lines(row.get("prompt") or "").strip()
-        if text:
-            parts.append(text)
-    return "\n".join(part for part in parts if part)
+        out.append({
+            "id": mid,
+            "use_media_prompt": entry.get("use_prompt") is not False,
+        })
+    return out
 
 
-def _clip_image_ids(entries: list) -> list[str]:
-    return [entry["id"] for entry in (entries or []) if entry.get("enabled") and entry.get("id")]
+_CLIP_ROLES = ("multi_ref", "first_last", "t2v", "video_ref", "video_edit", "other")
+_CLIP_AGENTS = ("MiniMaxH3", "LTX", "Bernini", "Wan", "other")
+
+
+def _clip_role_fields(clip: dict) -> tuple[str, str]:
+    role = str(clip.get("clip_role") or "multi_ref").strip()
+    if role not in _CLIP_ROLES:
+        role = "multi_ref"
+    custom = str(clip.get("clip_role_custom") or "").strip() if role == "other" else ""
+    return role, custom
+
+
+def _clip_agent_fields(clip: dict) -> tuple[str, str]:
+    agent = str(clip.get("agent") or "MiniMaxH3").strip()
+    if agent not in _CLIP_AGENTS:
+        agent = "MiniMaxH3"
+    custom = str(clip.get("agent_custom") or "").strip() if agent == "other" else ""
+    return agent, custom
 
 
 def _material_row(row: dict, resolve_media) -> dict | None:
@@ -577,10 +594,16 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             ext_end = int(end) + tail_ms
             if ext_end <= ext_start:
                 ext_end = ext_start + 1
+            clip_role, clip_role_custom = _clip_role_fields(clip)
+            agent, agent_custom = _clip_agent_fields(clip)
             runtime_clips.append({
                 "id": f"runtime_{index:04d}",
                 "source_clip_id": str(clip.get("id", "")),
                 "clip_type": str(clip.get("type") or "image"),
+                "clip_role": clip_role,
+                "clip_role_custom": clip_role_custom,
+                "agent": agent,
+                "agent_custom": agent_custom,
                 "start_ms": ext_start,
                 "end_ms": ext_end,
                 "preview_start_ms": int(start),
@@ -588,8 +611,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "head_extend_sec": head_sec,
                 "tail_extend_sec": tail_sec,
                 "generate_preview_video": bool(clip.get("generate_preview_video", False)),
-                "images": _clip_image_ids(entries),
-                "prompt": _compose_clip_prompt(clip, entries),
+                "images": _clip_image_refs(entries),
+                "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
+                "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),
                 "use_global_prompt": _clip_use_global_prompt(clip),
                 "z_index": z_index,
                 "audios": self._audio_slices(

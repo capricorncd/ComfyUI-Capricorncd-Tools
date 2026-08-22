@@ -55,6 +55,14 @@ from .cap_prompt_group import (
     NODE_CLASS_MAPPINGS as _CPG_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CPG_NAMES,
 )
+from .cap_minimax_h3 import (
+    NODE_CLASS_MAPPINGS as _CMH_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CMH_NAMES,
+)
+from .cap_clip_prompt_vl import (
+    NODE_CLASS_MAPPINGS as _CVP_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CVP_NAMES,
+)
 from .cap_join_strings import CAP_JoinStrings
 from .timecode import (
     AUDIO_EXTENSIONS,
@@ -83,6 +91,8 @@ NODE_CLASS_MAPPINGS = {
     **_CSS_CLASS,
     **_CFJ_CLASS,
     **_CPG_CLASS,
+    **_CMH_CLASS,
+    **_CVP_CLASS,
     "CAP_JoinStrings": CAP_JoinStrings,
 }
 
@@ -100,6 +110,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     **_CSS_NAMES,
     **_CFJ_NAMES,
     **_CPG_NAMES,
+    **_CMH_NAMES,
+    **_CVP_NAMES,
     "CAP_JoinStrings": "Join Strings",
 }
 
@@ -424,6 +436,81 @@ def _register_routes():
         rows.sort(key=lambda item: item[0], reverse=True)
         files = [rel for _, rel in rows[:400]]
         return web.json_response({"files": files, "count": len(files)})
+
+    @routes.get("/audio_keyframe_timeline/vl_models")
+    async def api_vl_models(_request: web.Request) -> web.Response:
+        from .cap_clip_prompt_vl import SKILL_URL, list_vl_models
+        models = list_vl_models()
+        return web.json_response({"models": models, "skill_url": SKILL_URL})
+
+    @routes.get("/audio_keyframe_timeline/clip_prompt_agent")
+    async def api_clip_prompt_agent(request: web.Request) -> web.Response:
+        from .cap_clip_prompt_vl import SKILL_URL, agent_system_prompt
+        agent = request.rel_url.query.get("agent", "MiniMaxH3")
+        clip_role = request.rel_url.query.get("clip_role", "multi_ref")
+        return web.json_response({
+            "system_prompt": agent_system_prompt(agent, clip_role),
+            "skill_url": SKILL_URL,
+        })
+
+    @routes.post("/audio_keyframe_timeline/optimize_clip_prompt")
+    async def api_optimize_clip_prompt(request: web.Request) -> web.Response:
+        import asyncio
+        from .cap_clip_prompt_vl import generate_from_payload
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                return web.json_response({"error": "Invalid payload"}, status=400)
+            text = await asyncio.to_thread(generate_from_payload, payload)
+            return web.json_response({"prompt": text})
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] optimize_clip_prompt error")
+            return web.json_response({"error": str(exc)}, status=500)
+
+    @routes.get("/audio_keyframe_timeline/h3_skills")
+    async def api_h3_skills(_request: web.Request) -> web.Response:
+        from .cap_h3_skills import SKILL_REPO_URL, list_h3_skills, skill_repo_root
+        skills = list_h3_skills()
+        return web.json_response({
+            "skills": skills,
+            "repo_url": SKILL_REPO_URL,
+            "available": skill_repo_root().is_dir() and bool(skills),
+        })
+
+    @routes.get("/audio_keyframe_timeline/h3_skill")
+    async def api_h3_skill(request: web.Request) -> web.Response:
+        from .cap_h3_skills import load_skill_text
+        skill_id = request.rel_url.query.get("id", "")
+        try:
+            text = load_skill_text(skill_id)
+        except ValueError:
+            return web.json_response({"error": "Invalid skill"}, status=400)
+        except FileNotFoundError:
+            return web.json_response({"error": "Skill not found"}, status=404)
+        return web.json_response({"id": skill_id, "text": text})
+
+    @routes.get("/audio_keyframe_timeline/h3_skill_preview")
+    async def api_h3_skill_preview(request: web.Request) -> web.Response:
+        from .cap_h3_skills import resolve_skill_preview
+        skill_id = request.rel_url.query.get("id", "")
+        try:
+            path = resolve_skill_preview(skill_id)
+        except ValueError:
+            return web.Response(status=400, text="Invalid skill")
+        if not path:
+            return web.Response(status=404, text="Not found")
+        return web.FileResponse(path)
+
+    @routes.post("/audio_keyframe_timeline/h3_skills_sync")
+    async def api_h3_skills_sync(_request: web.Request) -> web.Response:
+        import asyncio
+        from .cap_h3_skills import sync_skill_repo
+        try:
+            data = await asyncio.to_thread(sync_skill_repo)
+            return web.json_response(data)
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] h3_skills_sync error")
+            return web.json_response({"error": str(exc)}, status=500)
 
     @routes.get("/cap/ffmpeg_status")
     async def api_ffmpeg_status(_request: web.Request) -> web.Response:
