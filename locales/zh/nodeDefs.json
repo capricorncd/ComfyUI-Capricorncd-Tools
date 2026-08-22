@@ -87,7 +87,8 @@
       "images": { "name": "图片" },
       "clip_role": { "name": "类型" },
       "agent": { "name": "Agent" },
-      "ai_prompt": { "name": "AI提示词" }
+      "ai_prompt": { "name": "AI提示词" },
+      "clip_json": { "name": "片段JSON" }
     }
   },
 
@@ -277,7 +278,8 @@
       "height": { "name": "高度" },
       "ref_image_size": { "name": "参考图尺寸" },
       "data_json": { "name": "配置数据" },
-      "index": { "name": "索引" }
+      "index": { "name": "索引" },
+      "clip_json": { "name": "片段JSON" }
     },
     "outputs": {
       "positive": { "name": "正向" },

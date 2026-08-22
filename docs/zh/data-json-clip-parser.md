@@ -108,6 +108,14 @@
 | `generate_preview_video` | BOOLEAN | 是否另生成预览时长视频 |
 | `from_start` | STRING | 扩展后开始时刻标签，如 `FROM_0010_12_480`；负时间用 `FROM_N…` |
 | `from_preview_start` | STRING | 预览（时间轴原始）开始时刻标签，如 `FROM_0012_12_432` |
+| `seq_filename_prefix` | STRING | Seq To Video 前缀（`run_timestamp/from_start` 或 `…/index`） |
+| `images` | IMAGE | 片段全部静帧组成的 IMAGE 批次 |
+| `clip_role` | STRING | 片段类型（供 Agent） |
+| `agent` | STRING | Agent id |
+| `ai_prompt` | STRING | 片段 AI 提示词 |
+| `clip_json` | STRING | 自包含片段 JSON：`images` / `videos` 带绝对 `file` 路径、已解析的 `audios`，以及内嵌 `materials` |
+
+`clip_json` 供 [MiniMaxH3](minimax-h3.md) 等节点直接使用，无需再接完整 `data_json` + `index`。
 
 ---
 
@@ -117,11 +125,8 @@
 Timeline Editor / Audio Timeline
   └── data_json     ──►  Data Json Clip Parser（index = 循环计数器）
   └── clips_length  ──►  循环上限
-                             ├── audio       ──► 生成节点
-                             ├── frame_count ──► 生成节点
-                             ├── first_frame ──► 生成节点
-                             ├── last_frame  ──► 生成节点
-                             └── prompt      ──► 生成节点
+                             ├── audio / 帧 / 提示词 ──► 生成节点
+                             └── clip_json           ──► MiniMaxH3（忽略 data_json+index）
 ```
 
 两种上游节点都会将禁用 / 被遮挡的片段排除在 `data_json` 之外，因此可在编辑器中禁用其余片段来只重新生成某一段——下游索引连线无需改动。

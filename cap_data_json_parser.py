@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import json
 import os
 
@@ -6,7 +7,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from .timecode import resolve_media_path
+from .timecode import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, resolve_media_path
 
 
 class CAP_DataJsonClipParser:
@@ -30,7 +31,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -46,6 +47,7 @@ class CAP_DataJsonClipParser:
         "clip_role",
         "agent",
         "ai_prompt",
+        "clip_json",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -55,7 +57,8 @@ class CAP_DataJsonClipParser:
         "run_timestamp, generate_preview_video, FROM_ tags, seq_filename_prefix "
         "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
         "images (all clip images in editor order as one IMAGE batch), "
-        "clip_role, agent, and ai_prompt."
+        "clip_role, agent, ai_prompt, and clip_json (self-contained clip with resolved "
+        "image/video file paths and embedded materials)."
     )
 
     @classmethod
@@ -368,6 +371,122 @@ class CAP_DataJsonClipParser:
                 return img
         return None
 
+    def _infer_kind(self, path: str, row: dict | None = None) -> str:
+        kind = str((row or {}).get("kind") or "").lower()
+        if kind in ("image", "video", "audio"):
+            return kind
+        ext = os.path.splitext(path or "")[1].lower()
+        if ext in VIDEO_EXTENSIONS:
+            return "video"
+        if ext in AUDIO_EXTENSIONS:
+            return "audio"
+        return "image"
+
+    def _resolved_material_path(self, mid: str, materials: dict, fallback: str = "") -> str:
+        mat = materials.get(mid) if mid else None
+        path = ""
+        location = "input"
+        if isinstance(mat, dict):
+            path = str(mat.get("file") or "").strip()
+            location = str(mat.get("location") or "input")
+        if not path:
+            path = str(fallback or "").strip()
+        if not path:
+            return ""
+        if os.path.isabs(path) and os.path.isfile(path):
+            return os.path.normpath(path)
+        resolved = self._resolve_file_path(path, location)
+        return os.path.normpath(resolved) if resolved else os.path.normpath(path)
+
+    def _visual_ref_entry(self, ref, materials: dict) -> dict | None:
+        mid = self._ref_id(ref)
+        mat = materials.get(mid) if mid else None
+        if not isinstance(mat, dict):
+            mat = {}
+        path = self._resolved_material_path(mid, materials, self._ref_file(ref, materials))
+        if not path and isinstance(ref, dict):
+            path = str(ref.get("file") or "").strip()
+        if not path:
+            return None
+        kind = self._infer_kind(path, mat)
+        entry = {
+            "id": mid,
+            "file": path,
+            "kind": kind,
+            "use_media_prompt": self._ref_use_media_prompt(ref),
+        }
+        for key in ("name", "prompt", "media_type", "tags", "location", "stars"):
+            if key in mat:
+                entry[key] = copy.deepcopy(mat[key])
+        return entry
+
+    def _build_clip_json(self, clip: dict, materials: dict) -> str:
+        """Self-contained clip JSON: images/videos with absolute paths + embedded materials."""
+        out = copy.deepcopy(clip) if isinstance(clip, dict) else {}
+        images = []
+        videos = []
+        used_ids: list[str] = []
+        seen_ids: set[str] = set()
+
+        def _remember(mid: str):
+            mid = str(mid or "").strip()
+            if mid and mid not in seen_ids and mid in materials:
+                seen_ids.add(mid)
+                used_ids.append(mid)
+
+        for ref in self._ref_list(out.get("images")):
+            entry = self._visual_ref_entry(ref, materials)
+            if entry is None:
+                continue
+            _remember(entry.get("id"))
+            if entry.get("kind") == "video":
+                videos.append(entry)
+            else:
+                images.append(entry)
+
+        # Audio Timeline clips use start_image / end_image absolute paths.
+        if not images and not videos:
+            for key in ("start_image", "end_image"):
+                path = str(out.get(key) or "").strip()
+                if not path:
+                    continue
+                path = os.path.normpath(path)
+                images.append({
+                    "file": path,
+                    "kind": self._infer_kind(path),
+                    "use_media_prompt": True,
+                })
+
+        out["images"] = images
+        out["videos"] = videos
+
+        audio_rows = []
+        for row in out.get("audios") if isinstance(out.get("audios"), list) else []:
+            if not isinstance(row, dict):
+                continue
+            item = copy.deepcopy(row)
+            mid = str(item.get("id") or "").strip()
+            path = self._audio_row_path(item, materials)
+            if path:
+                item["file"] = os.path.normpath(path)
+            _remember(mid)
+            audio_rows.append(item)
+        if "audios" in out or audio_rows:
+            out["audios"] = audio_rows
+
+        materials_out = []
+        for mid in used_ids:
+            mat = materials.get(mid)
+            if not isinstance(mat, dict):
+                continue
+            row = copy.deepcopy(mat)
+            path = self._resolved_material_path(mid, materials, str(row.get("file") or ""))
+            if path:
+                row["file"] = path
+            materials_out.append(row)
+        out["materials"] = materials_out
+        return json.dumps(out, ensure_ascii=False)
+
     def execute(self, data_json: str, index: int, trim_offset: int = 1, seq_name_mode: str = "from_start"):
         try:
             data = json.loads(data_json or "{}")
@@ -430,6 +549,7 @@ class CAP_DataJsonClipParser:
         clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
         agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
         ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
+        clip_json = self._build_clip_json(clip, materials)
 
         return (
             audio_out,
@@ -446,6 +566,7 @@ class CAP_DataJsonClipParser:
             clip_role,
             agent,
             ai_prompt,
+            clip_json,
         )
 
 

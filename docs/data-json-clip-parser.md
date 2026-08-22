@@ -105,6 +105,14 @@ Adds extra seconds to the clip's audio end time. This is useful when the generat
 | `generate_preview_video` | BOOLEAN | Whether to also generate a preview-duration video |
 | `from_start` | STRING | Extended start tag, e.g. `FROM_0010_12_480`; negative times use `FROM_N…` |
 | `from_preview_start` | STRING | Preview (original timeline) start tag, e.g. `FROM_0012_12_432` |
+| `seq_filename_prefix` | STRING | Prefix for Seq To Video (`run_timestamp/from_start` or `…/index`) |
+| `images` | IMAGE | All clip stills as one IMAGE batch |
+| `clip_role` | STRING | Clip role for agents |
+| `agent` | STRING | Agent id |
+| `ai_prompt` | STRING | Clip AI prompt text |
+| `clip_json` | STRING | Self-contained clip JSON: `images` / `videos` with absolute `file` paths, resolved `audios`, and embedded `materials` |
+
+`clip_json` is meant for nodes such as [MiniMaxH3](minimax-h3.md) that should not need the full `data_json` + `index`.
 
 ---
 
@@ -114,11 +122,8 @@ Adds extra seconds to the clip's audio end time. This is useful when the generat
 Timeline Editor / Audio Timeline
   └── data_json     ──►  Data Json Clip Parser (index = loop counter)
   └── clips_length  ──►  loop limit
-                             ├── audio       ──► generation node
-                             ├── frame_count ──► generation node
-                             ├── first_frame ──► generation node
-                             ├── last_frame  ──► generation node
-                             └── prompt      ──► generation node
+                             ├── audio / frames / prompt ──► generation nodes
+                             └── clip_json               ──► MiniMaxH3 (ignores data_json+index)
 ```
 
 Both upstream nodes exclude disabled / occluded clips from `data_json`, so you can selectively re-run individual segments by disabling other clips in the editor — without changing any index wiring in the downstream graph.

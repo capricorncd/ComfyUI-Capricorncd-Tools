@@ -87,7 +87,8 @@
       "images": { "name": "Images" },
       "clip_role": { "name": "Clip Role" },
       "agent": { "name": "Agent" },
-      "ai_prompt": { "name": "AI Prompt" }
+      "ai_prompt": { "name": "AI Prompt" },
+      "clip_json": { "name": "Clip JSON" }
     }
   },
 
@@ -277,7 +278,8 @@
       "height": { "name": "Height" },
       "ref_image_size": { "name": "Ref Image Size" },
       "data_json": { "name": "Data JSON" },
-      "index": { "name": "Index" }
+      "index": { "name": "Index" },
+      "clip_json": { "name": "Clip JSON" }
     },
     "outputs": {
       "positive": { "name": "Positive" },

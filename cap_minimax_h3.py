@@ -52,7 +52,7 @@ def _pad_video_frames(frames: torch.Tensor, min_frames: int = 5) -> torch.Tensor
 
 
 class CAP_MiniMaxH3ReferenceToVideo:
-    """Parse a Timeline Editor clip from data_json and run MiniMax H3 Reference to Video."""
+    """Parse a Timeline Editor clip from data_json or clip_json and run MiniMax H3 Reference to Video."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -70,6 +70,13 @@ class CAP_MiniMaxH3ReferenceToVideo:
                 "data_json": ("STRING", {"default": "", "multiline": True}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
             },
+            "optional": {
+                "clip_json": ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "tooltip": "Self-contained clip JSON (e.g. from Data Json Clip Parser). When non-empty, data_json and index are ignored.",
+                }),
+            },
         }
 
     RETURN_TYPES = ("CONDITIONING", "LATENT", "INT", "STRING", "IMAGE", "IMAGE", "AUDIO")
@@ -77,7 +84,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
-        "MiniMax H3 Reference to Video using a Timeline Editor clip from data_json. "
+        "MiniMax H3 Reference to Video using a Timeline Editor clip from data_json+index, "
+        "or a self-contained clip_json (when set, data_json and index are ignored). "
         "Clip images map to ref_image, videos to ref_video (+ soundtrack), "
         "and clip audios to ref_audio. Frame count and prompt come from the clip. "
         "Also outputs clip stills, video frames, and mixed clip audio."
@@ -85,8 +93,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
 
     @classmethod
     def IS_CHANGED(cls, clip, vae, audio_vae, width, height, ref_image_size,
-                   data_json, index):
-        return (data_json, index, width, height, ref_image_size)
+                   data_json, index, clip_json=""):
+        return (data_json, index, clip_json, width, height, ref_image_size)
 
     def _parse_clip(self, data_json: str, index: int):
         try:
@@ -105,22 +113,54 @@ class CAP_MiniMaxH3ReferenceToVideo:
         materials = parser._materials_by_id(data)
         return data, clip, materials, parser
 
+    def _parse_clip_json(self, clip_json: str):
+        try:
+            clip = json.loads(clip_json or "{}")
+        except json.JSONDecodeError:
+            clip = {}
+        if not isinstance(clip, dict):
+            clip = {}
+        parser = CAP_DataJsonClipParser()
+        materials = parser._materials_by_id({"materials": clip.get("materials")})
+        for ref in (
+            parser._ref_list(clip.get("images"))
+            + parser._ref_list(clip.get("videos"))
+            + (clip.get("audios") if isinstance(clip.get("audios"), list) else [])
+        ):
+            if not isinstance(ref, dict):
+                continue
+            mid = str(ref.get("id") or "").strip()
+            path = str(ref.get("file") or "").strip()
+            if not mid or not path or mid in materials:
+                continue
+            materials[mid] = ref
+        data = {
+            "fps": clip.get("fps", 24.0),
+            "global_prompt": clip.get("global_prompt", ""),
+        }
+        return data, clip, materials, parser
+
     def _visual_refs(self, clip: dict, parser: CAP_DataJsonClipParser) -> list:
-        refs = parser._ref_list(clip.get("images"))
-        if not refs:
-            refs = parser._ref_list(clip.get("start_image")) + parser._ref_list(clip.get("end_image"))
-        return refs
+        images = parser._ref_list(clip.get("images"))
+        videos = parser._ref_list(clip.get("videos"))
+        if images or videos:
+            return images + videos
+        return parser._ref_list(clip.get("start_image")) + parser._ref_list(clip.get("end_image"))
 
     def _material_for_ref(self, ref, materials: dict, parser: CAP_DataJsonClipParser) -> tuple[str, dict]:
         mid = parser._ref_id(ref)
         row = materials.get(mid) if mid else None
         if not isinstance(row, dict):
-            row = {}
-        path = parser._ref_file(ref, materials)
+            row = ref if isinstance(ref, dict) else {}
+        path = ""
+        if isinstance(ref, dict):
+            path = str(ref.get("file") or "").strip()
+        if not path:
+            path = parser._ref_file(ref, materials)
         location = str(row.get("location") or "input")
         if path and not os.path.isfile(path):
             path = parser._resolve_file_path(path, location)
-        return os.path.normpath(path) if path else "", row
+        return os.path.normpath(path) if path else "", row if isinstance(row, dict) else {}
 
     def _material_prompt_line(self, parser: CAP_DataJsonClipParser, label: str, row: dict) -> str:
         text = parser._strip_comment_lines((row or {}).get("prompt") or "").strip()
@@ -215,8 +255,11 @@ class CAP_MiniMaxH3ReferenceToVideo:
         return torch.cat(aligned, dim=0)
 
     def execute(self, clip, vae, audio_vae, width, height, ref_image_size,
-                data_json, index):
-        data, clip_row, materials, parser = self._parse_clip(data_json, index)
+                data_json, index, clip_json=""):
+        if str(clip_json or "").strip():
+            data, clip_row, materials, parser = self._parse_clip_json(clip_json)
+        else:
+            data, clip_row, materials, parser = self._parse_clip(data_json, index)
         fps = max(1.0, float(data.get("fps", 24.0)))
         start_ms = int(clip_row.get("start_ms", 0) or 0)
         end_ms = int(clip_row.get("end_ms", start_ms) or start_ms)
@@ -285,11 +328,12 @@ class CAP_MiniMaxH3ReferenceToVideo:
             ref_audios[f"ref_audio_{n}"] = audio
             mid = str(row.get("id") or "").strip()
             mat = materials.get(mid) if mid else None
-            if isinstance(mat, dict):
-                audio_n += 1
-                line = self._material_prompt_line(parser, f"<Audio {audio_n}>", mat)
-                if line:
-                    audio_lines.append(line)
+            if not isinstance(mat, dict):
+                mat = row
+            audio_n += 1
+            line = self._material_prompt_line(parser, f"<Audio {audio_n}>", mat)
+            if line:
+                audio_lines.append(line)
 
         prompt = self._compose_prompt(
             parser, clip_row, data.get("global_prompt", ""),

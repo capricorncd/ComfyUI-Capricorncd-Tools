@@ -2,16 +2,19 @@
 
 **Category:** `Capricorncd`
 
-Runs ComfyUI’s **MiniMax H3 Reference to Video** from a single Timeline Editor / Audio Timeline clip in `data_json`. Clip media become H3 reference slots; frame count and prompt come from that clip.
+Runs ComfyUI’s **MiniMax H3 Reference to Video** from a single Timeline Editor / Audio Timeline clip. Clip media become H3 reference slots; frame count and prompt come from that clip.
 
-Does not replace [Data Json Clip Parser](data-json-clip-parser.md) for generic pipelines — this node is the H3-specific path that parses the clip and builds references in one step.
+Accepts either:
+
+- `data_json` + `index`, or
+- **`clip_json`** from [Data Json Clip Parser](data-json-clip-parser.md) — when `clip_json` is non-empty, **`data_json` and `index` are ignored**
 
 ---
 
 ## How it works
 
-1. Load `data_json` and pick clip `index`
-2. Collect visual refs (`images`, or `start_image` / `end_image` fallback) and `audios[]`
+1. Resolve the clip: prefer `clip_json`; otherwise load `data_json` and pick `index`
+2. Collect visual refs (`images` + `videos`, or `start_image` / `end_image` fallback) and `audios[]`
 3. Map media into H3 refs (caps below); build prompt from AI / media / global / clip text
 4. Call `MiniMaxH3ReferenceToVideo` with CLIP, VAE, Audio VAE, `width` / `height`, and aligned frame length
 5. Also emit stacked clip stills, video frames, and mixed clip audio for inspection or downstream use
@@ -21,6 +24,8 @@ Does not replace [Data Json Clip Parser](data-json-clip-parser.md) for generic p
 | Image | `ref_image_1…` | 9 | Still refs |
 | Video | `ref_video_1…` (+ soundtrack → `ref_video_audio_n`) | 3 | Resampled to 24 fps, max 15 s, padded to ≥5 frames |
 | Audio | `ref_audio_1…` | 3 | From clip `audios[]` slices; end may extend slightly to match H3 frame alignment |
+
+`clip_json` is self-contained: `images` / `videos` entries already carry absolute `file` paths (and optional embedded `materials`).
 
 ---
 
@@ -43,8 +48,9 @@ Does not replace [Data Json Clip Parser](data-json-clip-parser.md) for generic p
 | `width` | INT | 1344 | Generation width |
 | `height` | INT | 768 | Generation height |
 | `ref_image_size` | `match` / `max` | `match` | `match` = scale refs to generation pixel area; `max` = 2048px short edge |
-| `data_json` | STRING | — | Runtime JSON from Timeline Editor / Audio Timeline |
-| `index` | INT | 0 | Zero-based clip index |
+| `data_json` | STRING | — | Runtime JSON from Timeline Editor / Audio Timeline (ignored when `clip_json` is set) |
+| `index` | INT | 0 | Zero-based clip index (ignored when `clip_json` is set) |
+| `clip_json` | STRING | — | Optional. Self-contained clip JSON; when non-empty, overrides `data_json` / `index` |
 
 ## Outputs
 
@@ -66,11 +72,13 @@ Wire `positive` / `latent` into your MiniMax H3 sampler / decode chain as you wo
 
 ```
 Timeline Editor
-  └── data_json      ──► MiniMaxH3 (index = loop counter)
-  └── clips_length   ──► loop limit
+  └── data_json ──► Data Json Clip Parser (index = loop counter)
+                         └── clip_json ──► MiniMaxH3
   └── width / height ──► MiniMaxH3
                              ├── positive, latent ──► H3 sample / decode ──► Save / Seq To Video
                              └── prompt, images, videos, audio ──► optional inspect / sidecar
 ```
+
+Or wire `data_json` + `index` directly into MiniMaxH3 (no parser) when you do not need other parser outputs.
 
 Disabled / hidden clips are already omitted from `data_json`, so selective re-runs use the same Disable / Enable flow as other timeline pipelines.
