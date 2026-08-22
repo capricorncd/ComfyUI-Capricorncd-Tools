@@ -16,8 +16,9 @@ A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Com
 | **Prompt Group** | Global / scene / negative prompts; counts non-empty scene prompt lines | [→](docs/prompt-group.md) · [中文](docs/zh/prompt-group.md) |
 | **Prompt From Batch** | Slice scene prompts by index/length; optionally merge global prompt | [→](docs/prompt-from-batch.md) · [中文](docs/zh/prompt-from-batch.md) |
 | **Audio Timeline** | Waveform trim + image keyframe clip track + per-clip prompts | [→](docs/audio-timeline.md) · [中文](docs/zh/audio-timeline.md) |
-| **Timeline Editor** | Fullscreen multi-track timeline editor; outputs `data_json` and `frame_seq_dir` | [→](docs/timeline-editor.md) · [中文](docs/zh/timeline-editor.md) |
+| **Timeline Editor** | Fullscreen multi-track editor; generated-video preview/mute; Export → Compose Video; `swap_wh`; outputs `data_json` and `frame_seq_dir` | [→](docs/timeline-editor.md) · [中文](docs/zh/timeline-editor.md) |
 | **Data Json Clip Parser** | Extracts a single clip from Audio Timeline / Timeline Editor `data_json` output | [→](docs/data-json-clip-parser.md) · [中文](docs/zh/data-json-clip-parser.md) |
+| **MiniMaxH3** | Timeline `data_json` clip → MiniMax H3 Reference to Video (refs + prompt + latent) | [→](docs/minimax-h3.md) · [中文](docs/zh/minimax-h3.md) |
 | **Save Images** | Saves an `IMAGE` batch to disk; optional `{prefix}.json` sidecar with prompts and models | [→](docs/save-images.md) · [中文](docs/zh/save-images.md) |
 | **Load Images From Dir** | Loads images from a directory into an `IMAGE` batch | [→](docs/load-images-from-dir.md) · [中文](docs/zh/load-images-from-dir.md) |
 | **Image Batch Count** | Returns the number of images in a batch | [→](docs/image-batch.md) · [中文](docs/zh/image-batch.md) |
@@ -42,6 +43,7 @@ Timeline Editor / Audio Timeline
   │                                     └── ──► generation nodes ──► Save Images
   │                                               ├── image_paths ──► Seq To Video
   │                                               └── image_dir   ──► Clear Directory (cleanup)
+  │                           or ──► MiniMaxH3 (index loop) ──► H3 sample / decode
   └── clips_length                ──► loop limit
 ```
 
@@ -52,6 +54,8 @@ Timeline Editor / Audio Timeline
 3. `frames_dir` — numbered sequence scan from a directory
 
 The **Disable / Enable** feature in Audio Timeline / Timeline Editor lets you re-generate a single segment without touching the rest of the timeline. See [Audio Timeline](docs/audio-timeline.md#clip-disable--enable) and [Timeline Editor](docs/timeline-editor.md#clip-disable--enable).
+
+**Timeline Editor** can also attach ComfyUI `output/` MP4s as **generated videos** per clip (enable / mute / preview), and **Export → Compose Video** mixes enabled generated videos with unmuted audio tracks into one MP4 under `output/` (default prefix `cap_timeline_compose/`). See [Timeline Editor](docs/timeline-editor.md#generated-videos).
 
 ---
 
@@ -64,7 +68,7 @@ git clone https://github.com/capricorncd/ComfyUI-Capricorncd-Tools
 
 Restart ComfyUI. No additional Python packages are required beyond a standard ComfyUI installation.
 
-> **Seq To Video** additionally requires [ffmpeg](https://ffmpeg.org/download.html) to be installed and available on the system `PATH`.
+> **Seq To Video**, **Compose Clip Videos**, and Timeline Editor **Compose Video** require [ffmpeg](https://ffmpeg.org/download.html) on the system `PATH`.
 
 ---
 
@@ -84,6 +88,7 @@ docs/
 ├── audio-timeline.md
 ├── timeline-editor.md
 ├── data-json-clip-parser.md
+├── minimax-h3.md
 ├── save-images.md
 ├── load-images-from-dir.md
 ├── image-batch.md

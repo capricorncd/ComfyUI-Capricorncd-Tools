@@ -48,13 +48,42 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 
 - Selected clip thumbnails (start / end frame where applicable)
 - Per-clip **Keyframe Prompt** and **Use Global** checkbox
+- **Generated videos** list (when the clip has any): enable checkbox, mute (same icons as track mute), open preview, delete with confirm
 - Shortcut reminders
 
 ### Project chrome
 
 - Editable project name
-- **Import** / **Export**: directory package or ZIP (all media + `project.json`); **Compose Video** writes under `output/` via prefix (default `cap_timeline_compose/`) as `projectName_yyyyMMdd_hhmmss.mp4`
+- **Import** / **Export**:
+  - Directory package or ZIP (all media + `project.json`)
+  - **Compose Video**: modal with `filename_prefix` (default `cap_timeline_compose/`) and leaf name `projectName_yyyyMMdd_hhmmss.mp4`; ffmpeg writes directly under ComfyUI `output/` (e.g. `output/cap_timeline_compose/...`). Places each clip’s enabled generated video on its timeline range; mixes unmuted audio-track clips and unmuted generated-video audio. Requires **ffmpeg** on `PATH`.
 - Close returns to the ComfyUI graph
+
+### Clip context menu (visual)
+
+- Run, AI optimize prompt, disable / disable others, rename, view materials, add generated video
+- When the clip is in **generated-video preview** mode: **Mute / Unmute** for the active generated video
+- Copy / Paste; **Delete** shown in red
+
+### AI optimize prompt
+
+- Modal: model, output language, Agent prompt, Prompt Skill, result
+- Background-audio mode, Generate BGM, and Lyrics controls were removed
+
+---
+
+## Generated videos
+
+Attach ComfyUI `output/` MP4s to a visual clip (context menu **Add generated video**, or after a run).
+
+| Control | Behavior |
+|---------|----------|
+| Enable | Include in preview / compose selection |
+| Mute | During timeline play and Compose Video, skip that file’s audio (default off = play sound) |
+| Preview mode badge on clip | Toggle media vs generated preview |
+| Delete | Confirm; removes the clip binding only (does not delete the file on disk) |
+
+Compose Video uses each clip’s first **enabled** generated video, placed from the clip’s `start_ms` through `end_ms` (first `duration` seconds of the file).
 
 ---
 

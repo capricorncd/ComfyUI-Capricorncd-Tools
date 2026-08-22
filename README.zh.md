@@ -16,8 +16,9 @@
 | **Prompt Group** | 全局 / 场景 / 负面提示词输入；统计场景提示词有效条数 | [→](docs/zh/prompt-group.md) |
 | **Prompt From Batch** | 按索引/长度截取场景提示词；可选合并全局提示词 | [→](docs/zh/prompt-from-batch.md) |
 | **Audio Timeline** | 波形修剪 + 图像关键帧时间轴 + 每片段提示词 | [→](docs/zh/audio-timeline.md) |
-| **Timeline Editor** | 全屏多轨时间轴编辑器；输出 `data_json` 与 `frame_seq_dir` | [→](docs/zh/timeline-editor.md) |
+| **Timeline Editor** | 全屏多轨编辑器；生成视频预览/禁音；导出 → 合成视频；`swap_wh`；输出 `data_json` 与 `frame_seq_dir` | [→](docs/zh/timeline-editor.md) |
 | **Data Json Clip Parser** | 从 Audio Timeline / Timeline Editor 的 `data_json` 中提取单个片段 | [→](docs/zh/data-json-clip-parser.md) |
+| **MiniMaxH3** | 时间轴 `data_json` 片段 → MiniMax H3 Reference to Video（参考 + 提示词 + latent） | [→](docs/zh/minimax-h3.md) |
 | **Save Images** | 将一批图像保存到指定目录；可选写入 `{prefix}.json` 记录提示词与模型 | [→](docs/zh/save-images.md) |
 | **Load Images From Dir** | 从目录加载图像为 `IMAGE` 批次 | [→](docs/zh/load-images-from-dir.md) |
 | **Image Batch Count** | 返回批次中的图像数量 | [→](docs/zh/image-batch.md) |
@@ -42,10 +43,13 @@ Timeline Editor / Audio Timeline
   │                                     └── ──► 生成节点 ──► Save Images
   │                                               ├── image_paths ──► Seq To Video
   │                                               └── image_dir   ──► Clear Directory（清理）
+  │                           或 ──► MiniMaxH3（按 index 循环）──► H3 采样 / 解码
   └── clips_length                ──► 循环上限
 ```
 
 **禁用 / 启用** 可只重跑某一段而不改动其余时间轴。详见 [Audio Timeline](docs/zh/audio-timeline.md#片段禁用--启用) 与 [Timeline Editor](docs/zh/timeline-editor.md#片段禁用--启用)。
+
+**Timeline Editor** 还可为每个视觉片段绑定 ComfyUI `output/` 下的 **生成视频**（启用 / 禁音 / 预览），并通过 **导出 → 合成视频** 将启用的生成视频与未禁音的音频轨混成一条 MP4，写入 `output/`（默认前缀 `cap_timeline_compose/`）。详见 [Timeline Editor](docs/zh/timeline-editor.md#生成视频)。
 
 ---
 
@@ -58,7 +62,7 @@ git clone https://github.com/capricorncd/ComfyUI-Capricorncd-Tools
 
 重启 ComfyUI。除标准 ComfyUI 安装外，无需额外 Python 依赖。
 
-> **Seq To Video** 额外需要安装 [ffmpeg](https://ffmpeg.org/download.html) 并将其加入系统 `PATH`。
+> **Seq To Video**、**Compose Clip Videos** 以及 Timeline Editor 的 **合成视频** 均需安装 [ffmpeg](https://ffmpeg.org/download.html) 并加入系统 `PATH`。
 
 ---
 
