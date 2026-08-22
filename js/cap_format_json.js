@@ -1,7 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
 import { loadExtensionCss } from "./cap_ui.js";
-import { markNonSerializableWidget } from "./cap_widget_persist.js";
 
 const NODE_CLASS = "CAP_FormatJson";
 const MIN_PREVIEW_H = 100;
@@ -51,6 +50,25 @@ function setPreviewText(node, text) {
     w.value = text ?? "";
 }
 
+function previewTextFromValues(values) {
+    if (!values?.length) return null;
+    const first = values[0];
+    if (first == null) return null;
+    if (Array.isArray(first)) return first.map((x) => String(x ?? "")).join("\n");
+    return String(first);
+}
+
+function afterPreviewUpdate(node) {
+    requestAnimationFrame(() => {
+        fitFormatJsonPreview(node);
+        const sz = node.computeSize();
+        if (sz[0] < node.size[0]) sz[0] = node.size[0];
+        if (sz[1] < node.size[1]) sz[1] = node.size[1];
+        node.onResize?.(sz);
+        app.graph.setDirtyCanvas(true, false);
+    });
+}
+
 app.registerExtension({
     name: "Capricorncd.FormatJson",
 
@@ -66,15 +84,20 @@ app.registerExtension({
             onExecuted?.apply(this, arguments);
             if (message?.text?.[0] != null) {
                 setPreviewText(this, message.text[0]);
+                // Keep widgets_values in sync for save / refresh (Easy-Use Show Any style).
+                this.widgets_values = [message.text[0]];
             }
-            requestAnimationFrame(() => {
-                fitFormatJsonPreview(this);
-                const sz = this.computeSize();
-                if (sz[0] < this.size[0]) sz[0] = this.size[0];
-                if (sz[1] < this.size[1]) sz[1] = this.size[1];
-                this.onResize?.(sz);
-                app.graph.setDirtyCanvas(true, false);
-            });
+            afterPreviewUpdate(this);
+        };
+
+        const onConfigure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function () {
+            onConfigure?.apply(this, arguments);
+            const text = previewTextFromValues(this.widgets_values);
+            if (text != null) {
+                setPreviewText(this, text);
+                afterPreviewUpdate(this);
+            }
         };
 
         const onResize = nodeType.prototype.onResize;
@@ -98,7 +121,7 @@ app.registerExtension({
             widget.inputEl.spellcheck = false;
             widget.inputEl.classList.add("cap-format-json-preview");
             widget.inputEl.placeholder = "运行后在此显示格式化 JSON…";
-            markNonSerializableWidget(widget);
+            // Serializable: persist last preview in workflow widgets_values.
             hidePreviewLabel(widget);
 
             widget._capFormatJsonBodyH = MIN_PREVIEW_H;
@@ -114,7 +137,13 @@ app.registerExtension({
             if (this.size?.[0] < 420) {
                 this.setSize([420, Math.max(this.size?.[1] ?? 360, 360)]);
             }
-            requestAnimationFrame(() => fitFormatJsonPreview(this));
+            requestAnimationFrame(() => {
+                const text = previewTextFromValues(this.widgets_values);
+                if (text != null && !(widget.value || "").trim()) {
+                    setPreviewText(this, text);
+                }
+                fitFormatJsonPreview(this);
+            });
 
             return result;
         };

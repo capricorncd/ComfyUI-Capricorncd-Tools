@@ -25,3 +25,5 @@ Format a JSON string with indentation; shows the result on the node and outputs 
 <!-- AUTO:API:end -->
 
 该节点为输出节点：格式化结果也会显示在节点 UI 上。
+
+每次运行后，预览会写入工作流的 `widgets_values`（与 Easy-Use **展示任何** 相同思路），因此在浏览器刷新或重启 ComfyUI 并恢复工作流后，仍会显示上次格式化的内容。

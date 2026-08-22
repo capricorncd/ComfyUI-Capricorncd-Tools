@@ -25,3 +25,5 @@ Format a JSON string with indentation; shows the result on the node and outputs 
 <!-- AUTO:API:end -->
 
 The node is an output node: the formatted text is also shown on the node UI.
+
+After each run, the preview is written into the workflow’s `widgets_values` (same approach as Easy-Use **Show Any**), so the last formatted text still appears after browser refresh or ComfyUI restart when the workflow is restored.
