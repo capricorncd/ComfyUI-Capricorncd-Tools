@@ -11,6 +11,7 @@ import re
 import torch
 
 from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines
+from .cap_clip_prompt_vl import clear_clip_prompt_vl
 from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_project, resolve_clip_media
 from .timecode import resolve_media_path
 
@@ -516,6 +517,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     def execute(self, fps, width, height, global_prompt,
                 project_version, project_json, trim_offset=1, **_):
+        clear_clip_prompt_vl()
         project = self._project(project_json)
         settings = project["settings"]
         fps = max(1.0, float(fps))

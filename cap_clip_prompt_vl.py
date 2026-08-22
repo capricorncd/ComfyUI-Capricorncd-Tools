@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import re
 from pathlib import Path
@@ -8,6 +9,8 @@ from pathlib import Path
 import numpy as np
 import torch
 from PIL import Image
+
+import comfy.model_management as model_management
 
 from .timecode import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, resolve_media_path
 
@@ -324,15 +327,14 @@ class ClipPromptVLEngine:
         self.device = None
 
     def clear(self):
-        if self.model is None:
+        if self.model is None and self.processor is None and self.tokenizer is None:
             return
-        del self.model, self.processor, self.tokenizer
         self.model = self.processor = self.tokenizer = None
         self.model_name = None
         self.device = None
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        model_management.soft_empty_cache(True)
+        logging.info("[CAP] Unloaded Qwen3-VL")
 
     def load(self, model_name: str):
         path = resolve_vl_model_path(model_name)
@@ -436,6 +438,10 @@ class ClipPromptVLEngine:
 _ENGINE = ClipPromptVLEngine()
 
 
+def clear_clip_prompt_vl() -> None:
+    _ENGINE.clear()
+
+
 def _kind_of(row: dict, path: str) -> str:
     kind = str((row or {}).get("kind") or "").lower()
     if kind in ("image", "video", "audio"):
@@ -462,7 +468,7 @@ def _file_label(index: int, kind: str, row: dict) -> str:
     meta = ", ".join(part for part in [media_type, *tags] if part)
     prompt = str((row or {}).get("prompt") or "").strip()
     bits = [tag]
-    if name:
+    if name and kind != "audio":
         bits.append(name)
     if meta:
         bits.append(meta)

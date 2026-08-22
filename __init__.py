@@ -62,6 +62,7 @@ from .cap_minimax_h3 import (
 from .cap_clip_prompt_vl import (
     NODE_CLASS_MAPPINGS as _CVP_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CVP_NAMES,
+    clear_clip_prompt_vl,
 )
 from .cap_join_strings import CAP_JoinStrings
 from .timecode import (
@@ -556,6 +557,11 @@ def _register_routes():
             logging.exception("[CapricorncdTools] upload_keyframe error")
             return web.json_response({"error": str(exc)}, status=500)
 
+    def _unload_vl_before_prompt(json_data):
+        clear_clip_prompt_vl()
+        return json_data
+
+    PromptServer.instance.add_on_prompt_handler(_unload_vl_before_prompt)
     logging.info("[CapricorncdTools] Registered API routes.")
 
 

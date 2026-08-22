@@ -6298,6 +6298,7 @@ export class CapTimelineEditorApp {
         } else {
             items.push(
                 { label: "运行", fn: () => void this._runClipDownstream(clip) },
+                { label: "AI优化提示词", fn: () => void this._openAiOptimizeModal() },
                 { label: m.disabled ? "启用  Ctrl+B" : "禁用  Ctrl+B", strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
                 { label: "禁用其他素材  Ctrl+G", fn: () => this._disableOthers(clip) },
                 { label: "设置标题", fn: () => this._renameClip(clip) },
@@ -7714,16 +7715,6 @@ export class CapTimelineEditorApp {
             else lines.push(prompt || "（空）");
             lines.push("");
         });
-        const audios = this._overlappingBackgroundAudio(clip);
-        if (audios.length) {
-            lines.push("时间段内背景音频：");
-            audios.forEach((row, index) => {
-                const name = (row.file || "").split(/[\\/]/).pop() || `音频 ${index + 1}`;
-                lines.push(`${index + 1}. ${name}`);
-            });
-        } else {
-            lines.push("时间段内没有背景音频。");
-        }
         return lines.join("\n").trim() || "（当前 clip 没有素材提示词）";
     }
 

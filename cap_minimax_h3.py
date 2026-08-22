@@ -184,7 +184,25 @@ class CAP_MiniMaxH3ReferenceToVideo:
             return None
         return parser._trim(waveform, sample_rate, src_start, src_end)
 
-    def _stack_frames(self, frames: list, parser: CAP_DataJsonClipParser, blank: torch.Tensor) -> torch.Tensor:
+    def _letterbox_frames(self, image: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        src_h, src_w = int(image.shape[1]), int(image.shape[2])
+        if src_h == height and src_w == width:
+            return image
+        scale = min(height / src_h, width / src_w)
+        nh = min(height, max(1, int(round(src_h * scale))))
+        nw = min(width, max(1, int(round(src_w * scale))))
+        nchw = image.permute(0, 3, 1, 2)
+        if nh != src_h or nw != src_w:
+            nchw = torch.nn.functional.interpolate(
+                nchw, size=(nh, nw), mode="bilinear", align_corners=False,
+            )
+        canvas = nchw.new_ones(image.shape[0], nchw.shape[1], height, width)
+        top = (height - nh) // 2
+        left = (width - nw) // 2
+        canvas[:, :, top:top + nh, left:left + nw] = nchw
+        return canvas.permute(0, 2, 3, 1)
+
+    def _stack_frames(self, frames: list, blank: torch.Tensor) -> torch.Tensor:
         rows = []
         for frame in frames:
             if not isinstance(frame, torch.Tensor) or frame.ndim != 4 or frame.shape[0] < 1:
@@ -193,7 +211,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
         if not rows:
             return blank
         height, width = int(rows[0].shape[1]), int(rows[0].shape[2])
-        aligned = [parser._match_image_size(frame, height, width) for frame in rows]
+        aligned = [self._letterbox_frames(frame, height, width) for frame in rows]
         return torch.cat(aligned, dim=0)
 
     def execute(self, clip, vae, audio_vae, width, height, ref_image_size,
@@ -283,8 +301,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
         else:
             audio_out = parser._clip_audio_from_audios(clip_row, 0, materials=materials)
         blank = torch.zeros(1, 64, 64, 3)
-        images_out = self._stack_frames(image_frames, parser, blank)
-        videos_out = self._stack_frames(video_frames, parser, blank)
+        images_out = self._stack_frames(image_frames, blank)
+        videos_out = self._stack_frames(video_frames, blank)
 
         out = MiniMaxH3ReferenceToVideo.execute(
             clip, vae, audio_vae, prompt, width, height, length, ref_image_size,
