@@ -331,7 +331,6 @@ export class CapTimelineEditorApp {
         CapTimelineEditorApp._instances.add(this);
         loadEditorCss();
         this._buildLauncher();
-        this._bindGlobalPromptWidget();
     }
 
     _w(name) { return this.node.widgets?.find(w => w.name === name); }
@@ -463,7 +462,7 @@ export class CapTimelineEditorApp {
     async _openEditor(gen = this._openGen) {
         this._historyReady = false;
         this._openedWidgetValues = Object.fromEntries(
-            ["fps", "width", "height", "global_prompt"].map(name => [name, this._w(name)?.value]),
+            ["fps", "width", "height"].map(name => [name, this._w(name)?.value]),
         );
         // Re-apply panel layout each open (window size / localStorage may have changed).
         this._applySavedMediaPanelWidth();
@@ -471,7 +470,6 @@ export class CapTimelineEditorApp {
         this._applySavedProgramPanelHeight();
         // Bind (or re-bind) OS file drops — overlay may predate this feature.
         this._bindExternalFileDrop();
-        this._bindGlobalPromptWidget();
         try {
             await this._initTimelineFromWidgets();
         } catch (error) {
@@ -576,8 +574,7 @@ export class CapTimelineEditorApp {
                 for (const [name, value] of Object.entries(this._openedWidgetValues)) {
                     const widget = this._w(name);
                     if (!widget || value === undefined) continue;
-                    if (name === "global_prompt") this._setWidgetText(widget, value);
-                    else widget.value = value;
+                    widget.value = value;
                 }
             }
             this._discardTimeline();
@@ -989,6 +986,7 @@ export class CapTimelineEditorApp {
             this.composePrefixInput.value = "cap_timeline_compose/";
         }
         if (this.composeFilenameInput) this.composeFilenameInput.value = this._composeDefaultFilename();
+        if (this.composeIgnoreAudioCb) this.composeIgnoreAudioCb.checked = false;
         if (this.composeStatus) {
             this.composeStatus.hidden = true;
             this.composeStatus.textContent = "";
@@ -1039,6 +1037,7 @@ export class CapTimelineEditorApp {
                     project,
                     filename_prefix: filenamePrefix,
                     filename,
+                    ignore_audio_tracks: !!this.composeIgnoreAudioCb?.checked,
                 }),
             });
             const data = await response.json().catch(() => ({}));
@@ -1201,8 +1200,11 @@ export class CapTimelineEditorApp {
             <div class="cat-te-brand">
               ${iconHtml("rabbit", 22)}
               <span class="cat-te-brand-name">时间轴编辑器</span>
+              <span class="cat-te-brand-sep"> | </span>
+              <button type="button" class="cat-te-brand-project" title="编辑项目名称">未命名项目</button>
             </div>
             <div class="cat-te-header-spacer"></div>
+            <div class="cat-te-header-scalars" title="节点尺寸与帧率"></div>
             <button type="button" class="cat-te-btn cat-te-import">导入 ▾</button>
             <button type="button" class="cat-te-btn cat-te-export">导出 ▾</button>
             <button type="button" class="cat-te-btn cat-te-settings">⚙ 设置</button>
@@ -1238,6 +1240,7 @@ export class CapTimelineEditorApp {
                     <span>项目名称</span>
                     <input class="cat-te-title" type="text" value="未命名项目" aria-label="项目名称" />
                   </label>
+                  <div class="cat-te-project-scalars" aria-label="尺寸与帧率"></div>
                   <div class="cat-te-prompt-wrap cat-te-global-prompt-wrap">
                     <div class="cat-te-prompt-label-row">
                       <div class="cat-te-prompt-label">全局提示词</div>
@@ -1483,7 +1486,11 @@ export class CapTimelineEditorApp {
                   <span>文件名</span>
                   <input class="cat-te-compose-filename" type="text" />
                 </label>
-                <p class="cat-te-compose-hint">前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。需要本机已安装 ffmpeg。</p>
+                <label class="cat-te-compose-check">
+                  <input class="cat-te-compose-ignore-audio" type="checkbox" />
+                  <span>忽略音频轨道</span>
+                </label>
+                <p class="cat-te-compose-hint">前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。勾选「忽略音频轨道」时不合并音频轨上的 clip（生成视频音轨仍会按禁音设置处理）。需要本机已安装 ffmpeg。</p>
                 <div class="cat-te-compose-status" hidden></div>
               </div>
               <div class="cat-te-compose-actions">
@@ -1632,6 +1639,9 @@ export class CapTimelineEditorApp {
         document.body.appendChild(el);
         this._overlay = el;
         this.projectNameInput = el.querySelector(".cat-te-title");
+        this.brandProjectBtn = el.querySelector(".cat-te-brand-project");
+        this.headerScalarsEl = el.querySelector(".cat-te-header-scalars");
+        this.projectScalarsEl = el.querySelector(".cat-te-project-scalars");
         this.sidebarTitle = el.querySelector(".cat-te-sidebar-title");
         this.projectPanel = el.querySelector(".cat-te-project-panel");
         this.clipPanel = el.querySelector(".cat-te-clip-panel");
@@ -1729,6 +1739,7 @@ export class CapTimelineEditorApp {
         this.composeModal = el.querySelector(".cat-te-compose-modal");
         this.composePrefixInput = el.querySelector(".cat-te-compose-prefix");
         this.composeFilenameInput = el.querySelector(".cat-te-compose-filename");
+        this.composeIgnoreAudioCb = el.querySelector(".cat-te-compose-ignore-audio");
         this.composeStatus = el.querySelector(".cat-te-compose-status");
         this.composeRunBtn = el.querySelector(".cat-te-compose-run");
         this.aiOptimizeModal = el.querySelector(".cat-te-ai-optimize-modal");
@@ -1804,10 +1815,13 @@ export class CapTimelineEditorApp {
                 this._projectNameUndoArmed = true;
             }
         });
+        this.projectNameInput.addEventListener("input", () => this._syncBrandProjectName());
         this.projectNameInput.addEventListener("blur", () => {
             this.projectNameInput.value = this.projectNameInput.value.trim() || "未命名项目";
             this._projectNameUndoArmed = false;
+            this._syncBrandProjectName();
         });
+        this.brandProjectBtn?.addEventListener("click", () => this._focusProjectNameFromBrand());
         this.globalPromptInput?.addEventListener("focus", () => { this._globalPromptUndoArmed = true; });
         this.globalPromptInput?.addEventListener("blur", () => { this._globalPromptUndoArmed = false; });
         this.globalPromptInput?.addEventListener("input", () => this._onGlobalPromptInput());
@@ -1996,7 +2010,6 @@ export class CapTimelineEditorApp {
         this._applySavedProgramPanelHeight();
         this._bindProgramPanelResize();
         this._bindExternalFileDrop();
-        this._bindGlobalPromptWidget();
         this._renderMediaStarFilter();
     }
 
@@ -5065,16 +5078,16 @@ export class CapTimelineEditorApp {
     }
 
     _applyScalarSettings(settings, { applySettingsFromProject = false } = {}) {
-        for (const name of ["fps", "width", "height", "global_prompt"]) {
+        for (const name of ["fps", "width", "height"]) {
             const widget = this._w(name);
             if (!widget) continue;
             const sVal = settings[name];
             const next = applySettingsFromProject
                 ? (sVal != null ? sVal : widget.value)
                 : this._resolvedScalar(widget.value, sVal, PY_SCALAR_DEFAULTS[name]);
-            if (name === "global_prompt") this._setWidgetText(widget, next);
-            else widget.value = next;
+            widget.value = next;
         }
+        this._syncProjectScalarDisplay();
     }
 
     /** Keep project_json.settings aligned with node scalar widgets. */
@@ -5088,10 +5101,11 @@ export class CapTimelineEditorApp {
         project.settings.fps = Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps);
         project.settings.width = Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width);
         project.settings.height = Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height);
-        project.settings.global_prompt = String(this._w("global_prompt")?.value ?? "");
+        project.settings.global_prompt = this._readGlobalPrompt();
         delete project.settings.ignore_occluded;
         projectW.value = JSON.stringify(project);
         this.node.setDirtyCanvas(true, true);
+        this._syncProjectScalarDisplay();
     }
 
     async _initTimelineFromWidgetsAsync(projectOverride = null, { applySettingsFromProject = false } = {}) {
@@ -5126,6 +5140,7 @@ export class CapTimelineEditorApp {
         project = this._migrateProjectDocument(project);
         this._applyMediaCatalogFromProject(project);
         this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
+        this._syncBrandProjectName();
 
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
         this._applyScalarSettings(settings, { applySettingsFromProject });
@@ -5134,9 +5149,14 @@ export class CapTimelineEditorApp {
             fps: Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps),
             width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
             height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
-            global_prompt: String(this._w("global_prompt")?.value ?? ""),
+            global_prompt: String(settings.global_prompt ?? this._readGlobalPrompt() ?? ""),
         };
-        this._syncGlobalPromptInput();
+        if (settings.global_prompt != null) {
+            this._writeGlobalPrompt(settings.global_prompt);
+        } else {
+            this._syncGlobalPromptInput();
+        }
+        this._syncProjectScalarDisplay();
         this._timeline.fps = this.getFps();
 
         const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
@@ -7995,41 +8015,58 @@ export class CapTimelineEditorApp {
         if (this.sidebarTitle) this.sidebarTitle.textContent = hasClip ? "clip设置" : "项目设置";
         if (this.projectPanel) this.projectPanel.hidden = !!hasClip;
         if (this.clipPanel) this.clipPanel.hidden = !hasClip;
-        if (!hasClip) this._syncGlobalPromptInput();
-    }
-
-    _readGlobalPromptFromWidget() {
-        const widget = this._w("global_prompt");
-        const ta = resolvePromptTextarea(widget);
-        if (ta && (document.activeElement === ta || typeof widget?.value !== "string")) {
-            return String(ta.value ?? "");
+        if (hasClip) {
+            if (document.activeElement === this.projectNameInput) this.projectNameInput.blur();
+        } else {
+            this._syncGlobalPromptInput();
+            this._syncProjectScalarDisplay();
         }
-        if (typeof widget?.value === "string") return widget.value;
-        return String(ta?.value ?? "");
     }
 
-    _bindGlobalPromptWidget() {
-        const widget = this._w("global_prompt");
-        if (!widget) return;
-        const ta = resolvePromptTextarea(widget);
-        if (!ta || ta._capTeGpBound === this) return;
-        if (ta._capTeGpInput) {
-            ta.removeEventListener("input", ta._capTeGpInput);
-            ta.removeEventListener("change", ta._capTeGpInput);
+    _syncBrandProjectName() {
+        const name = String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目";
+        if (this.brandProjectBtn) this.brandProjectBtn.textContent = name;
+    }
+
+    _focusProjectNameFromBrand() {
+        this._timeline?.clearSelection?.();
+        this._selClip = null;
+        this._selClips = [];
+        this._updatePromptPanel();
+        requestAnimationFrame(() => {
+            this.projectNameInput?.focus();
+            this.projectNameInput?.select?.();
+        });
+    }
+
+    _syncProjectScalarDisplay() {
+        const fps = Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps);
+        const width = Math.round(Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width) || PY_SCALAR_DEFAULTS.width);
+        const height = Math.round(Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height) || PY_SCALAR_DEFAULTS.height);
+        const fpsText = Number.isFinite(fps) ? (Number.isInteger(fps) ? String(fps) : fps.toFixed(1)) : "24";
+        const sizeText = `${width} × ${height}`;
+        const fpsLabel = `${fpsText} fps`;
+        if (this.headerScalarsEl) this.headerScalarsEl.textContent = `${sizeText} · ${fpsLabel}`;
+        if (this.projectScalarsEl) this.projectScalarsEl.textContent = `${sizeText} · ${fpsLabel}`;
+    }
+
+    _readGlobalPrompt() {
+        if (this.globalPromptInput && (document.activeElement === this.globalPromptInput || typeof this.globalPromptInput.value === "string")) {
+            return String(this.globalPromptInput.value ?? "");
         }
-        ta._capTeGpBound = this;
-        ta._capTeGpInput = () => this._onNodeGlobalPromptInput();
-        ta.addEventListener("input", ta._capTeGpInput);
-        ta.addEventListener("change", ta._capTeGpInput);
+        const parsed = this._parseProjectWidgetValue();
+        const settings = parsed?.project?.settings;
+        if (settings && typeof settings === "object" && settings.global_prompt != null) {
+            return String(settings.global_prompt);
+        }
+        return "";
     }
 
-    _writeGlobalPromptToWidget(text) {
-        const widget = this._w("global_prompt");
-        if (!widget) return;
+    _writeGlobalPrompt(text) {
         const next = String(text ?? "");
         this._globalPromptSyncing = true;
         try {
-            this._setWidgetText(widget, next);
+            if (this.globalPromptInput) setRichPromptValue(this.globalPromptInput, next, true);
             this._syncScalarsToProjectJson();
             this.node.setDirtyCanvas?.(true, true);
         } finally {
@@ -8037,19 +8074,10 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _onNodeGlobalPromptInput() {
-        if (this._globalPromptSyncing) return;
-        const widget = this._w("global_prompt");
-        const text = this._readGlobalPromptFromWidget();
-        if (widget && widget.value !== text) widget.value = text;
-        this._syncScalarsToProjectJson();
-        if (this._overlay?.classList.contains("open")) this._syncGlobalPromptInput();
-    }
-
     _syncGlobalPromptInput() {
         if (!this.globalPromptInput || this._globalPromptSyncing) return;
         if (document.activeElement === this.globalPromptInput) return;
-        const value = this._readGlobalPromptFromWidget();
+        const value = this._readGlobalPrompt();
         if (this.globalPromptInput.value === value) {
             updateRichPromptMirror(this.globalPromptInput);
             return;
@@ -8062,7 +8090,7 @@ export class CapTimelineEditorApp {
             this._recordUndo();
             this._globalPromptUndoArmed = false;
         }
-        this._writeGlobalPromptToWidget(this.globalPromptInput?.value ?? "");
+        this._writeGlobalPrompt(this.globalPromptInput?.value ?? "");
     }
 
     _parseExtendSec(input) {
@@ -8174,7 +8202,7 @@ export class CapTimelineEditorApp {
         const meta = this._ensureClipMeta(clip);
         const tab = this._aiOptimizeSrc || "clip";
         if (tab === "clip") this.aiSrcText.value = String(meta.prompt || "") || "（空）";
-        else if (tab === "global") this.aiSrcText.value = this._readGlobalPromptFromWidget() || "（空）";
+        else if (tab === "global") this.aiSrcText.value = this._readGlobalPrompt() || "（空）";
         else this.aiSrcText.value = this._mediaPromptBlock(clip);
     }
 
@@ -8351,7 +8379,7 @@ export class CapTimelineEditorApp {
                 lyrics: "",
                 duration_sec: Number(clip.duration) || 0,
                 clip_prompt: String(meta.prompt || ""),
-                global_prompt: meta.useGlobalPrompt === false ? "" : this._readGlobalPromptFromWidget(),
+                global_prompt: meta.useGlobalPrompt === false ? "" : this._readGlobalPrompt(),
                 files: this._clipAiOptimizeFiles(clip),
                 keep_loaded: false,
             };
@@ -8681,7 +8709,7 @@ export class CapTimelineEditorApp {
                 fps: Number(this._w("fps")?.value ?? 24),
                 width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
                 height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
-                global_prompt: String(this._w("global_prompt")?.value ?? ""),
+                global_prompt: this._readGlobalPrompt(),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
                 current_time: Number(this._timeline?.currentTime ?? 0) || 0,
                 timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,
@@ -8760,13 +8788,14 @@ export class CapTimelineEditorApp {
             const project = this._migrateProjectDocument(snapshot.project || {});
             this._applyMediaCatalogFromProject(project);
             this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
+            this._syncBrandProjectName();
             const snapSettings = snapshot.project?.settings ?? {};
-            const gpWidget = this._w("global_prompt");
-            if (gpWidget && snapSettings.global_prompt != null) {
-                this._writeGlobalPromptToWidget(snapSettings.global_prompt);
+            if (snapSettings.global_prompt != null) {
+                this._writeGlobalPrompt(snapSettings.global_prompt);
             } else {
                 this._syncGlobalPromptInput();
             }
+            this._syncProjectScalarDisplay();
             const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
             const tracks = projectTracks.map((track, order) => ({
                 ...track,

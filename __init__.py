@@ -410,7 +410,13 @@ def _register_routes():
             filename = str(payload.get("filename") or "").strip()
             if not filename:
                 filename = build_compose_filename(project.get("name") or "未命名项目")
-            meta = compose_to_output(project, filename_prefix=filename_prefix, filename=filename)
+            ignore_audio_tracks = bool(payload.get("ignore_audio_tracks"))
+            meta = compose_to_output(
+                project,
+                filename_prefix=filename_prefix,
+                filename=filename,
+                ignore_audio_tracks=ignore_audio_tracks,
+            )
             return web.json_response({
                 "ok": True,
                 "filename": meta["filename"],

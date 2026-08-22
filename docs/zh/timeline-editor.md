@@ -54,7 +54,9 @@
 - 可编辑项目名称
 - **导入** / **导出**：
   - 目录包与 ZIP（含全部素材 + `project.json`）
-  - **合成视频**：弹窗设置 `filename_prefix`（默认 `cap_timeline_compose/`）与文件名 `项目名称_yyyyMMdd_hhmmss.mp4`；ffmpeg 直接写入 ComfyUI `output/`（如 `output/cap_timeline_compose/...`）。按各 clip 时间段放置其启用的生成视频；混入未禁音的音频轨，以及未禁音的生成视频音轨。需要本机 **ffmpeg** 在 `PATH` 中。
+  - **合成视频**：弹窗设置 `filename_prefix`（默认 `cap_timeline_compose/`）、文件名 `项目名称_yyyyMMdd_hhmmss.mp4`，以及 **忽略音频轨道**（默认关）。开启后不合并音频轨上的 clip；未禁音的生成视频音轨仍会混入。ffmpeg 写入 ComfyUI `output/`。需要本机 **ffmpeg**。
+- 标题栏显示 `时间轴编辑器 | 项目名称`；点击项目名称可聚焦右侧栏名称输入（并取消 clip 选中）。节点宽高与帧率显示在右侧（标题栏右侧 + 项目面板）。
+- 全局提示词仅在编辑器右侧栏维护，节点上不再提供该控件。
 - 关闭后返回 ComfyUI 画布
 
 ### Clip 右键菜单（视觉轨）
@@ -119,7 +121,6 @@
 | `width` | INT | 1344 | 输出宽度（写入 `data_json`） |
 | `height` | INT | 768 | 输出高度（写入 `data_json`） |
 | `swap_wh` | BOOLEAN | false | 切换时交换当前 width / height（如 1280×720 → 720×1280） |
-| `global_prompt` | STRING | — | 片段使用全局提示词时的默认内容 |
 | `project_version` | STRING | 包版本 | 写入项目 / 运行时 JSON |
 | `project_json` | STRING | 空项目 | 完整可编辑时间轴文档（轨道、片段、资源、设置） |
 | `trim_offset` | INT | 1 | 预留给音频尾部流程；`data_json` 中的运行时时间不会因此延长 |
@@ -131,7 +132,7 @@
 | `fps` | FLOAT | 帧率 |
 | `width` | INT | 视频宽度 |
 | `height` | INT | 视频高度 |
-| `global_prompt` | STRING | 有效的全局提示词 |
+| `global_prompt` | STRING | 编辑器内全局提示词（`project_json.settings.global_prompt`） |
 | `data_json` | STRING | 仅含启用且可见片段的运行时 JSON（见下文） |
 | `clips_length` | INT | 运行时片段数量 |
 | `total_frame_count` | INT | 按 `fps` 汇总的总帧数 |

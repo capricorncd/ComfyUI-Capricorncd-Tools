@@ -56,7 +56,9 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 - Editable project name
 - **Import** / **Export**:
   - Directory package or ZIP (all media + `project.json`)
-  - **Compose Video**: modal with `filename_prefix` (default `cap_timeline_compose/`) and leaf name `projectName_yyyyMMdd_hhmmss.mp4`; ffmpeg writes directly under ComfyUI `output/` (e.g. `output/cap_timeline_compose/...`). Places each clip’s enabled generated video on its timeline range; mixes unmuted audio-track clips and unmuted generated-video audio. Requires **ffmpeg** on `PATH`.
+  - **Compose Video**: modal with `filename_prefix` (default `cap_timeline_compose/`), leaf name `projectName_yyyyMMdd_hhmmss.mp4`, and **Ignore audio tracks** (default off). When on, audio-track clips are skipped; unmuted generated-video audio is still mixed. ffmpeg writes under ComfyUI `output/`. Requires **ffmpeg** on `PATH`.
+- Header shows `时间轴编辑器 | 项目名称`; click the project name to focus the right-panel name field (clears clip selection). Node width × height and fps are shown on the right (header + project panel).
+- Global prompt lives only in the editor (right panel), not as a node widget.
 - Close returns to the ComfyUI graph
 
 ### Clip context menu (visual)
@@ -121,7 +123,6 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 | `width` | INT | 1344 | Output width (written to `data_json`) |
 | `height` | INT | 768 | Output height (written to `data_json`) |
 | `swap_wh` | BOOLEAN | false | Toggling swaps the current width and height values |
-| `global_prompt` | STRING | — | Default prompt when a clip uses the global prompt |
 | `project_version` | STRING | package version | Written into project / runtime JSON |
 | `project_json` | STRING | empty project | Full editable timeline document (tracks, clips, resources, settings) |
 | `trim_offset` | INT | 1 | Reserved for audio tail workflows; runtime clip timings in `data_json` are not extended by this field |
@@ -133,7 +134,7 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 | `fps` | FLOAT | Frames per second |
 | `width` | INT | Video width |
 | `height` | INT | Video height |
-| `global_prompt` | STRING | Effective global prompt |
+| `global_prompt` | STRING | Effective global prompt from the editor (`project_json.settings.global_prompt`) |
 | `data_json` | STRING | Runtime JSON for enabled visible segments only (see below) |
 | `clips_length` | INT | Number of runtime clips |
 | `total_frame_count` | INT | Sum of runtime clip frame counts at `fps` |

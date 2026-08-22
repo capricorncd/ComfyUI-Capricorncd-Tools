@@ -180,7 +180,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                         "tooltip": "切换时交换当前 width / height（如 1280×720 → 720×1280）",
                     },
                 ),
-                "global_prompt": ("STRING", {"default": "", "multiline": True}),
                 "project_version": ("STRING", {"default": PROJECT_VERSION}),
                 "project_json": (
                     "STRING",
@@ -205,9 +204,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         }
 
     @classmethod
-    def IS_CHANGED(cls, fps, width, height, global_prompt,
+    def IS_CHANGED(cls, fps, width, height,
                    project_version, project_json, trim_offset, swap_wh=False, **_):
-        return fps, width, height, global_prompt, project_version, project_json, trim_offset, bool(swap_wh)
+        return fps, width, height, project_version, project_json, trim_offset, bool(swap_wh)
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -528,7 +527,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         segments.sort(key=lambda row: (row[1], row[3]))
         return segments
 
-    def execute(self, fps, width, height, global_prompt,
+    def execute(self, fps, width, height,
                 project_version, project_json, trim_offset=1, **_):
         clear_clip_prompt_vl()
         project = self._project(project_json)
@@ -536,10 +535,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         fps = max(1.0, float(fps))
         width = max(1, int(width))
         height = max(1, int(height))
-        if not str(global_prompt or "").strip():
-            global_prompt = _strip_comment_lines(settings.get("global_prompt") or "")
-        else:
-            global_prompt = _strip_comment_lines(global_prompt)
+        global_prompt = _strip_comment_lines(settings.get("global_prompt") or "")
 
         visual_clips: list[tuple[dict, dict, int]] = []
         audio_clips: list[dict] = []

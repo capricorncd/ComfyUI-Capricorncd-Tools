@@ -2,318 +2,646 @@
   "CAP_RichPromptInput": {
     "display_name": "富文本提示词输入",
     "inputs": {
-      "prompt": { "name": "提示词" },
-      "add_blank_line_start": { "name": "开头空行" },
-      "add_blank_line_end": { "name": "结尾空行" }
+      "prompt": {
+        "name": "提示词"
+      },
+      "add_blank_line_start": {
+        "name": "开头空行"
+      },
+      "add_blank_line_end": {
+        "name": "结尾空行"
+      }
     },
     "outputs": {
-      "prompt": { "name": "提示词" }
+      "prompt": {
+        "name": "提示词"
+      }
     }
   },
-
   "CAP_AudioTimeline": {
     "display_name": "音频时间轴",
     "inputs": {
-      "audio":          { "name": "音频" },
-      "start_time":     { "name": "开始时间" },
-      "end_time":       { "name": "结束时间" },
-      "fps":            { "name": "帧率" },
-      "width":          { "name": "宽度" },
-      "height":         { "name": "高度" },
-      "assets_dir":     { "name": "资源目录" },
-      "one_shot":       { "name": "一镜到底" },
-      "global_prompt":  { "name": "全局提示词" },
-      "clips_json":     { "name": "片段数据" },
-      "trim_offset":    { "name": "修剪偏移（秒）" }
+      "audio": {
+        "name": "音频"
+      },
+      "start_time": {
+        "name": "开始时间"
+      },
+      "end_time": {
+        "name": "结束时间"
+      },
+      "fps": {
+        "name": "帧率"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "assets_dir": {
+        "name": "资源目录"
+      },
+      "one_shot": {
+        "name": "一镜到底"
+      },
+      "global_prompt": {
+        "name": "全局提示词"
+      },
+      "clips_json": {
+        "name": "片段数据"
+      },
+      "trim_offset": {
+        "name": "修剪偏移（秒）"
+      }
     },
     "outputs": {
-      "trimmed_audio":     { "name": "修剪音频" },
-      "fps":               { "name": "帧率" },
-      "one_shot":          { "name": "一镜到底" },
-      "width":             { "name": "宽度" },
-      "height":            { "name": "高度" },
-      "global_prompt":     { "name": "全局提示词" },
-      "data_json":         { "name": "配置数据" },
-      "clips_length":      { "name": "片段数量" },
-      "total_frame_count": { "name": "总帧数" },
-      "clips_audio":       { "name": "片段音频" }
+      "trimmed_audio": {
+        "name": "修剪音频"
+      },
+      "fps": {
+        "name": "帧率"
+      },
+      "one_shot": {
+        "name": "一镜到底"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "global_prompt": {
+        "name": "全局提示词"
+      },
+      "data_json": {
+        "name": "配置数据"
+      },
+      "clips_length": {
+        "name": "片段数量"
+      },
+      "total_frame_count": {
+        "name": "总帧数"
+      },
+      "clips_audio": {
+        "name": "片段音频"
+      }
     }
   },
-
   "CAP_TimelineEditor": {
     "display_name": "时间轴编辑",
     "inputs": {
-      "fps":            { "name": "帧率" },
-      "width":          { "name": "宽度" },
-      "height":         { "name": "高度" },
-      "swap_wh":        { "name": "交换宽高" },
-      "global_prompt":  { "name": "全局提示词" },
-      "project_version":{ "name": "项目版本" },
-      "project_json":   { "name": "项目数据" },
-      "trim_offset":    { "name": "修剪偏移（秒）" }
+      "fps": {
+        "name": "帧率"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "swap_wh": {
+        "name": "交换宽高"
+      },
+      "project_version": {
+        "name": "项目版本"
+      },
+      "project_json": {
+        "name": "项目数据"
+      },
+      "trim_offset": {
+        "name": "修剪偏移（秒）"
+      }
     },
     "outputs": {
-      "fps":               { "name": "帧率" },
-      "width":             { "name": "宽度" },
-      "height":            { "name": "高度" },
-      "global_prompt":     { "name": "全局提示词" },
-      "data_json":         { "name": "配置数据" },
-      "clips_length":      { "name": "片段数量" },
-      "total_frame_count": { "name": "总帧数" },
-      "clips_audio":       { "name": "片段音频" },
-      "frame_seq_dir":     { "name": "帧序列目录" }
+      "fps": {
+        "name": "帧率"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "global_prompt": {
+        "name": "全局提示词"
+      },
+      "data_json": {
+        "name": "配置数据"
+      },
+      "clips_length": {
+        "name": "片段数量"
+      },
+      "total_frame_count": {
+        "name": "总帧数"
+      },
+      "clips_audio": {
+        "name": "片段音频"
+      },
+      "frame_seq_dir": {
+        "name": "帧序列目录"
+      }
     }
   },
-
   "CAP_DataJsonClipParser": {
     "display_name": "数据解析（片段）",
     "inputs": {
-      "data_json":    { "name": "配置数据" },
-      "index":        { "name": "索引" },
-      "trim_offset":  { "name": "修剪偏移（秒）" },
-      "seq_name_mode": { "name": "序列命名模式" }
+      "data_json": {
+        "name": "配置数据"
+      },
+      "index": {
+        "name": "索引"
+      },
+      "trim_offset": {
+        "name": "修剪偏移（秒）"
+      },
+      "seq_name_mode": {
+        "name": "序列命名模式"
+      }
     },
     "outputs": {
-      "audio":       { "name": "音频" },
-      "frame_count": { "name": "帧数" },
-      "first_frame": { "name": "首帧" },
-      "last_frame":  { "name": "尾帧" },
-      "prompt":      { "name": "提示词" },
-      "run_timestamp": { "name": "运行时间戳" },
-      "generate_preview_video": { "name": "生成预览时长视频" },
-      "from_start":  { "name": "FROM开始" },
-      "from_preview_start": { "name": "FROM预览开始" },
-      "seq_filename_prefix": { "name": "序列帧合成前缀" },
-      "images": { "name": "图片" },
-      "clip_role": { "name": "类型" },
-      "agent": { "name": "Agent" },
-      "ai_prompt": { "name": "AI提示词" },
-      "clip_json": { "name": "片段JSON" }
+      "audio": {
+        "name": "音频"
+      },
+      "frame_count": {
+        "name": "帧数"
+      },
+      "first_frame": {
+        "name": "首帧"
+      },
+      "last_frame": {
+        "name": "尾帧"
+      },
+      "prompt": {
+        "name": "提示词"
+      },
+      "run_timestamp": {
+        "name": "运行时间戳"
+      },
+      "generate_preview_video": {
+        "name": "生成预览时长视频"
+      },
+      "from_start": {
+        "name": "FROM开始"
+      },
+      "from_preview_start": {
+        "name": "FROM预览开始"
+      },
+      "seq_filename_prefix": {
+        "name": "序列帧合成前缀"
+      },
+      "images": {
+        "name": "图片"
+      },
+      "clip_role": {
+        "name": "类型"
+      },
+      "agent": {
+        "name": "Agent"
+      },
+      "ai_prompt": {
+        "name": "AI提示词"
+      },
+      "clip_json": {
+        "name": "片段JSON"
+      }
     }
   },
-
   "CAP_ImageBatchCount": {
     "display_name": "图像批次数量",
     "inputs": {
-      "images": { "name": "图像" }
+      "images": {
+        "name": "图像"
+      }
     },
     "outputs": {
-      "count": { "name": "数量" }
+      "count": {
+        "name": "数量"
+      }
     }
   },
-
   "CAP_ImageFromBatchIndex": {
     "display_name": "按索引获取图像",
     "inputs": {
-      "images": { "name": "图像" },
-      "index":  { "name": "索引" }
+      "images": {
+        "name": "图像"
+      },
+      "index": {
+        "name": "索引"
+      }
     },
     "outputs": {
-      "image":    { "name": "图像" },
-      "index":    { "name": "索引" },
-      "filename": { "name": "文件名" }
+      "image": {
+        "name": "图像"
+      },
+      "index": {
+        "name": "索引"
+      },
+      "filename": {
+        "name": "文件名"
+      }
     }
   },
-
   "CAP_SaveImages": {
     "display_name": "保存图像",
     "inputs": {
-      "images":          { "name": "图像" },
-      "filename_prefix": { "name": "文件名前缀" },
-      "filename":        { "name": "文件名" },
-      "quality":         { "name": "质量" },
-      "dpi":             { "name": "DPI" },
-      "save_as_zip":     { "name": "打包 ZIP" },
-      "save_sidecar":    { "name": "保存 JSON" },
-      "metadata":        { "name": "元数据" }
+      "images": {
+        "name": "图像"
+      },
+      "filename_prefix": {
+        "name": "文件名前缀"
+      },
+      "filename": {
+        "name": "文件名"
+      },
+      "quality": {
+        "name": "质量"
+      },
+      "dpi": {
+        "name": "DPI"
+      },
+      "save_as_zip": {
+        "name": "打包 ZIP"
+      },
+      "save_sidecar": {
+        "name": "保存 JSON"
+      },
+      "metadata": {
+        "name": "元数据"
+      }
     },
     "outputs": {
-      "image_dir":   { "name": "图像目录" },
-      "image_paths": { "name": "图像路径" }
+      "image_dir": {
+        "name": "图像目录"
+      },
+      "image_paths": {
+        "name": "图像路径"
+      }
     }
   },
-
   "CAP_LoadImagesFromDir": {
     "display_name": "从目录加载图像",
     "inputs": {
-      "directory":   { "name": "目录" },
-      "deep":          { "name": "包含子目录" },
-      "start_index":   { "name": "开始索引" },
-      "max_count":     { "name": "最大输出张数" }
+      "directory": {
+        "name": "目录"
+      },
+      "deep": {
+        "name": "包含子目录"
+      },
+      "start_index": {
+        "name": "开始索引"
+      },
+      "max_count": {
+        "name": "最大输出张数"
+      }
     },
     "outputs": {
-      "images":      { "name": "图像" },
-      "directory":   { "name": "目录" },
-      "total_count": { "name": "图片总数" },
-      "count":       { "name": "输出数量" }
+      "images": {
+        "name": "图像"
+      },
+      "directory": {
+        "name": "目录"
+      },
+      "total_count": {
+        "name": "图片总数"
+      },
+      "count": {
+        "name": "输出数量"
+      }
     }
   },
-
   "CAP_SeqToVideo": {
     "display_name": "序列帧合成视频",
     "inputs": {
-      "frames_dir":        { "name": "序列帧目录" },
-      "fps":               { "name": "帧率" },
-      "filename_prefix":   { "name": "文件名前缀" },
-      "images":            { "name": "图像" },
-      "audio":             { "name": "音频" },
-      "image_paths":       { "name": "图片文件列表" },
-      "metadata":          { "name": "元数据" },
-      "save_sidecar":      { "name": "保存 JSON" }
+      "frames_dir": {
+        "name": "序列帧目录"
+      },
+      "fps": {
+        "name": "帧率"
+      },
+      "filename_prefix": {
+        "name": "文件名前缀"
+      },
+      "images": {
+        "name": "图像"
+      },
+      "audio": {
+        "name": "音频"
+      },
+      "image_paths": {
+        "name": "图片文件列表"
+      },
+      "metadata": {
+        "name": "元数据"
+      },
+      "save_sidecar": {
+        "name": "保存 JSON"
+      }
     },
     "outputs": {
-      "filename": { "name": "文件名" }
+      "filename": {
+        "name": "文件名"
+      }
     }
   },
-
   "CAP_ComposeClipVideos": {
     "display_name": "多段视频合成",
     "inputs": {
-      "data_json":         { "name": "配置数据" },
-      "clips_dir":         { "name": "片段视频目录" },
-      "name_mode":         { "name": "命名模式" },
-      "filename_prefix":   { "name": "输出文件名前缀" },
-      "trim_extends":      { "name": "裁剪首尾扩展" },
-      "save_sidecar":      { "name": "保存 JSON" }
+      "data_json": {
+        "name": "配置数据"
+      },
+      "clips_dir": {
+        "name": "片段视频目录"
+      },
+      "name_mode": {
+        "name": "命名模式"
+      },
+      "filename_prefix": {
+        "name": "输出文件名前缀"
+      },
+      "trim_extends": {
+        "name": "裁剪首尾扩展"
+      },
+      "save_sidecar": {
+        "name": "保存 JSON"
+      }
     },
     "outputs": {
-      "filename": { "name": "文件名" }
+      "filename": {
+        "name": "文件名"
+      }
     }
   },
-
   "CAP_JoinStrings": {
     "display_name": "字符串拼接",
     "inputs": {
-      "join_mode":      { "name": "拼接方式" },
-      "custom_sep":     { "name": "自定义分隔符" },
-      "leading_blank":  { "name": "开始空行" },
-      "trailing_blank": { "name": "结尾空行" },
-      "prefix":         { "name": "前缀" },
-      "suffix":         { "name": "后缀" },
-      "texts":          { "name": "文本" }
+      "join_mode": {
+        "name": "拼接方式"
+      },
+      "custom_sep": {
+        "name": "自定义分隔符"
+      },
+      "leading_blank": {
+        "name": "开始空行"
+      },
+      "trailing_blank": {
+        "name": "结尾空行"
+      },
+      "prefix": {
+        "name": "前缀"
+      },
+      "suffix": {
+        "name": "后缀"
+      },
+      "texts": {
+        "name": "文本"
+      }
     },
     "outputs": {
-      "STRING": { "name": "字符串" }
+      "STRING": {
+        "name": "字符串"
+      }
     }
   },
-
   "CAP_ShowAnything": {
     "display_name": "展示任何",
     "inputs": {
-      "anything": { "name": "输入任何" },
-      "format_json": { "name": "格式化 JSON" }
+      "anything": {
+        "name": "输入任何"
+      },
+      "format_json": {
+        "name": "格式化 JSON"
+      }
     },
     "outputs": {
-      "output": { "name": "输出" }
+      "output": {
+        "name": "输出"
+      }
     }
   },
-
   "CAP_ClearDirectory": {
     "display_name": "清空目录",
     "inputs": {
-      "directory":      { "name": "目录" },
-      "delete_subdirs": { "name": "包含子目录" },
-      "delete_images":  { "name": "删除图片" },
-      "delete_videos":  { "name": "删除视频" },
-      "delete_audio":   { "name": "删除音频" },
-      "to_recycle_bin": { "name": "放入回收站" }
+      "directory": {
+        "name": "目录"
+      },
+      "delete_subdirs": {
+        "name": "包含子目录"
+      },
+      "delete_images": {
+        "name": "删除图片"
+      },
+      "delete_videos": {
+        "name": "删除视频"
+      },
+      "delete_audio": {
+        "name": "删除音频"
+      },
+      "to_recycle_bin": {
+        "name": "放入回收站"
+      }
     },
     "outputs": {
-      "directory":     { "name": "目录" },
-      "deleted_count": { "name": "删除数量" }
+      "directory": {
+        "name": "目录"
+      },
+      "deleted_count": {
+        "name": "删除数量"
+      }
     }
   },
-
   "CAP_SizeSettings": {
     "display_name": "尺寸设置",
     "inputs": {
-      "size":          { "name": "尺寸" },
-      "scale":         { "name": "倍数" },
-      "lock_aspect":   { "name": "锁定比例" },
-      "orientation":   { "name": "方向" },
-      "custom_width":  { "name": "宽度" },
-      "custom_height": { "name": "高度" },
-      "fps":           { "name": "帧率" },
-      "count":         { "name": "数量" }
+      "size": {
+        "name": "尺寸"
+      },
+      "scale": {
+        "name": "倍数"
+      },
+      "lock_aspect": {
+        "name": "锁定比例"
+      },
+      "orientation": {
+        "name": "方向"
+      },
+      "custom_width": {
+        "name": "宽度"
+      },
+      "custom_height": {
+        "name": "高度"
+      },
+      "fps": {
+        "name": "帧率"
+      },
+      "count": {
+        "name": "数量"
+      }
     },
     "outputs": {
-      "width":   { "name": "宽度" },
-      "height":  { "name": "高度" },
-      "count":   { "name": "数量" },
-      "fps":     { "name": "帧率" },
-      "fps_int": { "name": "帧率(整型)" }
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "count": {
+        "name": "数量"
+      },
+      "fps": {
+        "name": "帧率"
+      },
+      "fps_int": {
+        "name": "帧率(整型)"
+      }
     }
   },
-
   "CAP_PromptGroup": {
     "display_name": "提示词组合",
     "inputs": {
-      "global_prompt":   { "name": "全局提示词" },
-      "scene_prompt":    { "name": "场景提示词" },
-      "negative_prompt": { "name": "负面提示词" },
-      "output_scenes":   { "name": "输出场景" }
+      "global_prompt": {
+        "name": "全局提示词"
+      },
+      "scene_prompt": {
+        "name": "场景提示词"
+      },
+      "negative_prompt": {
+        "name": "负面提示词"
+      },
+      "output_scenes": {
+        "name": "输出场景"
+      }
     },
     "outputs": {
-      "global_prompt":     { "name": "全局提示词" },
-      "negative_prompt":   { "name": "负面提示词" },
-      "scene_prompt":      { "name": "场景提示词" },
-      "effective_length":  { "name": "有效提示词长度" }
+      "global_prompt": {
+        "name": "全局提示词"
+      },
+      "negative_prompt": {
+        "name": "负面提示词"
+      },
+      "scene_prompt": {
+        "name": "场景提示词"
+      },
+      "effective_length": {
+        "name": "有效提示词长度"
+      }
     }
   },
-
   "CAP_ClipPromptVL": {
     "display_name": "Clip Prompt VL",
     "inputs": {
-      "model": { "name": "模型" },
-      "output_language": { "name": "输出语言" },
-      "system_prompt": { "name": "Agent提示词" },
-      "skill": { "name": "Prompt Skill" },
-      "user_prompt": { "name": "用户提示词" },
-      "keep_model_loaded": { "name": "保持模型加载" },
-      "max_new_tokens": { "name": "最大令牌数" },
-      "images": { "name": "图片" },
-      "video": { "name": "视频帧" }
+      "model": {
+        "name": "模型"
+      },
+      "output_language": {
+        "name": "输出语言"
+      },
+      "system_prompt": {
+        "name": "Agent提示词"
+      },
+      "skill": {
+        "name": "Prompt Skill"
+      },
+      "user_prompt": {
+        "name": "用户提示词"
+      },
+      "keep_model_loaded": {
+        "name": "保持模型加载"
+      },
+      "max_new_tokens": {
+        "name": "最大令牌数"
+      },
+      "images": {
+        "name": "图片"
+      },
+      "video": {
+        "name": "视频帧"
+      }
     },
     "outputs": {
-      "prompt": { "name": "提示词" }
+      "prompt": {
+        "name": "提示词"
+      }
     }
   },
-
   "CAP_MiniMaxH3ReferenceToVideo": {
     "display_name": "MiniMaxH3",
     "inputs": {
-      "clip": { "name": "CLIP" },
-      "vae": { "name": "VAE" },
-      "audio_vae": { "name": "音频VAE" },
-      "width": { "name": "宽度" },
-      "height": { "name": "高度" },
-      "ref_image_size": { "name": "参考图尺寸" },
-      "data_json": { "name": "配置数据" },
-      "index": { "name": "索引" },
-      "clip_json": { "name": "片段JSON" }
+      "clip": {
+        "name": "CLIP"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "audio_vae": {
+        "name": "音频VAE"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "ref_image_size": {
+        "name": "参考图尺寸"
+      },
+      "data_json": {
+        "name": "配置数据"
+      },
+      "index": {
+        "name": "索引"
+      },
+      "clip_json": {
+        "name": "片段JSON"
+      }
     },
     "outputs": {
-      "positive": { "name": "正向" },
-      "latent": { "name": "Latent" },
-      "total_frame_count": { "name": "总帧数" },
-      "prompt": { "name": "提示词" },
-      "images": { "name": "图片" },
-      "videos": { "name": "视频" },
-      "audio": { "name": "音频" }
+      "positive": {
+        "name": "正向"
+      },
+      "latent": {
+        "name": "Latent"
+      },
+      "total_frame_count": {
+        "name": "总帧数"
+      },
+      "prompt": {
+        "name": "提示词"
+      },
+      "images": {
+        "name": "图片"
+      },
+      "videos": {
+        "name": "视频"
+      },
+      "audio": {
+        "name": "音频"
+      }
     }
   },
-
   "CAP_PromptFromBatch": {
     "display_name": "从批次获取提示词",
     "inputs": {
-      "global_prompt": { "name": "全局提示词" },
-      "scene_prompt":  { "name": "场景提示词" },
-      "batch_index":   { "name": "批次索引" },
-      "batch_length":  { "name": "批次长度" },
-      "merge_global":  { "name": "合并全局提示词" }
+      "global_prompt": {
+        "name": "全局提示词"
+      },
+      "scene_prompt": {
+        "name": "场景提示词"
+      },
+      "batch_index": {
+        "name": "批次索引"
+      },
+      "batch_length": {
+        "name": "批次长度"
+      },
+      "merge_global": {
+        "name": "合并全局提示词"
+      }
     },
     "outputs": {
-      "prompt": { "name": "提示词" }
+      "prompt": {
+        "name": "提示词"
+      }
     }
   }
 }

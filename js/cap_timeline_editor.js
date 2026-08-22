@@ -3,8 +3,8 @@ import { api } from "../../scripts/api.js";
 import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 
 const NODE_CLASS = "CAP_TimelineEditor";
-const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt"];
-const OBSOLETE_WIDGETS = ["ignore_occluded", "assets_dir"];
+const SCALAR_WIDGETS = ["fps", "width", "height"];
+const OBSOLETE_WIDGETS = ["ignore_occluded", "assets_dir", "global_prompt"];
 function flushOpenTimelineEditors() {
     CapTimelineEditorApp.flushOpenEditors();
     for (const node of app.graph?._nodes ?? []) {
@@ -88,10 +88,9 @@ function hookScalarWidgets(node) {
         w.callback = function (...args) {
             const ret = orig?.apply(this, args);
             node._teApp?._syncScalarsToProjectJson?.();
-            if (name === "global_prompt") node._teApp?._onNodeGlobalPromptInput?.();
+            node._teApp?._syncProjectScalarDisplay?.();
             return ret;
         };
-        if (name === "global_prompt") node._teApp?._bindGlobalPromptWidget?.();
     }
     hookSwapWhWidget(node);
 }

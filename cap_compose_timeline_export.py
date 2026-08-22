@@ -82,7 +82,7 @@ def _clip_audio_file(clip: dict, media_map: dict[str, dict]) -> str:
     return file
 
 
-def _collect_plan(project: dict) -> dict:
+def _collect_plan(project: dict, ignore_audio_tracks: bool = False) -> dict:
     settings = _as_dict(project.get("settings"))
     width = max(16, int(settings.get("width") or 1344))
     height = max(16, int(settings.get("height") or 768))
@@ -132,7 +132,7 @@ def _collect_plan(project: dict) -> dict:
                 })
             continue
 
-        if track_type != "audio":
+        if ignore_audio_tracks or track_type != "audio":
             continue
         if track.get("muted"):
             continue
@@ -179,13 +179,17 @@ def _escape_enable(start: float, end: float) -> str:
     return f"between(t\\,{start:.6f}\\,{end:.6f})"
 
 
-def compose_timeline_project(project: dict, output_path: str) -> dict:
+def compose_timeline_project(
+    project: dict,
+    output_path: str,
+    ignore_audio_tracks: bool = False,
+) -> dict:
     if not shutil.which("ffmpeg"):
         raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
     if not isinstance(project, dict):
         raise ValueError("无效的项目数据")
 
-    plan = _collect_plan(project)
+    plan = _collect_plan(project, ignore_audio_tracks=bool(ignore_audio_tracks))
     width = plan["width"]
     height = plan["height"]
     fps = plan["fps"]
@@ -353,6 +357,7 @@ def compose_to_output(
     project: dict,
     filename_prefix: str | None = None,
     filename: str | None = None,
+    ignore_audio_tracks: bool = False,
 ) -> dict:
     project_name = _as_dict(project).get("name") or "未命名项目"
     leaf, subfolder, output_path = resolve_compose_output_path(
@@ -361,7 +366,11 @@ def compose_to_output(
         filename,
     )
     # ffmpeg writes straight to the final path under ComfyUI output.
-    meta = compose_timeline_project(project, output_path)
+    meta = compose_timeline_project(
+        project,
+        output_path,
+        ignore_audio_tracks=bool(ignore_audio_tracks),
+    )
     meta["filename"] = leaf
     meta["subfolder"] = subfolder
     meta["output_path"] = output_path
