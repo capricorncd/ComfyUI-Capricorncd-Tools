@@ -1667,14 +1667,23 @@ body.cat-te-media-dnd-over-tl {
     background: rgba(91, 78, 255, 0.35);
 }
 .cat-te-ai-optimize-btn:disabled { opacity: 0.35; cursor: default; }
-.cat-te-ai-optimize-btn.is-loading,
-.cat-te-ai-generate.is-loading {
+.cat-te-ai-optimize-btn.is-loading {
     opacity: 0.85;
     pointer-events: none;
 }
 .cat-te-ai-optimize-btn.is-loading svg,
 .cat-te-ai-generate.is-loading svg {
     animation: cat-te-spin 0.8s linear infinite;
+}
+.cat-te-ai-optimize-btn.is-cancel,
+.cat-te-ai-generate.is-cancel {
+    background: #5a2a2a;
+    border-color: #aa5a5a;
+    color: #ffd8d8;
+}
+.cat-te-ai-optimize-btn.is-cancel:hover,
+.cat-te-ai-generate.is-cancel:hover {
+    background: #6a3232;
 }
 @keyframes cat-te-spin {
     to { transform: rotate(360deg); }

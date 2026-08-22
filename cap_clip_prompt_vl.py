@@ -4,6 +4,7 @@ import gc
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -71,29 +72,36 @@ _CLIP_ROLE_LABELS = {
     "other": "其他",
 }
 
+_NO_INVENT_REF_AUDIO = (
+    "Do not invent audio prompt text for the tagged timeline audio. "
+    "Do not describe wind, rain, instruments, lyrics, fading music, or any soundscape prose "
+    "copied or imagined from that audio. "
+    "overall_soundscape: N/A. non_diegetic_music: N/A unless Generate BGM is yes. "
+    "detailed_description must not narrate the existing audio."
+)
 _AUDIO_MODE_INSTRUCTIONS = {
     "none": (
         "Audio mode: do not use background / timeline audio. "
         "Do not add <Audio n> tags. Do not describe lip-sync or performing to existing music."
     ),
     "lipsync": (
-        "Audio mode: digital-human lip-sync. "
-        "The overlapping timeline audio is the driving voice. Characters must lip-sync to it. "
-        "Keep every <Audio n> tag. retention_analysis for those tags should be fully_copy or partially_copy. "
-        "Match mouth shapes to the speech. Do not invent different dialogue. "
-        "Subjects still act naturally, but speech must lock to the audio."
+        "Audio mode: digital-human lip-sync to the tagged timeline audio. "
+        "Keep every <Audio n> tag. retention_analysis: fully_copy or partially_copy. "
+        "In detailed_description, only say characters lip-sync to <Audio n>. "
+        "Do not invent different dialogue. "
+        f"{_NO_INVENT_REF_AUDIO}"
     ),
     "perform": (
-        "Audio mode: perform to the background audio, no lip-sync. "
-        "Subjects should move, dance, or act in time with the overlapping music or sound. "
-        "Do not lip-sync and do not invent spoken dialogue from the audio. "
-        "Keep every <Audio n> tag. overall_soundscape / non_diegetic_music should reference that audio."
+        "Audio mode: subjects perform / move in time with the tagged timeline audio. No lip-sync. "
+        "Keep every <Audio n> tag. "
+        "In detailed_description, only say they perform to <Audio n>. "
+        f"{_NO_INVENT_REF_AUDIO}"
     ),
     "auto": (
-        "Audio mode: interpret the overlapping clip audio freely. "
-        "If it is speech, you may lip-sync; if it is music, have subjects perform to the rhythm; "
-        "if mixed, combine both. Always keep <Audio n> tags and write overall_soundscape from that audio. "
-        "Subjects must react to the background music or sound."
+        "Audio mode: use the tagged timeline audio. Speech → lip-sync; music → perform to the beat; mixed → both. "
+        "Keep every <Audio n> tag. "
+        "Only mention lip-sync and/or performing to <Audio n>. "
+        f"{_NO_INVENT_REF_AUDIO}"
     ),
 }
 _NO_TIMELINE_AUDIO = (
@@ -106,7 +114,7 @@ _GENERATE_BGM = (
 )
 _NO_GENERATE_BGM = (
     "Generate BGM: no. Do not invent or generate background music. "
-    "Set non_diegetic_music to N/A unless tagged timeline audio itself is music that must be referenced. "
+    "Set non_diegetic_music to N/A. Do not narrate tagged timeline audio as music or ambience. "
     "Do not add generated BGM content anywhere in the prompt."
 )
 
@@ -326,6 +334,10 @@ def _clean_output(text: str) -> str:
     return out
 
 
+class ClipPromptCancelled(Exception):
+    pass
+
+
 class ClipPromptVLEngine:
     def __init__(self):
         self.model = None
@@ -333,6 +345,14 @@ class ClipPromptVLEngine:
         self.tokenizer = None
         self.model_name = None
         self.device = None
+        self._lock = threading.Lock()
+        self._cancel = threading.Event()
+
+    def request_cancel(self):
+        self._cancel.set()
+
+    def reset_cancel(self):
+        self._cancel.clear()
 
     def clear(self):
         if self.model is None and self.processor is None and self.tokenizer is None:
@@ -380,8 +400,39 @@ class ClipPromptVLEngine:
         videos: list[list[Image.Image]] | None = None,
         max_new_tokens: int = 2048,
         keep_loaded: bool = True,
+        reset_cancel: bool = True,
     ) -> str:
+        with self._lock:
+            if reset_cancel:
+                self._cancel.clear()
+            return self._generate_locked(
+                model_name=model_name,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                skill=skill,
+                images=images,
+                videos=videos,
+                max_new_tokens=max_new_tokens,
+                keep_loaded=keep_loaded,
+            )
+
+    def _generate_locked(
+        self,
+        *,
+        model_name: str,
+        system_prompt: str,
+        user_prompt: str,
+        skill: str = "",
+        images: list[Image.Image] | None = None,
+        videos: list[list[Image.Image]] | None = None,
+        max_new_tokens: int = 2048,
+        keep_loaded: bool = True,
+    ) -> str:
+        if self._cancel.is_set():
+            raise ClipPromptCancelled()
         self.load(model_name)
+        if self._cancel.is_set():
+            raise ClipPromptCancelled()
         system_text = str(system_prompt or "").strip()
         skill_text = str(skill or "").strip()
         if skill_text:
@@ -433,9 +484,12 @@ class ClipPromptVLEngine:
             "top_p": 0.9,
             "eos_token_id": stop_tokens,
             "pad_token_id": self.tokenizer.pad_token_id,
+            "stopping_criteria": _cancel_stopping_criteria(self._cancel),
         }
         with torch.inference_mode():
             outputs = self.model.generate(**model_inputs, **gen_kwargs, use_cache=True)
+        if self._cancel.is_set():
+            raise ClipPromptCancelled()
         input_len = model_inputs["input_ids"].shape[1]
         text = self.tokenizer.decode(outputs[0, input_len:], skip_special_tokens=True)
         if not keep_loaded:
@@ -446,8 +500,22 @@ class ClipPromptVLEngine:
 _ENGINE = ClipPromptVLEngine()
 
 
+def _cancel_stopping_criteria(flag: threading.Event):
+    from transformers import StoppingCriteria, StoppingCriteriaList
+
+    class CancelStop(StoppingCriteria):
+        def __call__(self, input_ids, scores, **kwargs):
+            return flag.is_set()
+
+    return StoppingCriteriaList([CancelStop()])
+
+
 def clear_clip_prompt_vl() -> None:
     _ENGINE.clear()
+
+
+def request_cancel_clip_prompt_vl() -> None:
+    _ENGINE.request_cancel()
 
 
 def _kind_of(row: dict, path: str) -> str:
@@ -601,6 +669,7 @@ def generate_from_payload(payload: dict) -> str:
         system_prompt,
         payload.get("output_language") or payload.get("language") or DEFAULT_OUTPUT_LANGUAGE,
     )
+    _ENGINE.reset_cancel()
     images, videos = media_from_payload(payload)
     user_prompt = build_user_prompt(payload)
     return _ENGINE.generate(
@@ -612,6 +681,7 @@ def generate_from_payload(payload: dict) -> str:
         videos=videos,
         max_new_tokens=int(payload.get("max_new_tokens") or 2048),
         keep_loaded=payload.get("keep_loaded", True) is not False,
+        reset_cancel=False,
     )
 
 

@@ -1616,7 +1616,8 @@ export class CapTimelineEditorApp {
         });
         this.aiOptimizeBtn?.addEventListener("click", (e) => {
             e.stopPropagation();
-            void this._openAiOptimizeModal();
+            if (this._aiOptimizeBusy) this._cancelAiOptimize();
+            else void this._openAiOptimizeModal();
         });
         this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
         this.useAiPromptCb?.addEventListener("change", () => this._onUseAiPromptChange());
@@ -1685,7 +1686,10 @@ export class CapTimelineEditorApp {
         this.aiSrcTabs?.forEach((tab) => {
             tab.addEventListener("click", () => this._setAiOptimizeSrcTab(tab.dataset.src));
         });
-        this.aiGenerateBtn?.addEventListener("click", () => void this._runAiOptimize());
+        this.aiGenerateBtn?.addEventListener("click", () => {
+            if (this._aiOptimizeBusy) this._cancelAiOptimize();
+            else void this._runAiOptimize();
+        });
         this.aiResultInput?.addEventListener("input", () => this._onAiResultInput());
         this.aiLangSelect?.addEventListener("change", () => {
             const lang = this._aiOutputLanguage();
@@ -7932,9 +7936,14 @@ export class CapTimelineEditorApp {
     }
 
     _closeAiOptimizeModal() {
+        this._cancelAiOptimize();
         if (!this.aiOptimizeModal) return;
         this.aiOptimizeModal.hidden = true;
         this._aiOptimizeClipId = null;
+    }
+
+    _cancelAiOptimize() {
+        this._aiOptimizeAbort?.abort();
     }
 
     async _loadAiOptimizeModels() {
@@ -7987,19 +7996,21 @@ export class CapTimelineEditorApp {
 
     _setAiOptimizeBusy(busy) {
         this._aiOptimizeBusy = !!busy;
-        const label = busy ? "处理中…" : "AI优化";
-        const genLabel = busy ? "生成中…" : "生成";
         if (this.aiOptimizeBtn) {
-            this.aiOptimizeBtn.disabled = busy || !this._selClip || this._selClip.track?.type === "audio";
-            this.aiOptimizeBtn.classList.toggle("is-loading", busy);
+            const audio = this._selClip?.track?.type === "audio";
+            this.aiOptimizeBtn.disabled = !busy && (!this._selClip || audio);
+            this.aiOptimizeBtn.classList.toggle("is-loading", false);
+            this.aiOptimizeBtn.classList.toggle("is-cancel", busy);
             const span = this.aiOptimizeBtn.querySelector("span");
-            if (span) span.textContent = label;
+            if (span) span.textContent = busy ? "终止" : "AI优化";
         }
         if (this.aiGenerateBtn) {
-            this.aiGenerateBtn.disabled = busy;
-            this.aiGenerateBtn.classList.toggle("is-loading", busy);
-            const span = this.aiGenerateBtn.querySelector("span");
-            if (span) span.textContent = genLabel;
+            this.aiGenerateBtn.disabled = false;
+            this.aiGenerateBtn.classList.toggle("is-loading", false);
+            this.aiGenerateBtn.classList.toggle("is-cancel", busy);
+            this.aiGenerateBtn.innerHTML = busy
+                ? `${iconHtml("stop", 12)}<span>终止</span>`
+                : `${iconHtml("sparkles", 12)}<span>生成</span>`;
         }
     }
 
@@ -8039,6 +8050,8 @@ export class CapTimelineEditorApp {
         meta.aiGenerateBgm = generateBgm;
         this._meta.set(clip.id, meta);
         const useTimelineAudio = audioMode !== "none";
+        const ac = new AbortController();
+        this._aiOptimizeAbort = ac;
         this._setAiOptimizeBusy(true);
         try {
             const payload = {
@@ -8060,8 +8073,10 @@ export class CapTimelineEditorApp {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
+                signal: ac.signal,
             });
             const data = await response.json().catch(() => ({}));
+            if (ac.signal.aborted || data.cancelled || response.status === 499) return;
             if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
             const text = String(data.prompt || "").trim();
             if (!text) throw new Error("模型没有返回提示词");
@@ -8075,8 +8090,10 @@ export class CapTimelineEditorApp {
             }
             this._saveToWidgets();
         } catch (error) {
+            if (ac.signal.aborted || error?.name === "AbortError") return;
             alert(`AI 优化失败：${error instanceof Error ? error.message : String(error)}`);
         } finally {
+            if (this._aiOptimizeAbort === ac) this._aiOptimizeAbort = null;
             this._setAiOptimizeBusy(false);
         }
     }

@@ -457,13 +457,37 @@ def _register_routes():
     @routes.post("/audio_keyframe_timeline/optimize_clip_prompt")
     async def api_optimize_clip_prompt(request: web.Request) -> web.Response:
         import asyncio
-        from .cap_clip_prompt_vl import generate_from_payload
+        from .cap_clip_prompt_vl import (
+            ClipPromptCancelled,
+            generate_from_payload,
+            request_cancel_clip_prompt_vl,
+        )
         try:
             payload = await request.json()
             if not isinstance(payload, dict):
                 return web.json_response({"error": "Invalid payload"}, status=400)
-            text = await asyncio.to_thread(generate_from_payload, payload)
-            return web.json_response({"prompt": text})
+
+            async def watch_disconnect():
+                while True:
+                    transport = request.transport
+                    if transport is None or transport.is_closing():
+                        request_cancel_clip_prompt_vl()
+                        return
+                    await asyncio.sleep(0.2)
+
+            watcher = asyncio.create_task(watch_disconnect())
+            try:
+                text = await asyncio.to_thread(generate_from_payload, payload)
+                return web.json_response({"prompt": text})
+            except ClipPromptCancelled:
+                return web.json_response({"cancelled": True}, status=499)
+            except asyncio.CancelledError:
+                request_cancel_clip_prompt_vl()
+                raise
+            finally:
+                watcher.cancel()
+        except ClipPromptCancelled:
+            return web.json_response({"cancelled": True}, status=499)
         except Exception as exc:
             logging.exception("[CapricorncdTools] optimize_clip_prompt error")
             return web.json_response({"error": str(exc)}, status=500)
