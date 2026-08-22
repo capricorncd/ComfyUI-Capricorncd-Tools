@@ -158,6 +158,13 @@ _H3_ROLE_HINTS = {
     "video_edit": "Rewrite as an edit of the source video: keep identity and setting unless the user asks to change them. Keep every <Video n> tag.",
     "other": "Follow the user's clip prompt and tagged media. Keep existing <Picture n> / <Video n> / <Audio n> tags.",
 }
+_REF_SHEET_RULE = (
+    "Character sheets, turnarounds, four-view 人设图, orthographic lineups, and reference boards "
+    "are identity sources only. Never write that the camera shows those layouts, multiple views "
+    "of the same character, or a model sheet. Put appearance (face, hair, body, outfit, colors) "
+    "in subject_definitions. detailed_description must be a real cinematic scene: camera, action, "
+    "environment — not a description of the reference image."
+)
 
 
 def normalize_output_language(value: str) -> str:
@@ -189,6 +196,7 @@ def agent_system_prompt(agent: str, clip_role: str) -> str:
         "You are a MiniMax H3 prompt writer. Look at the attached reference media "
         "and the user's notes, then write one MiniMax H3 reference-to-video prompt.\n"
         f"Clip type: {label} ({role}). {hint}\n"
+        f"{_REF_SHEET_RULE}\n"
         "Keep the user's subjects, actions, language, and dialogue. "
         "If the clip prompt is empty, infer subjects, action, camera, and sound from the media.\n"
         "Keep every <Picture n>, <Video n>, and <Audio n> tag and number. Do not add new tags.\n\n"
@@ -514,6 +522,8 @@ def build_user_prompt(payload: dict) -> str:
     if media_lines:
         lines.append("Reference media:")
         lines.extend(media_lines)
+        if picture_n:
+            lines.append(_REF_SHEET_RULE)
     clip_prompt = str(payload.get("clip_prompt") or "").strip()
     global_prompt = str(payload.get("global_prompt") or "").strip()
     if global_prompt:
@@ -523,7 +533,10 @@ def build_user_prompt(payload: dict) -> str:
         lines.append("Clip prompt:")
         lines.append(clip_prompt)
     else:
-        lines.append("The user did not write a clip prompt. Infer a complete prompt from the reference media.")
+        lines.append(
+            "The user did not write a clip prompt. Infer a complete cinematic scene from the "
+            "reference media. Do not describe character sheets or turnarounds as on-screen content."
+        )
     extra = str(payload.get("user_prompt") or "").strip()
     if extra:
         lines.append(extra)
