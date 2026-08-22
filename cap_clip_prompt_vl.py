@@ -1,19 +1,32 @@
 from __future__ import annotations
 
+import base64
 import gc
+import io
+import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
 from pathlib import Path
 
 import numpy as np
 import torch
 from PIL import Image
 
-import comfy.model_management as model_management
-
 from .timecode import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, resolve_media_path
+
+# Worker subprocess must not import ComfyUI CUDA/AIMDO while the parent holds the GPU.
+if os.environ.get("CAP_CLIP_PROMPT_VL_WORKER") == "1":
+    model_management = None
+else:
+    import comfy.model_management as model_management
 
 MAX_REF_IMAGES = 9
 MAX_REF_VIDEOS = 3
@@ -22,6 +35,12 @@ MAX_IMAGE_SIDE = 768
 SKILL_URL = "https://github.com/T8mars/minimax-h3-prompt-skill-T8"
 OUTPUT_LANGUAGES = ("简体中文", "繁體中文", "English", "日本語")
 DEFAULT_OUTPUT_LANGUAGE = "简体中文"
+AGENT_PROVIDERS = ("openai", "gemini")
+_AGENT_CONFIG_LOCK = threading.Lock()
+_AGENT_ENDPOINTS = {
+    "openai": "https://api.openai.com/v1/responses",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+}
 
 _LANGUAGE_INSTRUCTIONS = {
     "简体中文": (
@@ -74,10 +93,14 @@ _CLIP_ROLE_LABELS = {
 
 _NO_INVENT_REF_AUDIO = (
     "Do not invent audio prompt text for the tagged timeline audio. "
-    "Do not describe wind, rain, instruments, lyrics, fading music, or any soundscape prose "
-    "copied or imagined from that audio. "
+    "Do not describe the SOUND of wind, rain, guitar, lyrics, or fading music. "
     "overall_soundscape: N/A. non_diegetic_music: N/A unless Generate BGM is yes. "
-    "detailed_description must not narrate the existing audio."
+    "detailed_description must describe only the visible performance synchronized to the existing audio."
+)
+_NO_INVENT_SPEECH = (
+    "Do not invent spoken or sung lines. "
+    "Do not write (S1), <d>..., 低语, 吟唱, 台词, or any dialogue the user did not supply. "
+    "If the clip prompt has no dialogue, the shot has no speech."
 )
 _AUDIO_MODE_INSTRUCTIONS = {
     "none": (
@@ -87,20 +110,27 @@ _AUDIO_MODE_INSTRUCTIONS = {
     "lipsync": (
         "Audio mode: digital-human lip-sync to the tagged timeline audio. "
         "Keep every <Audio n> tag. retention_analysis: fully_copy or partially_copy. "
-        "In detailed_description, only say characters lip-sync to <Audio n>. "
-        "Do not invent different dialogue. "
+        "In detailed_description, say characters lip-sync / sing to <Audio n>. "
+        "Use (S1) <d> only for lyrics the user provided. Do not invent different words. "
         f"{_NO_INVENT_REF_AUDIO}"
     ),
     "perform": (
-        "Audio mode: subjects perform / move in time with the tagged timeline audio. No lip-sync. "
+        "Audio mode: perform to <Audio n>. No lip-sync. No speech. "
         "Keep every <Audio n> tag. "
-        "In detailed_description, only say they perform to <Audio n>. "
+        "If a reference shows an instrument, the subject PLAYS it in time with <Audio n> "
+        "(hands on strings, strumming, body moving with the beat). "
+        "The visible performance synchronized to <Audio n> is the main action of the shot, not an optional detail. "
+        "Write only camera, body, and instrument performance. Never call audio <Video n>. "
+        f"{_NO_INVENT_SPEECH} "
         f"{_NO_INVENT_REF_AUDIO}"
     ),
     "auto": (
-        "Audio mode: use the tagged timeline audio. Speech → lip-sync; music → perform to the beat; mixed → both. "
+        "Audio mode: speech → lip-sync; music / song / instrumental → perform to the beat, no invented speech. "
         "Keep every <Audio n> tag. "
-        "Only mention lip-sync and/or performing to <Audio n>. "
+        "If a reference shows an instrument, play it in time with <Audio n>. "
+        "Make the visible synchronization to <Audio n> explicit in detailed_description. Never call audio <Video n>. "
+        "Do not invent (S1) / <d> lines for music. "
+        f"{_NO_INVENT_SPEECH} "
         f"{_NO_INVENT_REF_AUDIO}"
     ),
 }
@@ -116,6 +146,12 @@ _NO_GENERATE_BGM = (
     "Generate BGM: no. Do not invent or generate background music. "
     "Set non_diegetic_music to N/A. Do not narrate tagged timeline audio as music or ambience. "
     "Do not add generated BGM content anywhere in the prompt."
+)
+_LYRICS_RULE = (
+    "Song lyrics guide mood, imagery, and action only. "
+    "In perform or auto-music mode: do not quote, paraphrase, or invent lyrics as (S1) / <d> speech. "
+    "In lipsync mode: write only the user-provided lyrics, never new lines. "
+    "Do not invent a soundscape of the song."
 )
 
 
@@ -151,11 +187,13 @@ retention_analysis:
 <Audio n>: fully_copy | partially_copy | reference | weak_reference
 (omit tags that do not exist)
 
-detailed_description: [Shot 1] <style>. <action, camera, identity>. Speakers use (S1) and <d>[Language] exact words</d>. Never put spoken words in quotation marks. Later shots start with At MM:SS.mmm, the camera cuts to...
+detailed_description: [Shot 1] <style>. <action, camera, identity>. Add (S1) <d>[Language] words</d> only when the user supplied dialogue or audio mode is lipsync with provided lyrics. Otherwise write no speech and do not invent 台词. Never put spoken words in quotation marks. Later shots start with At MM:SS.mmm, the camera cuts to...
 
 overall_soundscape: <ambience and physical sounds, or N/A>
 
 non_diegetic_music: <instrumentation and tempo, or N/A>
+
+Use one complete shot unless the user explicitly requests multiple shots. Never end with a placeholder such as "At MM:00.000, the camera cuts to...". Keep the whole prompt concise enough to finish.
 """
 
 _H3_ROLE_HINTS = {
@@ -206,7 +244,8 @@ def agent_system_prompt(agent: str, clip_role: str) -> str:
         f"Clip type: {label} ({role}). {hint}\n"
         f"{_REF_SHEET_RULE}\n"
         "Keep the user's subjects, actions, language, and dialogue. "
-        "If the clip prompt is empty, infer subjects, action, camera, and sound from the media.\n"
+        "Do not invent spoken lines, whispers, or sung lyrics. "
+        "If the clip prompt is empty, infer subjects, action, and camera from the media — not dialogue.\n"
         "Keep every <Picture n>, <Video n>, and <Audio n> tag and number. Do not add new tags.\n\n"
         f"{_H3_FORMAT}"
     )
@@ -232,6 +271,94 @@ def list_vl_models() -> list[str]:
             seen.add(child.name)
             names.append(child.name)
     return names
+
+
+def _agent_config_path() -> Path:
+    import folder_paths
+    return Path(folder_paths.get_user_directory()) / "capricorncd" / "timeline_agents.json"
+
+
+def _read_agent_configs() -> list[dict]:
+    path = _agent_config_path()
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.warning("[CAP] Failed to read timeline agents: %s", exc)
+        return []
+    return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+
+
+def public_agent_configs(enabled_only: bool = False) -> list[dict]:
+    rows = []
+    with _AGENT_CONFIG_LOCK:
+        configs = _read_agent_configs()
+    for row in configs:
+        enabled = row.get("enabled") is not False
+        if enabled_only and (not enabled or not row.get("api_key")):
+            continue
+        rows.append({
+            "id": str(row.get("id") or ""),
+            "label": str(row.get("label") or ""),
+            "provider": str(row.get("provider") or ""),
+            "model": str(row.get("model") or ""),
+            "enabled": enabled,
+            "has_key": bool(row.get("api_key")),
+        })
+    return rows
+
+
+def save_agent_config(payload: dict) -> dict:
+    provider = str(payload.get("provider") or "").strip().lower()
+    label = str(payload.get("label") or "").strip()
+    model = str(payload.get("model") or "").strip()
+    api_key = str(payload.get("api_key") or "").strip()
+    agent_id = str(payload.get("id") or "").strip()
+    if provider not in AGENT_PROVIDERS:
+        raise ValueError("服务商必须是 OpenAI 或 Gemini")
+    if not label or len(label) > 80:
+        raise ValueError("Agent 名称不能为空且不能超过 80 个字符")
+    if not model or len(model) > 120:
+        raise ValueError("模型名称不能为空且不能超过 120 个字符")
+    with _AGENT_CONFIG_LOCK:
+        configs = _read_agent_configs()
+        existing = next((row for row in configs if str(row.get("id")) == agent_id), None)
+        if existing is None:
+            if not api_key:
+                raise ValueError("新增 Agent 时必须填写 API Key")
+            existing = {"id": uuid.uuid4().hex}
+            configs.append(existing)
+        elif not api_key:
+            api_key = str(existing.get("api_key") or "")
+        existing.update({
+            "label": label,
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "enabled": payload.get("enabled") is not False,
+        })
+        path = _agent_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(configs, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temp, path)
+    return next(row for row in public_agent_configs() if row["id"] == existing["id"])
+
+
+def delete_agent_config(agent_id: str) -> bool:
+    agent_id = str(agent_id or "").strip()
+    with _AGENT_CONFIG_LOCK:
+        configs = _read_agent_configs()
+        kept = [row for row in configs if str(row.get("id")) != agent_id]
+        if len(kept) == len(configs):
+            return False
+        path = _agent_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(kept, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temp, path)
+    return True
 
 
 def resolve_vl_model_path(model_name: str) -> str:
@@ -355,35 +482,41 @@ class ClipPromptVLEngine:
         self._cancel.clear()
 
     def clear(self):
+        with self._lock:
+            self._clear_locked()
+
+    def _clear_locked(self):
         if self.model is None and self.processor is None and self.tokenizer is None:
             return
+        model = self.model
         self.model = self.processor = self.tokenizer = None
         self.model_name = None
         self.device = None
+        if model is not None:
+            del model
         gc.collect()
-        model_management.soft_empty_cache(True)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if model_management is not None:
+            model_management.soft_empty_cache(True)
         logging.info("[CAP] Unloaded Qwen3-VL")
 
     def load(self, model_name: str):
         path = resolve_vl_model_path(model_name)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         if self.model is not None and self.model_name == path:
+            self.device = device
+            self.model.to(device)
             return
-        self.clear()
+        self._clear_locked()
         try:
             from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
         except ImportError as exc:
             raise RuntimeError("需要 transformers（建议 >= 4.57）才能运行多模态提示词节点") from exc
-        device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.float16 if device == "cuda" else torch.float32
-        load_kwargs = {
-            "torch_dtype": dtype,
-            "trust_remote_code": True,
-        }
-        if device == "cuda":
-            load_kwargs["device_map"] = {"": 0}
-        else:
-            load_kwargs["device_map"] = "cpu"
-        self.model = AutoModelForImageTextToText.from_pretrained(path, **load_kwargs).eval()
+        self.model = AutoModelForImageTextToText.from_pretrained(
+            path, dtype=dtype, trust_remote_code=True,
+        ).to(device).eval()
         self.processor = AutoProcessor.from_pretrained(path, trust_remote_code=True)
         self.tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
         self.model_name = path
@@ -405,16 +538,21 @@ class ClipPromptVLEngine:
         with self._lock:
             if reset_cancel:
                 self._cancel.clear()
-            return self._generate_locked(
-                model_name=model_name,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                skill=skill,
-                images=images,
-                videos=videos,
-                max_new_tokens=max_new_tokens,
-                keep_loaded=keep_loaded,
-            )
+            try:
+                return self._generate_locked(
+                    model_name=model_name,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    skill=skill,
+                    images=images,
+                    videos=videos,
+                    max_new_tokens=max_new_tokens,
+                    keep_loaded=keep_loaded,
+                )
+            except Exception:
+                if not keep_loaded:
+                    self._clear_locked()
+                raise
 
     def _generate_locked(
         self,
@@ -489,15 +627,58 @@ class ClipPromptVLEngine:
         with torch.inference_mode():
             outputs = self.model.generate(**model_inputs, **gen_kwargs, use_cache=True)
         if self._cancel.is_set():
+            del outputs, model_inputs
+            self._clear_locked()
             raise ClipPromptCancelled()
         input_len = model_inputs["input_ids"].shape[1]
         text = self.tokenizer.decode(outputs[0, input_len:], skip_special_tokens=True)
+        del outputs, model_inputs
         if not keep_loaded:
-            self.clear()
+            self._clear_locked()
         return _clean_output(text)
 
 
 _ENGINE = ClipPromptVLEngine()
+_WORKER_LOCK = threading.Lock()
+_WORKER_PROCESS = None
+_WORKER_JOB = 0
+_WORKER_CANCELLED = threading.Event()
+
+_WORKER_CODE = r"""
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+import types
+
+def _emit(result):
+    sys.stdout.write("__CAP_CLIP_PROMPT_RESULT__" + json.dumps(result, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+    os._exit(0)
+
+try:
+    module_path = pathlib.Path(os.environ["CAP_CLIP_PROMPT_VL_MODULE"])
+    package_name = "_cap_clip_prompt_vl_worker"
+    package = types.ModuleType(package_name)
+    package.__path__ = [str(module_path.parent)]
+    sys.modules[package_name] = package
+    spec = importlib.util.spec_from_file_location(f"{package_name}.cap_clip_prompt_vl", module_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    payload = json.loads(sys.stdin.read())
+    try:
+        result = {"prompt": module.generate_from_payload(payload)}
+    except BaseException as error:
+        result = {"error": f"{type(error).__name__}: {error}"}
+    _emit(result)
+except BaseException as error:
+    try:
+        _emit({"error": f"{type(error).__name__}: {error}"})
+    except Exception:
+        os._exit(1)
+"""
 
 
 def _cancel_stopping_criteria(flag: threading.Event):
@@ -514,8 +695,154 @@ def clear_clip_prompt_vl() -> None:
     _ENGINE.clear()
 
 
-def request_cancel_clip_prompt_vl() -> None:
+_RESULT_MARKER = "__CAP_CLIP_PROMPT_RESULT__"
+
+
+def _stop_process(process):
+    if process is None:
+        return
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except OSError:
+            pass
+
+
+def _parse_worker_result(stdout: str):
+    if _RESULT_MARKER not in (stdout or ""):
+        return None
+    raw = stdout.rsplit(_RESULT_MARKER, 1)[-1].strip()
+    if not raw:
+        return None
+    line = raw.split("\n", 1)[0].strip()
+    for text in (line, raw):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def begin_clip_prompt_job() -> int:
+    global _WORKER_JOB
+    with _WORKER_LOCK:
+        _WORKER_JOB += 1
+        return _WORKER_JOB
+
+
+def request_cancel_clip_prompt_vl(job: int | None = None) -> None:
     _ENGINE.request_cancel()
+    with _WORKER_LOCK:
+        if job is not None and job != _WORKER_JOB:
+            return
+        _WORKER_CANCELLED.set()
+        process = _WORKER_PROCESS
+    _stop_process(process)
+
+
+def _generate_from_payload_isolated(payload: dict) -> str:
+    global _WORKER_PROCESS, _WORKER_JOB
+    with _WORKER_LOCK:
+        if _WORKER_JOB == 0:
+            _WORKER_JOB += 1
+        job = _WORKER_JOB
+        _WORKER_CANCELLED.clear()
+        old = _WORKER_PROCESS
+        _WORKER_PROCESS = None
+    _stop_process(old)
+    env = os.environ.copy()
+    env["CAP_CLIP_PROMPT_VL_MODULE"] = str(Path(__file__).resolve())
+    env["CAP_CLIP_PROMPT_VL_WORKER"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    process = subprocess.Popen(
+        [sys.executable, "-s", "-c", _WORKER_CODE],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        creationflags=creationflags,
+    )
+    with _WORKER_LOCK:
+        _WORKER_PROCESS = process
+    logging.info("[CAP] Qwen3-VL worker started pid=%s", process.pid)
+    stdout_chunks = []
+    stderr_chunks = []
+    done = threading.Event()
+
+    def _read_stdout():
+        try:
+            while True:
+                chunk = process.stdout.read(4096)
+                if not chunk:
+                    break
+                stdout_chunks.append(chunk)
+                if _parse_worker_result("".join(stdout_chunks)) is not None:
+                    break
+        except OSError:
+            pass
+        finally:
+            done.set()
+
+    def _read_stderr():
+        try:
+            while True:
+                chunk = process.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_chunks.append(chunk)
+                if len(stderr_chunks) > 80:
+                    del stderr_chunks[:-40]
+        except OSError:
+            pass
+
+    try:
+        process.stdin.write(json.dumps(payload, ensure_ascii=False))
+        process.stdin.close()
+        threading.Thread(target=_read_stdout, daemon=True).start()
+        threading.Thread(target=_read_stderr, daemon=True).start()
+        while not done.wait(0.15):
+            if _WORKER_CANCELLED.is_set():
+                break
+            if process.poll() is not None:
+                done.wait(1.0)
+                break
+    except OSError:
+        pass
+    result = _parse_worker_result("".join(stdout_chunks))
+    _stop_process(process)
+    with _WORKER_LOCK:
+        if _WORKER_PROCESS is process:
+            _WORKER_PROCESS = None
+    if _WORKER_CANCELLED.is_set() or job != _WORKER_JOB:
+        raise ClipPromptCancelled()
+    stderr = "".join(stderr_chunks).strip()
+    if result is None:
+        detail = stderr.rsplit("\n", 1)[-1] if stderr else f"exit code {process.returncode}"
+        raise RuntimeError(f"Qwen3-VL 独立进程失败: {detail}")
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    logging.info("[CAP] Qwen3-VL worker finished pid=%s", process.pid)
+    return str(result.get("prompt") or "").strip()
 
 
 def _kind_of(row: dict, path: str) -> str:
@@ -544,7 +871,7 @@ def _file_label(index: int, kind: str, row: dict) -> str:
     meta = ", ".join(part for part in [media_type, *tags] if part)
     prompt = str((row or {}).get("prompt") or "").strip()
     bits = [tag]
-    if name and kind != "audio":
+    if name:
         bits.append(name)
     if meta:
         bits.append(meta)
@@ -590,16 +917,42 @@ def build_user_prompt(payload: dict) -> str:
     if media_lines:
         lines.append("Reference media:")
         lines.extend(media_lines)
+        allowed_tags = [
+            *(f"<Picture {index}>" for index in range(1, picture_n + 1)),
+            *(f"<Video {index}>" for index in range(1, video_n + 1)),
+            *(f"<Audio {index}>" for index in range(1, audio_n + 1)),
+        ]
+        lines.append(f"Exact allowed media tags: {', '.join(allowed_tags)}.")
+        lines.append(
+            "Use each listed tag for its declared media type only. Do not create, rename, substitute, "
+            "or renumber tags. In particular, pictures are never <Video n> and audio is never <Video n>."
+        )
         if picture_n:
             lines.append(_REF_SHEET_RULE)
     clip_prompt = str(payload.get("clip_prompt") or "").strip()
     global_prompt = str(payload.get("global_prompt") or "").strip()
+    lyrics = str(payload.get("lyrics") or payload.get("song_lyrics") or "").strip()
     if global_prompt:
         lines.append("Global prompt:")
         lines.append(global_prompt)
+    if lyrics:
+        lines.append("Song lyrics:")
+        lines.append(lyrics)
+        lines.append(_LYRICS_RULE)
     if clip_prompt:
         lines.append("Clip prompt:")
         lines.append(clip_prompt)
+        if lyrics:
+            lines.append(
+                "Combine the user's clip prompt with the song lyrics for mood and action. "
+                "The shot must stay related to the music. Do not turn lyrics into invented 台词."
+            )
+    elif lyrics:
+        lines.append(
+            "The user did not write a clip prompt. Write the shot from the reference images; "
+            "use the lyrics only for mood and action, not as spoken dialogue. "
+            "Do not describe character sheets or turnarounds as on-screen content."
+        )
     else:
         lines.append(
             "The user did not write a clip prompt. Infer a complete cinematic scene from the "
@@ -650,9 +1003,132 @@ def media_from_payload(payload: dict) -> tuple[list[Image.Image], list[list[Imag
     return images, videos
 
 
+def _agent_config(agent_id: str) -> dict:
+    with _AGENT_CONFIG_LOCK:
+        config = next((row for row in _read_agent_configs() if str(row.get("id")) == agent_id), None)
+    if config is None:
+        raise ValueError("找不到所选 Agent，请在时间轴设置中重新配置")
+    if config.get("enabled") is False:
+        raise ValueError("所选 Agent 已停用")
+    if not str(config.get("api_key") or "").strip():
+        raise ValueError("所选 Agent 尚未配置 API Key")
+    return config
+
+
+def _image_data(image: Image.Image) -> tuple[str, str]:
+    output = io.BytesIO()
+    _to_pil(image).save(output, format="JPEG", quality=90)
+    return "image/jpeg", base64.b64encode(output.getvalue()).decode("ascii")
+
+
+def _remote_images(images: list[Image.Image], videos: list[list[Image.Image]]) -> list[tuple[str, str]]:
+    media = [*images]
+    for frames in videos:
+        media.extend(frames)
+    return [_image_data(image) for image in media[:24]]
+
+
+def _post_agent_json(url: str, api_key: str, payload: dict, provider: str) -> dict:
+    headers = {"Content-Type": "application/json"}
+    if provider == "openai":
+        headers["Authorization"] = f"Bearer {api_key}"
+    else:
+        headers["x-goog-api-key"] = api_key
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1000]
+        try:
+            body = json.loads(detail)
+            detail = str(body.get("error", {}).get("message") or body.get("error") or detail)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        raise RuntimeError(f"{provider} API 请求失败 ({exc.code}): {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"{provider} API 连接失败: {exc.reason}") from exc
+
+
+def _generate_with_agent(payload: dict, agent_id: str) -> str:
+    config = _agent_config(agent_id)
+    provider = str(config.get("provider") or "")
+    system_prompt = str(payload.get("system_prompt") or "").strip()
+    if not system_prompt:
+        system_prompt = agent_system_prompt(
+            str(payload.get("agent") or "MiniMaxH3"),
+            str(payload.get("clip_role") or "multi_ref"),
+        )
+    system_prompt = with_output_language(
+        system_prompt,
+        payload.get("output_language") or payload.get("language") or DEFAULT_OUTPUT_LANGUAGE,
+    )
+    skill = str(payload.get("skill") or "").strip()
+    if skill:
+        system_prompt = f"{system_prompt}\n\nAdditional prompt skill:\n{skill}"
+    images, videos = media_from_payload(payload)
+    encoded_images = _remote_images(images, videos)
+    user_prompt = build_user_prompt(payload)
+    max_tokens = min(8192, max(256, int(payload.get("max_new_tokens") or 2048)))
+    if provider == "openai":
+        content = [
+            {"type": "input_image", "image_url": f"data:{mime};base64,{data}"}
+            for mime, data in encoded_images
+        ]
+        content.append({"type": "input_text", "text": user_prompt})
+        body = {
+            "model": str(config["model"]),
+            "instructions": system_prompt,
+            "input": [{"role": "user", "content": content}],
+            "max_output_tokens": max_tokens,
+            "store": False,
+        }
+        result = _post_agent_json(_AGENT_ENDPOINTS[provider], str(config["api_key"]), body, provider)
+        text = str(result.get("output_text") or "").strip()
+        if not text:
+            parts = []
+            for output in result.get("output", []):
+                for part in output.get("content", []):
+                    if part.get("type") == "output_text" and part.get("text"):
+                        parts.append(str(part["text"]))
+            text = "\n".join(parts).strip()
+    elif provider == "gemini":
+        parts = [
+            {"inlineData": {"mimeType": mime, "data": data}}
+            for mime, data in encoded_images
+        ]
+        parts.append({"text": user_prompt})
+        body = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7, "topP": 0.9},
+        }
+        model = urllib.parse.quote(str(config["model"]), safe="")
+        url = _AGENT_ENDPOINTS[provider].format(model=model)
+        result = _post_agent_json(url, str(config["api_key"]), body, provider)
+        candidates = result.get("candidates") or []
+        response_parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        text = "\n".join(str(part.get("text") or "") for part in response_parts).strip()
+    else:
+        raise ValueError("不支持的 Agent 服务商")
+    if not text:
+        raise RuntimeError(f"{provider} API 没有返回文本")
+    return text
+
+
 def generate_from_payload(payload: dict) -> str:
     if not isinstance(payload, dict):
         raise ValueError("Invalid payload")
+    agent_id = str(payload.get("agent_id") or "").strip()
+    if agent_id:
+        return _generate_with_agent(payload, agent_id)
+    if os.environ.get("CAP_CLIP_PROMPT_VL_WORKER") != "1":
+        return _generate_from_payload_isolated(payload)
     model_name = str(payload.get("model") or "").strip()
     if not model_name:
         models = list_vl_models()
@@ -680,7 +1156,7 @@ def generate_from_payload(payload: dict) -> str:
         images=images,
         videos=videos,
         max_new_tokens=int(payload.get("max_new_tokens") or 2048),
-        keep_loaded=payload.get("keep_loaded", True) is not False,
+        keep_loaded=False,
         reset_cancel=False,
     )
 

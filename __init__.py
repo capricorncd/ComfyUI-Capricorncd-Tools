@@ -135,11 +135,11 @@ def _safe_join(base: str, rel: str) -> str | None:
 def _register_routes():
     try:
         from server import PromptServer
+        server = getattr(PromptServer, "instance", None)
+        routes = server.routes
     except Exception:
         logging.warning("[CapricorncdTools] PromptServer not available; API routes skipped.")
         return
-
-    routes = PromptServer.instance.routes
 
     @routes.get("/audio_keyframe_timeline/uploaded")
     async def api_list_uploaded(request: web.Request) -> web.Response:
@@ -440,9 +440,36 @@ def _register_routes():
 
     @routes.get("/audio_keyframe_timeline/vl_models")
     async def api_vl_models(_request: web.Request) -> web.Response:
-        from .cap_clip_prompt_vl import SKILL_URL, list_vl_models
+        from .cap_clip_prompt_vl import SKILL_URL, list_vl_models, public_agent_configs
         models = list_vl_models()
-        return web.json_response({"models": models, "skill_url": SKILL_URL})
+        return web.json_response({
+            "models": models,
+            "agents": public_agent_configs(enabled_only=True),
+            "skill_url": SKILL_URL,
+        })
+
+    @routes.get("/audio_keyframe_timeline/agents")
+    async def api_timeline_agents(_request: web.Request) -> web.Response:
+        from .cap_clip_prompt_vl import public_agent_configs
+        return web.json_response({"agents": public_agent_configs()})
+
+    @routes.post("/audio_keyframe_timeline/agents")
+    async def api_save_timeline_agent(request: web.Request) -> web.Response:
+        from .cap_clip_prompt_vl import save_agent_config
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                return web.json_response({"error": "Invalid payload"}, status=400)
+            return web.json_response({"agent": save_agent_config(payload)})
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+    @routes.delete("/audio_keyframe_timeline/agents/{agent_id}")
+    async def api_delete_timeline_agent(request: web.Request) -> web.Response:
+        from .cap_clip_prompt_vl import delete_agent_config
+        if not delete_agent_config(request.match_info.get("agent_id", "")):
+            return web.json_response({"error": "Agent 不存在"}, status=404)
+        return web.json_response({"ok": True})
 
     @routes.get("/audio_keyframe_timeline/clip_prompt_agent")
     async def api_clip_prompt_agent(request: web.Request) -> web.Response:
@@ -459,6 +486,7 @@ def _register_routes():
         import asyncio
         from .cap_clip_prompt_vl import (
             ClipPromptCancelled,
+            begin_clip_prompt_job,
             generate_from_payload,
             request_cancel_clip_prompt_vl,
         )
@@ -467,13 +495,19 @@ def _register_routes():
             if not isinstance(payload, dict):
                 return web.json_response({"error": "Invalid payload"}, status=400)
 
+            job = begin_clip_prompt_job()
+
             async def watch_disconnect():
-                while True:
-                    transport = request.transport
-                    if transport is None or transport.is_closing():
-                        request_cancel_clip_prompt_vl()
-                        return
-                    await asyncio.sleep(0.2)
+                try:
+                    await asyncio.sleep(1.0)
+                    while True:
+                        transport = request.transport
+                        if transport is not None and transport.is_closing():
+                            request_cancel_clip_prompt_vl(job)
+                            return
+                        await asyncio.sleep(0.25)
+                except asyncio.CancelledError:
+                    return
 
             watcher = asyncio.create_task(watch_disconnect())
             try:
@@ -482,7 +516,7 @@ def _register_routes():
             except ClipPromptCancelled:
                 return web.json_response({"cancelled": True}, status=499)
             except asyncio.CancelledError:
-                request_cancel_clip_prompt_vl()
+                request_cancel_clip_prompt_vl(job)
                 raise
             finally:
                 watcher.cancel()
@@ -585,8 +619,11 @@ def _register_routes():
         clear_clip_prompt_vl()
         return json_data
 
-    PromptServer.instance.add_on_prompt_handler(_unload_vl_before_prompt)
+    server.add_on_prompt_handler(_unload_vl_before_prompt)
     logging.info("[CapricorncdTools] Registered API routes.")
 
 
-_register_routes()
+try:
+    _register_routes()
+except Exception:
+    logging.exception("[CapricorncdTools] API route registration failed")

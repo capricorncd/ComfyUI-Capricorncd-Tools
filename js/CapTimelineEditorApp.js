@@ -31,6 +31,7 @@ const STORAGE_AI_PROMPT_MODEL = "cat-te-ai-prompt-model";
 const STORAGE_AI_PROMPT_SKILL = "cat-te-ai-prompt-skill";
 const STORAGE_AI_PROMPT_LANG = "cat-te-ai-prompt-lang";
 const AI_PROMPT_LANGUAGES = ["简体中文", "繁體中文", "English", "日本語"];
+const AGENT_DEFAULT_MODELS = { openai: "gpt-5.4", gemini: "gemini-3.7-flash" };
 const SKILL_URL_DEFAULT = "https://github.com/T8mars/minimax-h3-prompt-skill-T8";
 const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
@@ -152,6 +153,7 @@ function defaultImageMeta(trackIndex = 0) {
         previewMode: "media",
         aiAudioMode: "",
         aiGenerateBgm: null,
+        aiLyrics: null,
         useAiPrompt: true,
     };
 }
@@ -629,17 +631,118 @@ export class CapTimelineEditorApp {
         }
     }
 
-    /** Settings dialog — language is the first setting; more will land here
-     * later. Selection is only persisted for now, not yet wired to i18n. */
     _openSettings() {
         if (!this.settingsModal) return;
         this.langSelect.value = localStorage.getItem("cat-te-lang") || "zh";
         this.autosaveIntervalInput.value = String(this._getAutosaveIntervalSec());
         this.settingsModal.hidden = false;
+        void this._loadAgentConfigs();
     }
 
     _closeSettings() {
         if (this.settingsModal) this.settingsModal.hidden = true;
+        this._cancelAgentEdit();
+    }
+
+    async _loadAgentConfigs() {
+        if (!this.agentList) return;
+        this.agentList.textContent = "加载中…";
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/agents"));
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            this._agentConfigs = Array.isArray(data.agents) ? data.agents : [];
+            this._renderAgentConfigs();
+        } catch (error) {
+            this.agentList.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
+        }
+    }
+
+    _renderAgentConfigs() {
+        if (!this.agentList) return;
+        this.agentList.replaceChildren();
+        if (!this._agentConfigs?.length) {
+            const empty = document.createElement("div");
+            empty.className = "cat-te-agent-empty";
+            empty.textContent = "尚未添加 Agent";
+            this.agentList.appendChild(empty);
+            return;
+        }
+        for (const config of this._agentConfigs) {
+            const row = document.createElement("div");
+            row.className = "cat-te-agent-row";
+            const text = document.createElement("div");
+            text.className = "cat-te-agent-row-text";
+            const title = document.createElement("strong");
+            title.textContent = config.label || "未命名";
+            const detail = document.createElement("span");
+            detail.textContent = `${config.provider === "gemini" ? "Gemini" : "OpenAI"} · ${config.model}${config.enabled ? "" : " · 已停用"}`;
+            text.append(title, detail);
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "cat-te-btn";
+            edit.textContent = "编辑";
+            edit.addEventListener("click", () => this._editAgentConfig(config));
+            row.append(text, edit);
+            this.agentList.appendChild(row);
+        }
+    }
+
+    _editAgentConfig(config = null) {
+        if (!this.agentForm) return;
+        this._editingAgentId = config?.id || "";
+        this.agentLabelInput.value = config?.label || "";
+        this.agentProviderSelect.value = config?.provider || "openai";
+        this.agentModelInput.value = config?.model || AGENT_DEFAULT_MODELS[this.agentProviderSelect.value] || "";
+        this.agentKeyInput.value = "";
+        this.agentKeyInput.placeholder = config?.has_key ? "留空则保留现有 Key" : "输入 API Key";
+        this.agentEnabledCb.checked = config?.enabled !== false;
+        this.agentDeleteBtn.hidden = !config;
+        this.agentForm.hidden = false;
+        this.agentLabelInput.focus();
+    }
+
+    _cancelAgentEdit() {
+        this._editingAgentId = "";
+        if (this.agentForm) this.agentForm.hidden = true;
+        if (this.agentKeyInput) this.agentKeyInput.value = "";
+    }
+
+    async _saveAgentConfig() {
+        const payload = {
+            id: this._editingAgentId || undefined,
+            label: this.agentLabelInput?.value.trim() || "",
+            provider: this.agentProviderSelect?.value || "openai",
+            model: this.agentModelInput?.value.trim() || "",
+            api_key: this.agentKeyInput?.value.trim() || "",
+            enabled: !!this.agentEnabledCb?.checked,
+        };
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/agents"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            this._cancelAgentEdit();
+            await this._loadAgentConfigs();
+        } catch (error) {
+            alert(`保存 Agent 失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    async _deleteAgentConfig() {
+        if (!this._editingAgentId || !confirm("确定删除这个 Agent 配置？")) return;
+        try {
+            const response = await fetch(api.apiURL(`/audio_keyframe_timeline/agents/${encodeURIComponent(this._editingAgentId)}`), { method: "DELETE" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            this._cancelAgentEdit();
+            await this._loadAgentConfigs();
+        } catch (error) {
+            alert(`删除 Agent 失败：${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     _confirmOverwriteImport() {
@@ -1305,8 +1408,8 @@ export class CapTimelineEditorApp {
               <div class="cat-te-ai-optimize-body">
                 <div class="cat-te-ai-optimize-left">
                   <div class="cat-te-ai-optimize-tabs">
-                    <button type="button" class="cat-te-ai-src-tab is-active" data-src="media">素材提示词</button>
-                    <button type="button" class="cat-te-ai-src-tab" data-src="clip">Clip Prompt</button>
+                    <button type="button" class="cat-te-ai-src-tab" data-src="media">素材提示词</button>
+                    <button type="button" class="cat-te-ai-src-tab is-active" data-src="clip">Clip Prompt</button>
                     <button type="button" class="cat-te-ai-src-tab" data-src="global">全局提示词</button>
                   </div>
                   <textarea class="cat-te-ai-src-text" readonly></textarea>
@@ -1355,6 +1458,10 @@ export class CapTimelineEditorApp {
                       <input class="cat-te-ai-generate-bgm" type="checkbox" />
                       <span>生成 BGM</span>
                     </label>
+                    <label class="cat-te-ai-field cat-te-ai-lyrics-field">
+                      <span>歌词</span>
+                      <textarea class="cat-te-ai-lyrics" rows="4" placeholder="把歌曲歌词贴到这里。模型听不到音频，用歌词对齐镜头。"></textarea>
+                    </label>
                   </div>
                   <label class="cat-te-ai-field">
                     <span>Agent 提示词</span>
@@ -1390,7 +1497,7 @@ export class CapTimelineEditorApp {
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-settings-modal" hidden>
-            <div class="cat-te-modal">
+            <div class="cat-te-modal cat-te-settings-dialog">
               <div class="cat-te-modal-header">
                 <span>设置</span>
                 <button type="button" class="cat-te-modal-close" title="关闭">${iconHtml("close", 16)}</button>
@@ -1407,6 +1514,27 @@ export class CapTimelineEditorApp {
                   <span>自动保存间隔（秒）</span>
                   <input class="cat-te-autosave-interval" type="number" min="1" max="300" step="1" />
                 </label>
+                <div class="cat-te-agent-settings">
+                  <div class="cat-te-agent-heading">
+                    <span>AI Agent</span>
+                    <button type="button" class="cat-te-btn cat-te-agent-add">添加</button>
+                  </div>
+                  <div class="cat-te-agent-list"></div>
+                  <div class="cat-te-agent-form" hidden>
+                    <label><span>名称</span><input class="cat-te-agent-label" type="text" maxlength="80" placeholder="例如 ChatGPT" /></label>
+                    <label><span>服务商</span><select class="cat-te-agent-provider"><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label>
+                    <label><span>模型</span><input class="cat-te-agent-model" type="text" maxlength="120" placeholder="例如 gpt-5.4 或 gemini-3.7-flash" /></label>
+                    <label><span>API Key</span><input class="cat-te-agent-key" type="password" autocomplete="new-password" placeholder="输入 API Key" /></label>
+                    <label class="cat-te-agent-enabled"><input type="checkbox" checked /><span>启用并显示在 AI 优化模型中</span></label>
+                    <div class="cat-te-agent-form-actions">
+                      <button type="button" class="cat-te-btn cat-te-agent-delete" hidden>删除</button>
+                      <span></span>
+                      <button type="button" class="cat-te-btn cat-te-agent-cancel">取消</button>
+                      <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-agent-save">保存</button>
+                    </div>
+                  </div>
+                  <div class="cat-te-agent-note">API Key 仅保存在本机 ComfyUI 用户目录，不会写入项目或工作流。</div>
+                </div>
               </div>
             </div>
           </div>
@@ -1514,6 +1642,8 @@ export class CapTimelineEditorApp {
         this.aiAudioModeSelect = el.querySelector(".cat-te-ai-audio-mode");
         this.aiAudioHint = el.querySelector(".cat-te-ai-audio-hint");
         this.aiGenerateBgmCb = el.querySelector(".cat-te-ai-generate-bgm");
+        this.aiLyricsField = el.querySelector(".cat-te-ai-lyrics-field");
+        this.aiLyricsInput = el.querySelector(".cat-te-ai-lyrics");
         this.aiSystemInput = el.querySelector(".cat-te-ai-system");
         this.aiSkillInput = el.querySelector(".cat-te-ai-skill");
         this.skillPickBtn = el.querySelector(".cat-te-skill-pick-btn");
@@ -1529,6 +1659,14 @@ export class CapTimelineEditorApp {
         this.settingsModal = el.querySelector(".cat-te-settings-modal");
         this.langSelect = el.querySelector(".cat-te-lang-select");
         this.autosaveIntervalInput = el.querySelector(".cat-te-autosave-interval");
+        this.agentList = el.querySelector(".cat-te-agent-list");
+        this.agentForm = el.querySelector(".cat-te-agent-form");
+        this.agentLabelInput = el.querySelector(".cat-te-agent-label");
+        this.agentProviderSelect = el.querySelector(".cat-te-agent-provider");
+        this.agentModelInput = el.querySelector(".cat-te-agent-model");
+        this.agentKeyInput = el.querySelector(".cat-te-agent-key");
+        this.agentEnabledCb = el.querySelector(".cat-te-agent-enabled input");
+        this.agentDeleteBtn = el.querySelector(".cat-te-agent-delete");
         this.importZipInput = el.querySelector(".cat-te-import-zip");
         el.querySelector(".cat-te-import").addEventListener("click", (e) => this._showImportMenu(e));
         el.querySelector(".cat-te-export").addEventListener("click", (e) => this._showExportMenu(e));
@@ -1590,6 +1728,15 @@ export class CapTimelineEditorApp {
         });
         el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
         this.settingsModal.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
+        el.querySelector(".cat-te-agent-add")?.addEventListener("click", () => this._editAgentConfig());
+        el.querySelector(".cat-te-agent-cancel")?.addEventListener("click", () => this._cancelAgentEdit());
+        el.querySelector(".cat-te-agent-save")?.addEventListener("click", () => void this._saveAgentConfig());
+        this.agentDeleteBtn?.addEventListener("click", () => void this._deleteAgentConfig());
+        this.agentProviderSelect?.addEventListener("change", () => {
+            if (Object.values(AGENT_DEFAULT_MODELS).includes(this.agentModelInput.value) || !this.agentModelInput.value.trim()) {
+                this.agentModelInput.value = AGENT_DEFAULT_MODELS[this.agentProviderSelect.value] || "";
+            }
+        });
         this.langSelect.addEventListener("change", () => {
             localStorage.setItem("cat-te-lang", this.langSelect.value);
         });
@@ -1697,6 +1844,8 @@ export class CapTimelineEditorApp {
         });
         this.aiAudioModeSelect?.addEventListener("change", () => this._onAiAudioModeChange());
         this.aiGenerateBgmCb?.addEventListener("change", () => this._onAiGenerateBgmChange());
+        this.aiLyricsInput?.addEventListener("change", () => this._onAiLyricsChange());
+        this.aiLyricsInput?.addEventListener("blur", () => this._onAiLyricsChange());
         this.skillPickBtn?.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -3381,19 +3530,17 @@ export class CapTimelineEditorApp {
         return true;
     }
 
-    _removeCurrentClipItem() {
-        const clip = this._selClip;
+    _removeClipItem(clip, index) {
         if (!clip || clip.track?.type === "audio") return;
         const m = this._ensureClipMeta(clip);
         this._normalizeVisualMeta(clip, m, { seedFromClip: false });
         const items = this._clipItems(m);
-        const idx = this._clipPreviewItemIndex(clip, m);
-        const current = items[idx];
+        const current = items[index];
         if (!current) return;
         const name = current.file.split(/[\\/]/).pop() || current.file;
         if (!confirm(`确定从 clip 中移除「${name}」？\n不会删除磁盘文件。`)) return;
         this._recordUndo();
-        m.items = items.filter((_, i) => i !== idx).map((item) => ({
+        m.items = items.filter((_, i) => i !== index).map((item) => ({
             id: item.id,
             kind: item.kind,
             file: item.file,
@@ -3403,12 +3550,20 @@ export class CapTimelineEditorApp {
         m.mediaIds = m.items.map((item) => item.id).filter(Boolean);
         this._normalizeVisualMeta(clip, m, { seedFromClip: false });
         this._meta.set(clip.id, m);
-        this._setClipPreviewItemIndex(clip, Math.min(idx, Math.max(0, m.items.length - 1)));
+        this._setClipPreviewItemIndex(clip, Math.min(index, Math.max(0, m.items.length - 1)));
         this._syncClipPrimaryAppearance(clip);
         this._scheduleProgramPreview();
         this._saveToWidgets();
-        this._updateClipInfoPanel(clip);
+        if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         if (this._clipItemsModalClipId === clip.id) this._renderClipItemsModal(clip);
+    }
+
+    _removeCurrentClipItem() {
+        const clip = this._selClip;
+        if (!clip || clip.track?.type === "audio") return;
+        const m = this._ensureClipMeta(clip);
+        this._normalizeVisualMeta(clip, m, { seedFromClip: false });
+        this._removeClipItem(clip, this._clipPreviewItemIndex(clip, m));
     }
 
     _activeMediaFilterCount() {
@@ -4998,6 +5153,7 @@ export class CapTimelineEditorApp {
                     ? String(c.ai_audio_mode).trim()
                     : "",
                 aiGenerateBgm: typeof c.generate_bgm === "boolean" ? c.generate_bgm : null,
+                aiLyrics: typeof c.ai_lyrics === "string" ? c.ai_lyrics : null,
             };
             if (first?.kind === "video") {
                 meta.sourceDuration = sourceDur;
@@ -6750,8 +6906,18 @@ export class CapTimelineEditorApp {
             enableText.textContent = "启用";
             enable.append(enableCb, enableText);
 
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "cat-te-clip-item-delete";
+            del.title = "删除素材";
+            del.innerHTML = iconHtml("trash", 12);
+            del.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._removeClipItem(clip, index);
+            });
+
             if (item.enabled === false) row.classList.add("is-disabled");
-            row.append(move, thumb, name, kind, enable);
+            row.append(move, thumb, name, kind, enable, del);
             this.clipItemsBody.appendChild(row);
         });
     }
@@ -7834,11 +8000,34 @@ export class CapTimelineEditorApp {
         }
         const generateBgm = this._resolvedAiGenerateBgm(clip, null, { reset: resetBgm });
         if (this.aiGenerateBgmCb) this.aiGenerateBgmCb.checked = generateBgm;
+        if (this.aiLyricsField) {
+            this.aiLyricsField.hidden = !hasAudio || mode === "none";
+        }
+        if (this.aiLyricsInput) this.aiLyricsInput.value = this._resolvedAiLyrics(clip);
         if (clip && resetBgm) {
             const meta = this._ensureClipMeta(clip);
             meta.aiGenerateBgm = generateBgm;
             this._meta.set(clip.id, meta);
         }
+    }
+
+    _resolvedAiLyrics(clip, meta = null) {
+        const m = meta || (clip ? this._ensureClipMeta(clip) : null);
+        if (typeof m?.aiLyrics === "string") return m.aiLyrics;
+        return this._overlappingBackgroundAudio(clip)
+            .map((row) => String(row.prompt || "").trim())
+            .filter(Boolean)
+            .join("\n\n");
+    }
+
+    _onAiLyricsChange() {
+        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
+        if (!clip || clip.track?.type === "audio") return;
+        this._recordUndo();
+        const meta = this._ensureClipMeta(clip);
+        meta.aiLyrics = String(this.aiLyricsInput?.value || "");
+        this._meta.set(clip.id, meta);
+        this._saveToWidgets();
     }
 
     _onAiAudioModeChange() {
@@ -7898,7 +8087,7 @@ export class CapTimelineEditorApp {
             return;
         }
         const meta = this._ensureClipMeta(clip);
-        const tab = this._aiOptimizeSrc || "media";
+        const tab = this._aiOptimizeSrc || "clip";
         if (tab === "clip") this.aiSrcText.value = String(meta.prompt || "") || "（空）";
         else if (tab === "global") this.aiSrcText.value = this._readGlobalPromptFromWidget() || "（空）";
         else this.aiSrcText.value = this._mediaPromptBlock(clip);
@@ -7930,7 +8119,7 @@ export class CapTimelineEditorApp {
         }
         this._restoreAiOutputLanguage();
         this._syncAiAudioModeUi(clip);
-        this._setAiOptimizeSrcTab("media");
+        this._setAiOptimizeSrcTab("clip");
         await this._loadAiOptimizeModels();
         await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
     }
@@ -7952,25 +8141,44 @@ export class CapTimelineEditorApp {
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/vl_models"));
             const data = await response.json();
             const models = Array.isArray(data.models) ? data.models : [];
+            const agents = Array.isArray(data.agents) ? data.agents : [];
             if (data.skill_url && this.aiSkillLink) this.aiSkillLink.href = data.skill_url;
             const saved = localStorage.getItem(STORAGE_AI_PROMPT_MODEL) || "";
             this.aiModelSelect.replaceChildren();
-            if (!models.length) {
+            if (!models.length && !agents.length) {
                 const opt = document.createElement("option");
                 opt.value = "";
-                opt.textContent = "未找到本地 VL 模型";
+                opt.textContent = "未找到可用模型或 Agent";
                 this.aiModelSelect.appendChild(opt);
                 this.aiModelSelect.disabled = true;
                 return;
             }
             this.aiModelSelect.disabled = false;
-            for (const name of models) {
-                const opt = document.createElement("option");
-                opt.value = name;
-                opt.textContent = name;
-                this.aiModelSelect.appendChild(opt);
+            if (agents.length) {
+                const group = document.createElement("optgroup");
+                group.label = "已配置 Agent";
+                for (const agent of agents) {
+                    const opt = document.createElement("option");
+                    opt.value = `agent:${agent.id}`;
+                    opt.textContent = `${agent.label} · ${agent.model}`;
+                    group.appendChild(opt);
+                }
+                this.aiModelSelect.appendChild(group);
             }
-            this.aiModelSelect.value = models.includes(saved) ? saved : models[0];
+            if (models.length) {
+                const group = document.createElement("optgroup");
+                group.label = "本地 Qwen3-VL";
+                for (const name of models) {
+                    const opt = document.createElement("option");
+                    opt.value = `local:${name}`;
+                    opt.textContent = name;
+                    group.appendChild(opt);
+                }
+                this.aiModelSelect.appendChild(group);
+            }
+            const values = [...this.aiModelSelect.options].map((option) => option.value);
+            const normalizedSaved = saved && !saved.includes(":") ? `local:${saved}` : saved;
+            this.aiModelSelect.value = values.includes(normalizedSaved) ? normalizedSaved : values[0];
         } catch {
             this.aiModelSelect.replaceChildren();
             const opt = document.createElement("option");
@@ -8009,7 +8217,7 @@ export class CapTimelineEditorApp {
             this.aiGenerateBtn.classList.toggle("is-loading", false);
             this.aiGenerateBtn.classList.toggle("is-cancel", busy);
             this.aiGenerateBtn.innerHTML = busy
-                ? `${iconHtml("stop", 12)}<span>终止</span>`
+                ? `${iconHtml("sparkles", 12)}<span>终止</span>`
                 : `${iconHtml("sparkles", 12)}<span>生成</span>`;
         }
     }
@@ -8029,12 +8237,15 @@ export class CapTimelineEditorApp {
         const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
         if (!clip || clip.track?.type === "audio" || this._aiOptimizeBusy) return;
         const meta = this._ensureClipMeta(clip);
-        const model = String(this.aiModelSelect?.value || "").trim();
-        if (!model) {
-            alert("未找到本地 Qwen3-VL 模型。请放到 ComfyUI/models/prompt_generator/ 后重试。");
+        const modelChoice = String(this.aiModelSelect?.value || "").trim();
+        if (!modelChoice) {
+            alert("没有可用的本地模型或 Agent，请先在设置中添加 Agent。");
             return;
         }
-        localStorage.setItem(STORAGE_AI_PROMPT_MODEL, model);
+        localStorage.setItem(STORAGE_AI_PROMPT_MODEL, modelChoice);
+        const isAgent = modelChoice.startsWith("agent:");
+        const model = modelChoice.startsWith("local:") ? modelChoice.slice(6) : "";
+        const agentId = isAgent ? modelChoice.slice(6) : "";
         const skill = String(this.aiSkillInput?.value || "");
         localStorage.setItem(STORAGE_AI_PROMPT_SKILL, skill);
         const outputLanguage = this._aiOutputLanguage();
@@ -8046,8 +8257,12 @@ export class CapTimelineEditorApp {
         const generateBgm = this.aiGenerateBgmCb
             ? !!this.aiGenerateBgmCb.checked
             : this._resolvedAiGenerateBgm(clip, meta);
+        const lyrics = this.aiLyricsField?.hidden
+            ? ""
+            : String(this.aiLyricsInput?.value || this._resolvedAiLyrics(clip, meta) || "").trim();
         meta.aiAudioMode = audioMode;
         meta.aiGenerateBgm = generateBgm;
+        meta.aiLyrics = this.aiLyricsField?.hidden ? meta.aiLyrics : String(this.aiLyricsInput?.value || "");
         this._meta.set(clip.id, meta);
         const useTimelineAudio = audioMode !== "none";
         const ac = new AbortController();
@@ -8056,6 +8271,7 @@ export class CapTimelineEditorApp {
         try {
             const payload = {
                 model,
+                agent_id: agentId,
                 system_prompt: String(this.aiSystemInput?.value || ""),
                 skill,
                 output_language: outputLanguage,
@@ -8063,11 +8279,12 @@ export class CapTimelineEditorApp {
                 clip_role: meta.clipRole || "multi_ref",
                 audio_mode: audioMode,
                 generate_bgm: generateBgm,
+                lyrics,
                 duration_sec: Number(clip.duration) || 0,
                 clip_prompt: String(meta.prompt || ""),
                 global_prompt: meta.useGlobalPrompt === false ? "" : this._readGlobalPromptFromWidget(),
                 files: this._clipAiOptimizeFiles(clip, { includeTimelineAudio: useTimelineAudio }),
-                keep_loaded: true,
+                keep_loaded: false,
             };
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/optimize_clip_prompt"), {
                 method: "POST",
@@ -8357,6 +8574,7 @@ export class CapTimelineEditorApp {
                         ? m.aiAudioMode
                         : "";
                     if (typeof m.aiGenerateBgm === "boolean") row.generate_bgm = m.aiGenerateBgm;
+                    if (typeof m.aiLyrics === "string") row.ai_lyrics = m.aiLyrics;
                     const generated = this._clipGeneratedVideos(m);
                     if (generated.length) {
                         row.generated_videos = generated.map((v) => ({
