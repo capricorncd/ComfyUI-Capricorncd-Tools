@@ -91,7 +91,7 @@ function genVideoUid() {
 function normalizeGeneratedVideo(row) {
     if (typeof row === "string") {
         const file = row.trim().replace(/\\/g, "/");
-        return file ? { id: genVideoUid(), file, enabled: true, note: "" } : null;
+        return file ? { id: genVideoUid(), file, enabled: true, muted: false, note: "" } : null;
     }
     if (!row || typeof row !== "object") return null;
     const file = String(row.file || row.src || "").trim().replace(/\\/g, "/");
@@ -100,6 +100,7 @@ function normalizeGeneratedVideo(row) {
         id: String(row.id || "").trim() || genVideoUid(),
         file,
         enabled: row.enabled !== false,
+        muted: row.muted === true,
         note: String(row.note || row.remark || ""),
     };
 }
@@ -329,6 +330,9 @@ export class CapTimelineEditorApp {
         this._genVideoState = null;
         this._outputVideosClipId = null;
         this._outputVideosCache = [];
+        this._outputVideosThumbIo = null;
+        this._videoThumbActive = 0;
+        this._videoThumbWaiters = [];
         this._timelineReady = false;
         this._loadSeq = 0;
         this._openGen = 0;
@@ -1364,6 +1368,10 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-gen-video-enabled" type="checkbox" checked />
                   <span>启用</span>
                 </label>
+                <label class="cat-te-clip-setting-check">
+                  <input class="cat-te-gen-video-muted" type="checkbox" />
+                  <span>禁音</span>
+                </label>
                 <label class="cat-te-media-preview-meta-row">
                   <span>备注</span>
                   <textarea class="cat-te-gen-video-note" rows="3" placeholder="视频备注"></textarea>
@@ -1630,6 +1638,7 @@ export class CapTimelineEditorApp {
         this.genVideoPrevBtn = el.querySelector(".cat-te-gen-video-prev");
         this.genVideoNextBtn = el.querySelector(".cat-te-gen-video-next");
         this.genVideoEnabledCb = el.querySelector(".cat-te-gen-video-enabled");
+        this.genVideoMutedCb = el.querySelector(".cat-te-gen-video-muted");
         this.genVideoNote = el.querySelector(".cat-te-gen-video-note");
         this.genVideoDeleteBtn = el.querySelector(".cat-te-gen-video-delete");
         this.outputVideosModal = el.querySelector(".cat-te-output-videos-modal");
@@ -1815,6 +1824,7 @@ export class CapTimelineEditorApp {
             this._stepGenVideoPreview(1);
         });
         this.genVideoEnabledCb?.addEventListener("change", () => this._onGenVideoEnabledChange());
+        this.genVideoMutedCb?.addEventListener("change", () => this._onGenVideoMutedChange());
         this.genVideoNote?.addEventListener("change", () => this._onGenVideoNoteChange());
         this.genVideoNote?.addEventListener("blur", () => this._onGenVideoNoteChange());
         this.genVideoDeleteBtn?.addEventListener("click", () => this._deleteCurrentGenVideo());
@@ -3061,7 +3071,7 @@ export class CapTimelineEditorApp {
             const n = normalizeOutputVideoPath(file);
             if (!n || have.has(n)) continue;
             have.add(n);
-            added.push({ id: genVideoUid(), file: n, enabled: true, note: "" });
+            added.push({ id: genVideoUid(), file: n, enabled: true, muted: false, note: "" });
         }
         if (!added.length) return false;
         this._recordUndo();
@@ -3092,6 +3102,7 @@ export class CapTimelineEditorApp {
         this._decorateClip(clip);
         this._syncClipPrimaryAppearance(clip);
         this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
         this._saveToWidgets();
     }
 
@@ -3239,6 +3250,7 @@ export class CapTimelineEditorApp {
         const name = row.file.split(/[\\/]/).pop() || "生成视频";
         if (this.genVideoTitle) this.genVideoTitle.textContent = n > 1 ? `${index + 1} / ${n}  ${name}` : name;
         if (this.genVideoEnabledCb) this.genVideoEnabledCb.checked = row.enabled !== false;
+        if (this.genVideoMutedCb) this.genVideoMutedCb.checked = row.muted === true;
         if (this.genVideoNote) this.genVideoNote.value = row.note || "";
         if (this.genVideoPrevBtn) this.genVideoPrevBtn.disabled = n <= 1;
         if (this.genVideoNextBtn) this.genVideoNextBtn.disabled = n <= 1;
@@ -3267,6 +3279,22 @@ export class CapTimelineEditorApp {
         const cur = this._currentGenVideo();
         if (!cur || !this.genVideoEnabledCb) return;
         this._setGeneratedVideoEnabled(cur.clip, cur.row.id, !!this.genVideoEnabledCb.checked);
+    }
+
+    _onGenVideoMutedChange() {
+        const cur = this._currentGenVideo();
+        if (!cur || !this.genVideoMutedCb) return;
+        const muted = !!this.genVideoMutedCb.checked;
+        const m = this._ensureClipMeta(cur.clip);
+        m.generatedVideos = this._clipGeneratedVideos(m);
+        const row = m.generatedVideos.find((item) => item.id === cur.row.id) || m.generatedVideos[cur.index];
+        if (!row || row.muted === muted) return;
+        this._recordUndo();
+        row.muted = muted;
+        this._meta.set(cur.clip.id, m);
+        this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
+        this._saveToWidgets();
     }
 
     _onGenVideoNoteChange() {
@@ -3307,14 +3335,21 @@ export class CapTimelineEditorApp {
 
     _closeOutputVideosPicker() {
         this._outputVideosClipId = null;
+        this._outputVideosThumbIo?.disconnect();
+        this._outputVideosThumbIo = null;
         if (this.outputVideosModal) this.outputVideosModal.hidden = true;
         this.outputVideosBody?.replaceChildren();
     }
 
     _renderOutputVideosPicker() {
         if (!this.outputVideosBody) return;
+        this._outputVideosThumbIo?.disconnect();
+        this._outputVideosThumbIo = null;
         const clip = this._findClipById(this._outputVideosClipId);
-        const have = new Set(this._clipGeneratedVideos(clip ? this._ensureClipMeta(clip) : null).map((row) => row.file));
+        const have = new Set(
+            this._clipGeneratedVideos(clip ? this._ensureClipMeta(clip) : null)
+                .map((row) => normalizeOutputVideoPath(row.file) || row.file),
+        );
         const q = String(this.outputVideosFilter?.value || "").trim().toLowerCase();
         const files = this._outputVideosCache.filter((file) => !q || String(file).toLowerCase().includes(q));
         this.outputVideosBody.replaceChildren();
@@ -3325,11 +3360,25 @@ export class CapTimelineEditorApp {
             this.outputVideosBody.appendChild(empty);
             return;
         }
+        const io = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const thumb = entry.target;
+                const file = thumb.dataset?.file;
+                io.unobserve(thumb);
+                if (!file) continue;
+                void this._getOutputVideoThumbnail(file).then((url) => {
+                    if (url && thumb.isConnected) thumb.src = url;
+                });
+            }
+        }, { root: this.outputVideosBody, rootMargin: "120px 0px" });
+        this._outputVideosThumbIo = io;
         for (const file of files) {
+            const key = normalizeOutputVideoPath(file) || file;
             const btn = document.createElement("button");
             btn.type = "button";
             btn.className = "cat-te-output-video-row";
-            const added = have.has(file);
+            const added = have.has(key);
             if (added) {
                 btn.disabled = true;
                 btn.classList.add("is-added");
@@ -3337,6 +3386,7 @@ export class CapTimelineEditorApp {
             const thumb = document.createElement("img");
             thumb.className = "cat-te-output-video-thumb";
             thumb.alt = "";
+            thumb.dataset.file = file;
             const name = document.createElement("span");
             name.className = "cat-te-output-video-name";
             name.textContent = file;
@@ -3348,13 +3398,14 @@ export class CapTimelineEditorApp {
             if (!added) {
                 btn.addEventListener("click", () => {
                     if (!this._addGeneratedVideosToClip(clip, [file])) return;
-                    this._renderOutputVideosPicker();
+                    // In-place mark — avoid re-rendering hundreds of rows / re-queuing thumbs.
+                    btn.disabled = true;
+                    btn.classList.add("is-added");
+                    tag.textContent = "已添加";
                 });
             }
             this.outputVideosBody.appendChild(btn);
-            void this._getOutputVideoThumbnail(file).then((url) => {
-                if (url && thumb.isConnected) thumb.src = url;
-            });
+            io.observe(thumb);
         }
     }
 
@@ -4571,24 +4622,87 @@ export class CapTimelineEditorApp {
         });
     }
 
+    _runVideoThumbJob(fn) {
+        return new Promise((resolve, reject) => {
+            this._videoThumbWaiters.push({ fn, resolve, reject });
+            this._pumpVideoThumbQueue();
+        });
+    }
+
+    _pumpVideoThumbQueue() {
+        const max = 2;
+        while (this._videoThumbActive < max && this._videoThumbWaiters.length) {
+            const job = this._videoThumbWaiters.shift();
+            this._videoThumbActive += 1;
+            Promise.resolve()
+                .then(() => job.fn())
+                .then(job.resolve, job.reject)
+                .finally(() => {
+                    this._videoThumbActive = Math.max(0, this._videoThumbActive - 1);
+                    this._pumpVideoThumbQueue();
+                });
+        }
+    }
+
     async _grabVideoThumbnail(url, atSec = 0.15) {
+        return this._runVideoThumbJob(() => this._grabVideoThumbnailOnce(url, atSec));
+    }
+
+    _grabVideoThumbnailOnce(url, atSec = 0.15) {
         return new Promise((resolve, reject) => {
             const v = document.createElement("video");
-            v.preload = "auto";
+            v.preload = "metadata";
             v.muted = true;
-            v.addEventListener("loadedmetadata", () => {
-                v.currentTime = Math.min(Math.max(0, atSec), Math.max(0, v.duration - 0.05));
-            });
-            v.addEventListener("seeked", () => {
+            v.playsInline = true;
+            let done = false;
+            const finish = (fn, value) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
                 try {
+                    v.removeAttribute("src");
+                    v.load();
+                } catch { /* ignore */ }
+                fn(value);
+            };
+            const timer = setTimeout(() => finish(reject, new Error("thumb timeout")), 8000);
+            const draw = () => {
+                try {
+                    const srcW = Math.max(1, v.videoWidth || 160);
+                    const srcH = Math.max(1, v.videoHeight || 90);
+                    const maxSide = 160;
+                    const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
                     const canvas = document.createElement("canvas");
-                    canvas.width = v.videoWidth || 320;
-                    canvas.height = v.videoHeight || 180;
+                    canvas.width = Math.max(1, Math.round(srcW * scale));
+                    canvas.height = Math.max(1, Math.round(srcH * scale));
                     canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
-                    resolve(canvas.toDataURL("image/jpeg", 0.72));
-                } catch (err) { reject(err); }
+                    finish(resolve, canvas.toDataURL("image/jpeg", 0.72));
+                } catch (err) {
+                    finish(reject, err);
+                }
+            };
+            v.addEventListener("loadedmetadata", () => {
+                const dur = Number.isFinite(v.duration) ? v.duration : 0;
+                const t = dur > 0
+                    ? Math.min(Math.max(0, atSec), Math.max(0, dur - 0.05))
+                    : 0;
+                const seek = () => {
+                    try {
+                        v.currentTime = t;
+                    } catch {
+                        draw();
+                    }
+                };
+                // Some files already sit at the target time and never fire `seeked`.
+                if (Math.abs((v.currentTime || 0) - t) < 0.001) {
+                    if (v.readyState >= 2) draw();
+                    else v.addEventListener("loadeddata", draw, { once: true });
+                    return;
+                }
+                v.addEventListener("seeked", draw, { once: true });
+                seek();
             });
-            v.addEventListener("error", () => reject(new Error("load failed")));
+            v.addEventListener("error", () => finish(reject, new Error("load failed")));
             v.src = url;
         });
     }
@@ -4769,6 +4883,8 @@ export class CapTimelineEditorApp {
                     if (!clip.hasAudio) continue;
                     if (track.visible === false || m?.disabled) continue;
                     if (track.muted) continue;
+                    // Generated-video preview owns its own HTML5 audio path.
+                    if (this._clipUsesGeneratedPreview(m)) continue;
                 }
                 out.push(clip);
             }
@@ -7161,7 +7277,7 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _syncPreviewVideo(entry, mediaTime) {
+    _syncPreviewVideo(entry, mediaTime, { audible = false } = {}) {
         if (!entry?.el) return;
         const v = entry.el;
         const t = Math.max(0, Number(mediaTime) || 0);
@@ -7169,6 +7285,8 @@ export class CapTimelineEditorApp {
         const clamped = dur != null && dur > 0 ? Math.min(t, Math.max(0, dur - 0.001)) : t;
         entry.wantTime = clamped;
         const playing = !!this._timeline?._playing;
+        // Only unmute during timeline play when this layer should be heard.
+        v.muted = !(playing && audible);
         if (playing) {
             const drift = Math.abs((v.currentTime || 0) - clamped);
             if (drift > 0.25) this._seekPreviewVideo(entry, clamped);
@@ -7190,6 +7308,7 @@ export class CapTimelineEditorApp {
         for (const [key, entry] of this._previewVideos) {
             if (usedKeys.has(key)) continue;
             if (!entry.el.paused) entry.el.pause();
+            entry.el.muted = true;
         }
     }
 
@@ -7226,7 +7345,13 @@ export class CapTimelineEditorApp {
                 if (m.disabled || m.visible === false) continue;
                 const gen = this._clipUsesGeneratedPreview(m) ? this._firstEnabledGeneratedVideo(m) : null;
                 if (gen) {
-                    layers.push({ kind: "generated", clip, meta: m, file: gen.file });
+                    layers.push({
+                        kind: "generated",
+                        clip,
+                        meta: m,
+                        file: gen.file,
+                        muted: gen.muted === true,
+                    });
                     continue;
                 }
                 const items = this._enabledClipItems(m);
@@ -7295,7 +7420,9 @@ export class CapTimelineEditorApp {
                     const slice = layer.clip.duration / items.length;
                     mediaTime = Math.max(0, (t - layer.clip.startTime) - (layer.itemIndex || 0) * slice);
                 }
-                this._syncPreviewVideo(entry, mediaTime);
+                this._syncPreviewVideo(entry, mediaTime, {
+                    audible: layer.kind === "generated" && layer.muted !== true,
+                });
                 if (this._previewVideoCanDraw(entry) && this._drawCover(ctx, entry.el, cw, ch)) {
                     drew = true;
                 }
@@ -8581,6 +8708,7 @@ export class CapTimelineEditorApp {
                             id: v.id,
                             file: v.file,
                             enabled: v.enabled !== false,
+                            muted: v.muted === true,
                             note: v.note || "",
                         }));
                     }
