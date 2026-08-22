@@ -1745,13 +1745,19 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-ai-prompt-input:disabled { opacity: 0.4; }
 
 .cat-te-use-global,
-.cat-te-use-media-prompt {
+.cat-te-use-media-prompt,
+.cat-te-use-ai-prompt {
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 11px;
     color: #8888b0;
     cursor: pointer;
+}
+.cat-te-use-ai-prompt {
+    padding: 8px 12px;
+    flex-shrink: 0;
+    border-bottom: 1px solid #1c1c30;
 }
 .cat-te-use-media-prompt[hidden] { display: none !important; }
 
@@ -2410,6 +2416,9 @@ body.cat-te-media-dnd-over-tl {
     font-size: 10px;
     color: #6868a0;
     line-height: 1.4;
+}
+.cat-te-ai-bgm-check {
+    margin-top: 2px;
 }
 .cat-te-ai-system { min-height: 110px; flex: 0 0 auto; height: 110px; }
 .cat-te-ai-skill { min-height: 64px; flex: 0 0 auto; height: 64px; }

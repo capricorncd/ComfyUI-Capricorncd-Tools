@@ -276,14 +276,16 @@
       "height": { "name": "高度" },
       "ref_image_size": { "name": "参考图尺寸" },
       "data_json": { "name": "配置数据" },
-      "index": { "name": "索引" },
-      "optimize_prompt": { "name": "使用优化提示词" }
+      "index": { "name": "索引" }
     },
     "outputs": {
       "positive": { "name": "正向" },
       "latent": { "name": "Latent" },
       "total_frame_count": { "name": "总帧数" },
-      "prompt": { "name": "提示词" }
+      "prompt": { "name": "提示词" },
+      "images": { "name": "图片" },
+      "videos": { "name": "视频" },
+      "audio": { "name": "音频" }
     }
   },
 

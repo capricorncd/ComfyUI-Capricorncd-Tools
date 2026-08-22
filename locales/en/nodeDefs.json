@@ -276,14 +276,16 @@
       "height": { "name": "Height" },
       "ref_image_size": { "name": "Ref Image Size" },
       "data_json": { "name": "Data JSON" },
-      "index": { "name": "Index" },
-      "optimize_prompt": { "name": "Use Optimized Prompt" }
+      "index": { "name": "Index" }
     },
     "outputs": {
       "positive": { "name": "Positive" },
       "latent": { "name": "Latent" },
       "total_frame_count": { "name": "Total Frames" },
-      "prompt": { "name": "Prompt" }
+      "prompt": { "name": "Prompt" },
+      "images": { "name": "Images" },
+      "videos": { "name": "Videos" },
+      "audio": { "name": "Audio" }
     }
   },
 

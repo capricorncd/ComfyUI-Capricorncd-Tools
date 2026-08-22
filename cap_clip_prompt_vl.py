@@ -71,8 +71,7 @@ _CLIP_ROLE_LABELS = {
 _AUDIO_MODE_INSTRUCTIONS = {
     "none": (
         "Audio mode: do not use background / timeline audio. "
-        "Do not add <Audio n> tags. Do not describe lip-sync or performing to music. "
-        "overall_soundscape and non_diegetic_music may be N/A unless the user's text already specifies sound."
+        "Do not add <Audio n> tags. Do not describe lip-sync or performing to existing music."
     ),
     "lipsync": (
         "Audio mode: digital-human lip-sync. "
@@ -97,6 +96,15 @@ _AUDIO_MODE_INSTRUCTIONS = {
 _NO_TIMELINE_AUDIO = (
     "No overlapping background audio was found on the timeline for this clip. "
     "Do not add <Audio n> tags or invent lip-sync / music performance from audio that is not there."
+)
+_GENERATE_BGM = (
+    "Generate BGM: yes. Write a non_diegetic_music section with newly generated background music "
+    "(instrumentation, tempo, mood) that fits the scene. This is generated music, not copied from a tagged audio file."
+)
+_NO_GENERATE_BGM = (
+    "Generate BGM: no. Do not invent or generate background music. "
+    "Set non_diegetic_music to N/A unless tagged timeline audio itself is music that must be referenced. "
+    "Do not add generated BGM content anywhere in the prompt."
 )
 
 
@@ -519,6 +527,12 @@ def build_user_prompt(payload: dict) -> str:
         lines.append(_AUDIO_MODE_INSTRUCTIONS["none"] if audio_mode == "none" else _NO_TIMELINE_AUDIO)
     else:
         lines.append(_AUDIO_MODE_INSTRUCTIONS.get(audio_mode, _AUDIO_MODE_INSTRUCTIONS["auto"]))
+    generate_bgm = payload.get("generate_bgm")
+    if generate_bgm is None:
+        generate_bgm = audio_mode == "none" or not has_audio
+    else:
+        generate_bgm = generate_bgm is not False
+    lines.append(_GENERATE_BGM if generate_bgm else _NO_GENERATE_BGM)
     return "\n".join(lines)
 
 

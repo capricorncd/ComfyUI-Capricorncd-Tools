@@ -69,27 +69,24 @@ class CAP_MiniMaxH3ReferenceToVideo:
                 }),
                 "data_json": ("STRING", {"default": "", "multiline": True}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
-                "optimize_prompt": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Use the clip's AI-optimized prompt when present. Off uses the composed clip / media / global prompt.",
-                }),
             },
         }
 
-    RETURN_TYPES = ("CONDITIONING", "LATENT", "INT", "STRING")
-    RETURN_NAMES = ("positive", "latent", "total_frame_count", "prompt")
+    RETURN_TYPES = ("CONDITIONING", "LATENT", "INT", "STRING", "IMAGE", "IMAGE", "AUDIO")
+    RETURN_NAMES = ("positive", "latent", "total_frame_count", "prompt", "images", "videos", "audio")
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "MiniMax H3 Reference to Video using a Timeline Editor clip from data_json. "
         "Clip images map to ref_image, videos to ref_video (+ soundtrack), "
-        "and clip audios to ref_audio. Frame count and prompt come from the clip."
+        "and clip audios to ref_audio. Frame count and prompt come from the clip. "
+        "Also outputs clip stills, video frames, and mixed clip audio."
     )
 
     @classmethod
     def IS_CHANGED(cls, clip, vae, audio_vae, width, height, ref_image_size,
-                   data_json, index, optimize_prompt=True):
-        return (data_json, index, width, height, ref_image_size, optimize_prompt)
+                   data_json, index):
+        return (data_json, index, width, height, ref_image_size)
 
     def _parse_clip(self, data_json: str, index: int):
         try:
@@ -137,8 +134,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
         return f"{label}: {body}"
 
     def _compose_prompt(self, parser: CAP_DataJsonClipParser, clip: dict, global_prompt: str,
-                        media_lines: list[str], use_optimized: bool = True) -> str:
-        if use_optimized:
+                        media_lines: list[str]) -> str:
+        if parser._clip_use_ai_prompt(clip):
             ai_prompt = parser._strip_comment_lines(clip.get("ai_prompt") or "").strip()
             if ai_prompt:
                 return ai_prompt
@@ -187,8 +184,20 @@ class CAP_MiniMaxH3ReferenceToVideo:
             return None
         return parser._trim(waveform, sample_rate, src_start, src_end)
 
+    def _stack_frames(self, frames: list, parser: CAP_DataJsonClipParser, blank: torch.Tensor) -> torch.Tensor:
+        rows = []
+        for frame in frames:
+            if not isinstance(frame, torch.Tensor) or frame.ndim != 4 or frame.shape[0] < 1:
+                continue
+            rows.append(frame)
+        if not rows:
+            return blank
+        height, width = int(rows[0].shape[1]), int(rows[0].shape[2])
+        aligned = [parser._match_image_size(frame, height, width) for frame in rows]
+        return torch.cat(aligned, dim=0)
+
     def execute(self, clip, vae, audio_vae, width, height, ref_image_size,
-                data_json, index, optimize_prompt=True):
+                data_json, index):
         data, clip_row, materials, parser = self._parse_clip(data_json, index)
         fps = max(1.0, float(data.get("fps", 24.0)))
         start_ms = int(clip_row.get("start_ms", 0) or 0)
@@ -204,6 +213,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
         picture_lines = []
         video_lines = []
         audio_lines = []
+        image_frames = []
+        video_frames = []
 
         for ref in self._visual_refs(clip_row, parser):
             path, row = self._material_for_ref(ref, materials, parser)
@@ -219,6 +230,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
                     continue
                 n = len(ref_videos) + 1
                 ref_videos[f"ref_video_{n}"] = frames
+                video_frames.append(frames)
                 if soundtrack is not None:
                     ref_video_audios[f"ref_video_audio_{n}"] = soundtrack
                 if use_prompt:
@@ -233,6 +245,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
                 continue
             n = len(ref_images) + 1
             ref_images[f"ref_image_{n}"] = img
+            image_frames.append(img)
             if use_prompt:
                 line = self._material_prompt_line(parser, f"<Picture {n}>", row)
                 if line:
@@ -263,8 +276,15 @@ class CAP_MiniMaxH3ReferenceToVideo:
         prompt = self._compose_prompt(
             parser, clip_row, data.get("global_prompt", ""),
             picture_lines + video_lines + audio_lines,
-            use_optimized=optimize_prompt,
         )
+
+        if parser._uses_master_audio(data, clip_row):
+            audio_out = parser._clip_audio_from_master(data, clip_row, 0)
+        else:
+            audio_out = parser._clip_audio_from_audios(clip_row, 0, materials=materials)
+        blank = torch.zeros(1, 64, 64, 3)
+        images_out = self._stack_frames(image_frames, parser, blank)
+        videos_out = self._stack_frames(video_frames, parser, blank)
 
         out = MiniMaxH3ReferenceToVideo.execute(
             clip, vae, audio_vae, prompt, width, height, length, ref_image_size,
@@ -273,7 +293,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
             ref_video_audios=ref_video_audios or None,
             ref_audios=ref_audios or None,
         )
-        return (*out.args, length, prompt)
+        return (*out.args, length, prompt, images_out, videos_out, audio_out)
 
 
 NODE_CLASS_MAPPINGS = {"CAP_MiniMaxH3ReferenceToVideo": CAP_MiniMaxH3ReferenceToVideo}

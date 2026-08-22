@@ -615,6 +615,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
                 "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),
                 "use_global_prompt": _clip_use_global_prompt(clip),
+                "use_ai_prompt": clip.get("use_ai_prompt", True) is not False,
                 "z_index": z_index,
                 "audios": self._audio_slices(
                     ext_start, ext_end, audio_clips, resolve_media, project, materials, seen_materials,

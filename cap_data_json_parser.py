@@ -148,6 +148,11 @@ class CAP_DataJsonClipParser:
             return bool(clip["use_global_prompt"])
         return not bool(self._strip_comment_lines(clip.get("prompt") or "").strip())
 
+    def _clip_use_ai_prompt(self, clip: dict) -> bool:
+        if isinstance(clip, dict) and "use_ai_prompt" in clip:
+            return bool(clip["use_ai_prompt"])
+        return True
+
     def _strip_comment_lines(self, text: str) -> str:
         return "\n".join(
             line for line in str(text or "").split("\n")
@@ -155,9 +160,10 @@ class CAP_DataJsonClipParser:
         )
 
     def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None) -> str:
-        ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
-        if ai_prompt:
-            return ai_prompt
+        if self._clip_use_ai_prompt(clip):
+            ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
+            if ai_prompt:
+                return ai_prompt
         clip_prompt = self._strip_comment_lines(clip.get("prompt") or "")
         global_prompt = self._strip_comment_lines(global_prompt)
         parts = []
