@@ -46,6 +46,7 @@
       "fps":            { "name": "帧率" },
       "width":          { "name": "宽度" },
       "height":         { "name": "高度" },
+      "swap_wh":        { "name": "交换宽高" },
       "global_prompt":  { "name": "全局提示词" },
       "project_version":{ "name": "项目版本" },
       "project_json":   { "name": "项目数据" },

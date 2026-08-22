@@ -87,8 +87,9 @@
 | 名称 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `fps` | FLOAT | 24.0 | 帧率 |
-| `width` | INT | 1280 | 输出宽度（写入 `data_json`） |
-| `height` | INT | 720 | 输出高度（写入 `data_json`） |
+| `width` | INT | 1344 | 输出宽度（写入 `data_json`） |
+| `height` | INT | 768 | 输出高度（写入 `data_json`） |
+| `swap_wh` | BOOLEAN | false | 切换时交换当前 width / height（如 1280×720 → 720×1280） |
 | `global_prompt` | STRING | — | 片段使用全局提示词时的默认内容 |
 | `project_version` | STRING | 包版本 | 写入项目 / 运行时 JSON |
 | `project_json` | STRING | 空项目 | 完整可编辑时间轴文档（轨道、片段、资源、设置） |
@@ -147,8 +148,8 @@
   "project_version": "x.y.z",
   "schema_version": "x.y.z",
   "fps": 24.0,
-  "width": 1280,
-  "height": 720,
+  "width": 1344,
+  "height": 768,
   "global_prompt": "cinematic",
   "total_frame_count": 120,
   "run_prefix": "20260805_224215",

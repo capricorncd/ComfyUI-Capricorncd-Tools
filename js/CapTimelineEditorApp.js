@@ -37,7 +37,7 @@ const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
 /** Must match CAP_TimelineEditor INPUT_TYPES defaults. */
-const PY_SCALAR_DEFAULTS = { fps: 24, width: 1280, height: 720, global_prompt: "" };
+const PY_SCALAR_DEFAULTS = { fps: 24, width: 1344, height: 768, global_prompt: "" };
 const MEDIA_KIND_FILTERS = [
     { id: "image", label: "图片" },
     { id: "video", label: "视频" },
@@ -8614,8 +8614,8 @@ export class CapTimelineEditorApp {
             media: this._serializeMediaCatalog(),
             settings: {
                 fps: Number(this._w("fps")?.value ?? 24),
-                width: Number(this._w("width")?.value ?? 1280),
-                height: Number(this._w("height")?.value ?? 720),
+                width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
+                height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
                 global_prompt: String(this._w("global_prompt")?.value ?? ""),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
                 current_time: Number(this._timeline?.currentTime ?? 0) || 0,

@@ -89,8 +89,9 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `fps` | FLOAT | 24.0 | Frames per second |
-| `width` | INT | 1280 | Output width (written to `data_json`) |
-| `height` | INT | 720 | Output height (written to `data_json`) |
+| `width` | INT | 1344 | Output width (written to `data_json`) |
+| `height` | INT | 768 | Output height (written to `data_json`) |
+| `swap_wh` | BOOLEAN | false | Toggling swaps the current width and height values |
 | `global_prompt` | STRING | — | Default prompt when a clip uses the global prompt |
 | `project_version` | STRING | package version | Written into project / runtime JSON |
 | `project_json` | STRING | empty project | Full editable timeline document (tracks, clips, resources, settings) |
@@ -149,8 +150,8 @@ The fullscreen editor owns this document; you normally do not edit it by hand.
   "project_version": "x.y.z",
   "schema_version": "x.y.z",
   "fps": 24.0,
-  "width": 1280,
-  "height": 720,
+  "width": 1344,
+  "height": 768,
   "global_prompt": "cinematic",
   "total_frame_count": 120,
   "run_prefix": "20260805_224215",

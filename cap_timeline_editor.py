@@ -167,22 +167,35 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
-                "width": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
-                "height": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
+                "fps": (
+                    "FLOAT",
+                    {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1},
+                ),
+                "width": ("INT", {"default": 1344, "min": 64, "max": 8192, "step": 1}),
+                "height": ("INT", {"default": 768, "min": 64, "max": 8192, "step": 1}),
+                "swap_wh": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "切换时交换当前 width / height（如 1280×720 → 720×1280）",
+                    },
+                ),
                 "global_prompt": ("STRING", {"default": "", "multiline": True}),
                 "project_version": ("STRING", {"default": PROJECT_VERSION}),
                 "project_json": (
                     "STRING",
                     {
-                        "default": json.dumps({
-                            "project_version": PROJECT_VERSION,
-                            "schema_version": SCHEMA_VERSION,
-                            "name": "未命名项目",
-                            "media": [],
-                            "settings": {},
-                            "tracks": [],
-                        }, ensure_ascii=False),
+                        "default": json.dumps(
+                            {
+                                "project_version": PROJECT_VERSION,
+                                "schema_version": SCHEMA_VERSION,
+                                "name": "未命名项目",
+                                "media": [],
+                                "settings": {},
+                                "tracks": [],
+                            },
+                            ensure_ascii=False,
+                        ),
                         "multiline": True,
                         "tooltip": "Track-nested editable timeline project (schema version 2: media catalog + clip media_ids).",
                     },
@@ -193,8 +206,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     @classmethod
     def IS_CHANGED(cls, fps, width, height, global_prompt,
-                   project_version, project_json, trim_offset, **_):
-        return fps, width, height, global_prompt, project_version, project_json, trim_offset
+                   project_version, project_json, trim_offset, swap_wh=False, **_):
+        return fps, width, height, global_prompt, project_version, project_json, trim_offset, bool(swap_wh)
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):

@@ -46,6 +46,7 @@
       "fps":            { "name": "FPS" },
       "width":          { "name": "Width" },
       "height":         { "name": "Height" },
+      "swap_wh":        { "name": "Swap Dimensions" },
       "global_prompt":  { "name": "Global Prompt" },
       "project_version":{ "name": "Project Version" },
       "project_json":   { "name": "Project JSON" },

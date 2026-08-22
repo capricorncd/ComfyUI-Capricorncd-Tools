@@ -5,7 +5,6 @@ import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 const NODE_CLASS = "CAP_TimelineEditor";
 const SCALAR_WIDGETS = ["fps", "width", "height", "global_prompt"];
 const OBSOLETE_WIDGETS = ["ignore_occluded", "assets_dir"];
-
 function flushOpenTimelineEditors() {
     CapTimelineEditorApp.flushOpenEditors();
     for (const node of app.graph?._nodes ?? []) {
@@ -55,6 +54,31 @@ function hookGraphClear() {
     proto.clear._capTeHooked = true;
 }
 
+function swapWhWidgets(node) {
+    const widthW = node.widgets?.find(w => w.name === "width");
+    const heightW = node.widgets?.find(w => w.name === "height");
+    if (!widthW || !heightW) return;
+    const prevW = widthW.value;
+    widthW.value = heightW.value;
+    heightW.value = prevW;
+    node._teApp?._syncScalarsToProjectJson?.();
+    node._teApp?._scheduleProgramPreview?.();
+    node.setDirtyCanvas?.(true, true);
+}
+
+function hookSwapWhWidget(node) {
+    const w = node.widgets?.find(widget => widget.name === "swap_wh");
+    if (!w || w._capSwapWhHooked) return;
+    w._capSwapWhHooked = true;
+    const orig = w.callback;
+    w.callback = function (...args) {
+        const ret = orig?.apply(this, args);
+        // Toggle only: exchange current width/height (do not force presets).
+        swapWhWidgets(node);
+        return ret;
+    };
+}
+
 function hookScalarWidgets(node) {
     for (const name of SCALAR_WIDGETS) {
         const w = node.widgets?.find(widget => widget.name === name);
@@ -69,6 +93,7 @@ function hookScalarWidgets(node) {
         };
         if (name === "global_prompt") node._teApp?._bindGlobalPromptWidget?.();
     }
+    hookSwapWhWidget(node);
 }
 
 function onTeGlobalKeyDown(e) {
