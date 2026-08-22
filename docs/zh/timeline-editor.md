@@ -51,7 +51,7 @@
 ### 项目栏
 
 - 可编辑项目名称
-- **导入** / **导出**：支持目录包与 ZIP（含全部素材 + `project.json`）
+- **导入** / **导出**：支持目录包与 ZIP（含全部素材 + `project.json`）；**合成视频**按前缀（默认 `cap_timeline_compose/`）写入 `output/`，文件名为 `项目名称_yyyyMMdd_hhmmss.mp4`
 - 关闭后返回 ComfyUI 画布
 
 ---

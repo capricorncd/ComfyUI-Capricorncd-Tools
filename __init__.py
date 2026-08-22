@@ -389,6 +389,44 @@ def _register_routes():
             logging.exception("[CapricorncdTools] export_zip error")
             return web.json_response({"error": str(exc)}, status=500)
 
+    @routes.post("/audio_keyframe_timeline/compose_video")
+    async def api_compose_timeline_video(request: web.Request) -> web.Response:
+        from .cap_compose_timeline_export import (
+            DEFAULT_COMPOSE_PREFIX,
+            build_compose_filename,
+            compose_to_output,
+        )
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                return web.json_response({"error": "Invalid payload"}, status=400)
+            project = payload.get("project")
+            if not isinstance(project, dict):
+                return web.json_response({"error": "Invalid project"}, status=400)
+            filename_prefix = str(payload.get("filename_prefix") or DEFAULT_COMPOSE_PREFIX).strip()
+            filename = str(payload.get("filename") or "").strip()
+            if not filename:
+                filename = build_compose_filename(project.get("name") or "未命名项目")
+            meta = compose_to_output(project, filename_prefix=filename_prefix, filename=filename)
+            return web.json_response({
+                "ok": True,
+                "filename": meta["filename"],
+                "subfolder": meta.get("subfolder") or "",
+                "duration_sec": meta.get("duration_sec"),
+                "video_count": meta.get("video_count"),
+                "audio_count": meta.get("audio_count"),
+                "width": meta.get("width"),
+                "height": meta.get("height"),
+                "fps": meta.get("fps"),
+            })
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except RuntimeError as exc:
+            return web.json_response({"error": str(exc)}, status=500)
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] compose_video error")
+            return web.json_response({"error": str(exc)}, status=500)
+
     @routes.post("/audio_keyframe_timeline/import_project_zip")
     async def api_import_project_zip(request: web.Request) -> web.Response:
         from .cap_timeline_project_io import import_project_from_zip_bytes

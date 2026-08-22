@@ -331,6 +331,7 @@ export class CapTimelineEditorApp {
         this._outputVideosClipId = null;
         this._outputVideosCache = [];
         this._outputVideosThumbIo = null;
+        this._composeBusy = false;
         this._videoThumbActive = 0;
         this._videoThumbWaiters = [];
         this._timelineReady = false;
@@ -573,6 +574,7 @@ export class CapTimelineEditorApp {
             try { this._closeMediaPreview(); } catch { /* ignore */ }
             try { this._closeGenVideoModal(); } catch { /* ignore */ }
             try { this._closeOutputVideosPicker(); } catch { /* ignore */ }
+            try { this._closeComposeModal(true); } catch { /* ignore */ }
             try { this._closeAddMaterial(); } catch { /* ignore */ }
             try { this._closeSettings(); } catch { /* ignore */ }
             this._removeCtxMenu();
@@ -980,8 +982,92 @@ export class CapTimelineEditorApp {
     }
 
     _composeGeneratedVideosExport() {
-        // TODO: 按时间轴顺序把各 clip 绑定的生成视频拼接成完整成片并导出。
-        alert("Coming soon — this feature is under development.");
+        this._openComposeModal();
+    }
+
+    _composeDefaultFilename() {
+        const stamp = new Date();
+        const pad = (n) => String(n).padStart(2, "0");
+        const tag = `${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}`
+            + `_${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}`;
+        return `${this._safeProjectFilename()}_${tag}.mp4`;
+    }
+
+    _openComposeModal() {
+        if (!this.composeModal) return;
+        if (this.composePrefixInput && !String(this.composePrefixInput.value || "").trim()) {
+            this.composePrefixInput.value = "cap_timeline_compose/";
+        }
+        if (this.composeFilenameInput) this.composeFilenameInput.value = this._composeDefaultFilename();
+        if (this.composeStatus) {
+            this.composeStatus.hidden = true;
+            this.composeStatus.textContent = "";
+            this.composeStatus.classList.remove("is-error", "is-ok");
+        }
+        if (this.composeRunBtn) this.composeRunBtn.disabled = false;
+        this.composeModal.hidden = false;
+    }
+
+    _closeComposeModal(force = false) {
+        if (this._composeBusy && !force) return;
+        this._composeBusy = false;
+        if (this.composeRunBtn) this.composeRunBtn.disabled = false;
+        if (this.composeModal) this.composeModal.hidden = true;
+    }
+
+    _setComposeStatus(text, { error = false, ok = false } = {}) {
+        if (!this.composeStatus) return;
+        this.composeStatus.hidden = !text;
+        this.composeStatus.textContent = text || "";
+        this.composeStatus.classList.toggle("is-error", !!error);
+        this.composeStatus.classList.toggle("is-ok", !!ok);
+    }
+
+    async _runComposeVideoExport() {
+        if (this._composeBusy || !this.composeModal) return;
+        let filenamePrefix = String(this.composePrefixInput?.value || "").trim() || "cap_timeline_compose/";
+        filenamePrefix = filenamePrefix.replace(/\\/g, "/");
+        if (this.composePrefixInput) this.composePrefixInput.value = filenamePrefix;
+
+        let filename = String(this.composeFilenameInput?.value || "").trim();
+        if (!filename) filename = this._composeDefaultFilename();
+        if (!filename.toLowerCase().endsWith(".mp4")) filename += ".mp4";
+        filename = filename.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/[. ]+$/g, "");
+        if (!filename.toLowerCase().endsWith(".mp4")) filename += ".mp4";
+        if (this.composeFilenameInput) this.composeFilenameInput.value = filename;
+
+        this._saveToWidgets();
+        const project = this._buildProject();
+        this._composeBusy = true;
+        if (this.composeRunBtn) this.composeRunBtn.disabled = true;
+        this._setComposeStatus("正在合成，请稍候…");
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/compose_video"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    project,
+                    filename_prefix: filenamePrefix,
+                    filename,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || `合成失败（HTTP ${response.status}）`);
+
+            const outName = data.filename || filename;
+            const sub = String(data.subfolder || "").replace(/^\/+|\/+$/g, "");
+            const rel = sub ? `${sub}/${outName}` : outName;
+            this._setComposeStatus(`已保存到 ComfyUI/output/${rel}`, { ok: true });
+        } catch (error) {
+            if (error?.name === "AbortError") {
+                this._setComposeStatus("");
+                return;
+            }
+            this._setComposeStatus(error instanceof Error ? error.message : String(error), { error: true });
+        } finally {
+            this._composeBusy = false;
+            if (this.composeRunBtn) this.composeRunBtn.disabled = false;
+        }
     }
 
     async _exportAsZip() {
@@ -1392,6 +1478,30 @@ export class CapTimelineEditorApp {
               <div class="cat-te-output-videos-body"></div>
             </div>
           </div>
+          <div class="cat-te-modal-backdrop cat-te-compose-modal" hidden>
+            <div class="cat-te-modal cat-te-compose-dialog">
+              <div class="cat-te-modal-header">
+                <span>合成视频</span>
+                <button type="button" class="cat-te-modal-close cat-te-compose-close" title="关闭">${iconHtml("close", 16)}</button>
+              </div>
+              <div class="cat-te-compose-body">
+                <label class="cat-te-compose-field">
+                  <span>文件名前缀</span>
+                  <input class="cat-te-compose-prefix" type="text" value="cap_timeline_compose/" />
+                </label>
+                <label class="cat-te-compose-field">
+                  <span>文件名</span>
+                  <input class="cat-te-compose-filename" type="text" />
+                </label>
+                <p class="cat-te-compose-hint">前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。需要本机已安装 ffmpeg。</p>
+                <div class="cat-te-compose-status" hidden></div>
+              </div>
+              <div class="cat-te-compose-actions">
+                <button type="button" class="cat-te-btn cat-te-compose-cancel">取消</button>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-compose-run">开始合成</button>
+              </div>
+            </div>
+          </div>
           <div class="cat-te-modal-backdrop cat-te-add-material-modal" hidden>
             <div class="cat-te-modal cat-te-add-material-dialog">
               <div class="cat-te-modal-header">
@@ -1644,6 +1754,11 @@ export class CapTimelineEditorApp {
         this.outputVideosModal = el.querySelector(".cat-te-output-videos-modal");
         this.outputVideosBody = el.querySelector(".cat-te-output-videos-body");
         this.outputVideosFilter = el.querySelector(".cat-te-output-videos-filter");
+        this.composeModal = el.querySelector(".cat-te-compose-modal");
+        this.composePrefixInput = el.querySelector(".cat-te-compose-prefix");
+        this.composeFilenameInput = el.querySelector(".cat-te-compose-filename");
+        this.composeStatus = el.querySelector(".cat-te-compose-status");
+        this.composeRunBtn = el.querySelector(".cat-te-compose-run");
         this.aiOptimizeModal = el.querySelector(".cat-te-ai-optimize-modal");
         this.aiOptimizeTitle = el.querySelector(".cat-te-ai-optimize-title");
         this.aiModelSelect = el.querySelector(".cat-te-ai-model");
@@ -1830,6 +1945,9 @@ export class CapTimelineEditorApp {
         this.genVideoDeleteBtn?.addEventListener("click", () => this._deleteCurrentGenVideo());
         el.querySelector(".cat-te-output-videos-close")?.addEventListener("click", () => this._closeOutputVideosPicker());
         this.outputVideosFilter?.addEventListener("input", () => this._renderOutputVideosPicker());
+        el.querySelector(".cat-te-compose-close")?.addEventListener("click", () => this._closeComposeModal());
+        el.querySelector(".cat-te-compose-cancel")?.addEventListener("click", () => this._closeComposeModal());
+        this.composeRunBtn?.addEventListener("click", () => void this._runComposeVideoExport());
         this.mediaPreviewDesc?.addEventListener("input", () => this._saveMediaPreviewMeta());
         this.mediaPreviewDesc?.addEventListener("change", () => this._saveMediaPreviewMeta());
         this.mediaPreviewDesc?.addEventListener("blur", () => this._saveMediaPreviewMeta());

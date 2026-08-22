@@ -53,7 +53,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 ### Project chrome
 
 - Editable project name
-- **Import** / **Export**: directory package or ZIP (all media + `project.json`)
+- **Import** / **Export**: directory package or ZIP (all media + `project.json`); **Compose Video** writes under `output/` via prefix (default `cap_timeline_compose/`) as `projectName_yyyyMMdd_hhmmss.mp4`
 - Close returns to the ComfyUI graph
 
 ---
