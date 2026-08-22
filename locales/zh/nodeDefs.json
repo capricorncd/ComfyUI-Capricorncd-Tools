@@ -46,6 +46,7 @@
       "fps":            { "name": "帧率" },
       "width":          { "name": "宽度" },
       "height":         { "name": "高度" },
+      "swap_wh":        { "name": "交换宽高" },
       "global_prompt":  { "name": "全局提示词" },
       "project_version":{ "name": "项目版本" },
       "project_json":   { "name": "项目数据" },
@@ -78,11 +79,15 @@
       "first_frame": { "name": "首帧" },
       "last_frame":  { "name": "尾帧" },
       "prompt":      { "name": "提示词" },
-      "run_prefix":  { "name": "运行前缀" },
+      "run_timestamp": { "name": "运行时间戳" },
       "generate_preview_video": { "name": "生成预览时长视频" },
       "from_start":  { "name": "FROM开始" },
       "from_preview_start": { "name": "FROM预览开始" },
-      "seq_filename_prefix": { "name": "序列帧合成前缀" }
+      "seq_filename_prefix": { "name": "序列帧合成前缀" },
+      "images": { "name": "图片" },
+      "clip_role": { "name": "类型" },
+      "agent": { "name": "Agent" },
+      "ai_prompt": { "name": "AI提示词" }
     }
   },
 
@@ -241,6 +246,47 @@
       "negative_prompt":   { "name": "负面提示词" },
       "scene_prompt":      { "name": "场景提示词" },
       "effective_length":  { "name": "有效提示词长度" }
+    }
+  },
+
+  "CAP_ClipPromptVL": {
+    "display_name": "Clip Prompt VL",
+    "inputs": {
+      "model": { "name": "模型" },
+      "output_language": { "name": "输出语言" },
+      "system_prompt": { "name": "Agent提示词" },
+      "skill": { "name": "Prompt Skill" },
+      "user_prompt": { "name": "用户提示词" },
+      "keep_model_loaded": { "name": "保持模型加载" },
+      "max_new_tokens": { "name": "最大令牌数" },
+      "images": { "name": "图片" },
+      "video": { "name": "视频帧" }
+    },
+    "outputs": {
+      "prompt": { "name": "提示词" }
+    }
+  },
+
+  "CAP_MiniMaxH3ReferenceToVideo": {
+    "display_name": "MiniMaxH3",
+    "inputs": {
+      "clip": { "name": "CLIP" },
+      "vae": { "name": "VAE" },
+      "audio_vae": { "name": "音频VAE" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "ref_image_size": { "name": "参考图尺寸" },
+      "data_json": { "name": "配置数据" },
+      "index": { "name": "索引" }
+    },
+    "outputs": {
+      "positive": { "name": "正向" },
+      "latent": { "name": "Latent" },
+      "total_frame_count": { "name": "总帧数" },
+      "prompt": { "name": "提示词" },
+      "images": { "name": "图片" },
+      "videos": { "name": "视频" },
+      "audio": { "name": "音频" }
     }
   },
 

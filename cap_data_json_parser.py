@@ -30,26 +30,32 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING")
     RETURN_NAMES = (
         "audio",
         "frame_count",
         "first_frame",
         "last_frame",
         "prompt",
-        "run_prefix",
+        "run_timestamp",
         "generate_preview_video",
         "from_start",
         "from_preview_start",
         "seq_filename_prefix",
+        "images",
+        "clip_role",
+        "agent",
+        "ai_prompt",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "Parse data_json from Audio Timeline or Timeline Editor and extract a clip by index. "
         "Outputs the clip audio segment, frame count, first/last keyframe images, prompt, "
-        "run_prefix, generate_preview_video, FROM_ tags, and seq_filename_prefix "
-        "(run_prefix/from_start or run_prefix/index) for Seq To Video."
+        "run_timestamp, generate_preview_video, FROM_ tags, seq_filename_prefix "
+        "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
+        "images (all clip images in editor order as one IMAGE batch), "
+        "clip_role, agent, and ai_prompt."
     )
 
     @classmethod
@@ -109,14 +115,43 @@ class CAP_DataJsonClipParser:
     def _load_image(self, path: str) -> torch.Tensor | None:
         if not path or not os.path.isfile(path):
             return None
-        img = Image.open(path).convert("RGB")
+        try:
+            img = Image.open(path).convert("RGB")
+        except Exception:
+            return None
         arr = np.array(img).astype(np.float32) / 255.0
         return torch.from_numpy(arr).unsqueeze(0)
+
+    def _match_image_size(self, image: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        if image.shape[1] == height and image.shape[2] == width:
+            return image
+        nchw = image.permute(0, 3, 1, 2)
+        nchw = torch.nn.functional.interpolate(
+            nchw, size=(height, width), mode="bilinear", align_corners=False,
+        )
+        return nchw.permute(0, 2, 3, 1)
+
+    def _load_images_batch(self, refs, materials: dict, blank: torch.Tensor) -> torch.Tensor:
+        frames = []
+        for ref in refs:
+            img = self._load_image(self._ref_file(ref, materials))
+            if img is not None:
+                frames.append(img)
+        if not frames:
+            return blank
+        height, width = int(frames[0].shape[1]), int(frames[0].shape[2])
+        aligned = [self._match_image_size(frame, height, width) for frame in frames]
+        return torch.cat(aligned, dim=0)
 
     def _clip_use_global_prompt(self, clip: dict) -> bool:
         if "use_global_prompt" in clip:
             return bool(clip["use_global_prompt"])
         return not bool(self._strip_comment_lines(clip.get("prompt") or "").strip())
+
+    def _clip_use_ai_prompt(self, clip: dict) -> bool:
+        if isinstance(clip, dict) and "use_ai_prompt" in clip:
+            return bool(clip["use_ai_prompt"])
+        return True
 
     def _strip_comment_lines(self, text: str) -> str:
         return "\n".join(
@@ -124,14 +159,40 @@ class CAP_DataJsonClipParser:
             if not line.startswith("#")
         )
 
-    def _compose_prompt(self, clip: dict, global_prompt: str) -> str:
+    def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None) -> str:
+        if self._clip_use_ai_prompt(clip):
+            ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
+            if ai_prompt:
+                return ai_prompt
         clip_prompt = self._strip_comment_lines(clip.get("prompt") or "")
         global_prompt = self._strip_comment_lines(global_prompt)
-        if not self._clip_use_global_prompt(clip):
-            return clip_prompt
-        if global_prompt and clip_prompt:
-            return f"{global_prompt}\n{clip_prompt}"
-        return global_prompt or clip_prompt
+        parts = []
+        if self._clip_use_global_prompt(clip) and global_prompt.strip():
+            parts.append(global_prompt.strip())
+        if clip_prompt.strip():
+            parts.append(clip_prompt.strip())
+        materials = materials if isinstance(materials, dict) else {}
+        for ref in self._ref_list(clip.get("images")):
+            if not self._ref_use_media_prompt(ref):
+                continue
+            mid = self._ref_id(ref)
+            row = materials.get(mid) if mid else None
+            text = ""
+            if isinstance(row, dict):
+                text = self._strip_comment_lines(row.get("prompt") or "").strip()
+            if text:
+                parts.append(text)
+        return "\n".join(part for part in parts if part)
+
+    def _ref_id(self, ref) -> str:
+        if isinstance(ref, dict):
+            return str(ref.get("id") or "").strip()
+        return str(ref or "").strip()
+
+    def _ref_use_media_prompt(self, ref) -> bool:
+        if isinstance(ref, dict):
+            return ref.get("use_media_prompt") is not False
+        return True
 
     def _frame_count(self, start_ms: int, end_ms: int, fps: float) -> int:
         duration_ms = max(0, int(end_ms) - int(start_ms))
@@ -185,7 +246,7 @@ class CAP_DataJsonClipParser:
             return self._trim(waveform, sample_rate, abs_start_ms, abs_end_ms)
         return self._silent_audio(44100, duration_ms)
 
-    def _clip_audio_from_audios(self, clip: dict, trim_offset: int, sample_rate: int = 44100):
+    def _clip_audio_from_audios(self, clip: dict, trim_offset: int, sample_rate: int = 44100, materials: dict | None = None):
         clip_start_ms = int(clip.get("start_ms", 0))
         clip_end_ms = int(clip.get("end_ms", clip_start_ms))
         clip_duration_ms = max(1, clip_end_ms - clip_start_ms)
@@ -198,11 +259,12 @@ class CAP_DataJsonClipParser:
 
         mixed = torch.zeros(1, 2, n_out)
         used = False
+        materials = materials if isinstance(materials, dict) else {}
 
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            path = os.path.normpath(self._resolve_file_path(row.get("file"), str(row.get("location") or "assets")))
+            path = os.path.normpath(self._audio_row_path(row, materials))
             if not path or not os.path.isfile(path):
                 continue
 
@@ -235,17 +297,76 @@ class CAP_DataJsonClipParser:
             return self._silent_audio(sample_rate, output_ms)
         return self._pack(mixed, sample_rate)
 
-    def _seq_filename_prefix(self, run_prefix: str, from_start: str, index: int, mode: str) -> str:
-        """Build Seq-To-Video filename_prefix: run_prefix/from_start or run_prefix/index."""
+    def _seq_filename_prefix(self, run_timestamp: str, from_start: str, index: int, mode: str) -> str:
+        """Build Seq-To-Video filename_prefix: run_timestamp/from_start or run_timestamp/index."""
         mode = str(mode or "from_start").strip().lower()
         if mode == "index":
             leaf = f"{max(0, int(index)):04d}"
         else:
             leaf = str(from_start or "").strip() or f"{max(0, int(index)):04d}"
-        prefix = str(run_prefix or "").strip().replace("\\", "/").strip("/")
+        prefix = str(run_timestamp or "").strip().replace("\\", "/").strip("/")
         if prefix:
             return f"{prefix}/{leaf}"
         return leaf
+
+    def _materials_by_id(self, data: dict) -> dict:
+        out = {}
+        rows = data.get("materials") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            return out
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            mid = str(row.get("id") or "").strip()
+            if mid:
+                out[mid] = row
+        return out
+
+    def _ref_list(self, value) -> list:
+        if value is None or value == "":
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    def _ref_file(self, ref, materials: dict) -> str:
+        if isinstance(ref, dict):
+            path = str(ref.get("file") or "").strip()
+            mid = str(ref.get("id") or "").strip()
+            if not path and mid and mid in materials:
+                path = str(materials[mid].get("file") or "").strip()
+            return path
+        s = str(ref or "").strip()
+        if not s:
+            return ""
+        if s in materials:
+            return str(materials[s].get("file") or "").strip()
+        return s
+
+    def _audio_row_path(self, row: dict, materials: dict) -> str:
+        mid = str(row.get("id") or "").strip()
+        mat = materials.get(mid) if mid else None
+        location = "input"
+        if isinstance(mat, dict):
+            path = str(mat.get("file") or "").strip()
+            location = str(mat.get("location") or row.get("location") or "input")
+            if path:
+                return self._resolve_file_path(path, location)
+        path = str(row.get("file") or "").strip()
+        if path in materials:
+            mat = materials[path]
+            return self._resolve_file_path(
+                str(mat.get("file") or path),
+                str(mat.get("location") or row.get("location") or "input"),
+            )
+        return self._resolve_file_path(path, str(row.get("location") or "assets"))
+
+    def _first_loadable_image(self, refs, materials: dict):
+        for ref in refs:
+            img = self._load_image(self._ref_file(ref, materials))
+            if img is not None:
+                return img
+        return None
 
     def execute(self, data_json: str, index: int, trim_offset: int = 1, seq_name_mode: str = "from_start"):
         try:
@@ -261,7 +382,8 @@ class CAP_DataJsonClipParser:
 
         fps = max(1.0, float(data.get("fps", 24.0)))
         global_prompt = data.get("global_prompt", "")
-        run_prefix = str(data.get("run_prefix") or "").strip()
+        run_timestamp = str(data.get("run_timestamp") or data.get("run_prefix") or "").strip()
+        materials = self._materials_by_id(data)
 
         clip = clips[index] if clips and 0 <= index < len(clips) else {}
         if not isinstance(clip, dict):
@@ -270,7 +392,7 @@ class CAP_DataJsonClipParser:
         clip_start_ms = int(clip.get("start_ms", 0) or 0)
         clip_end_ms = int(clip.get("end_ms", clip_start_ms) or clip_start_ms)
         frame_count = self._frame_count(clip_start_ms, clip_end_ms, fps)
-        prompt = self._compose_prompt(clip, global_prompt)
+        prompt = self._compose_prompt(clip, global_prompt, materials)
         generate_preview_video = bool(clip.get("generate_preview_video", False))
 
         preview_start_ms = clip.get("preview_start_ms", None)
@@ -287,20 +409,27 @@ class CAP_DataJsonClipParser:
 
         from_start = self._from_tag(clip_start_ms, frame_count, fps)
         from_preview_start = self._from_tag(preview_start_ms, preview_frame_count, fps)
-        seq_filename_prefix = self._seq_filename_prefix(run_prefix, from_start, index, seq_name_mode)
+        seq_filename_prefix = self._seq_filename_prefix(run_timestamp, from_start, index, seq_name_mode)
 
         if self._uses_master_audio(data, clip):
             audio_out = self._clip_audio_from_master(data, clip, trim_offset)
         else:
-            audio_out = self._clip_audio_from_audios(clip, trim_offset)
+            audio_out = self._clip_audio_from_audios(clip, trim_offset, materials=materials)
 
         blank = torch.zeros(1, 64, 64, 3)
-        first_path = str(clip.get("start_image") or "")
-        last_path = str(clip.get("end_image") or "")
-        _fi = self._load_image(first_path)
-        _li = self._load_image(last_path)
-        first_frame = _fi if _fi is not None else blank
-        last_frame = _li if _li is not None else blank
+        refs = self._ref_list(clip.get("images"))
+        if not refs:
+            refs = self._ref_list(clip.get("start_image")) + self._ref_list(clip.get("end_image"))
+        first_frame = self._first_loadable_image(refs, materials)
+        last_frame = self._first_loadable_image(list(reversed(refs)), materials)
+        if first_frame is None:
+            first_frame = blank
+        if last_frame is None:
+            last_frame = blank
+        images = self._load_images_batch(refs, materials, blank)
+        clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
+        agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
+        ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
 
         return (
             audio_out,
@@ -308,11 +437,15 @@ class CAP_DataJsonClipParser:
             first_frame,
             last_frame,
             prompt,
-            run_prefix,
+            run_timestamp,
             generate_preview_video,
             from_start,
             from_preview_start,
             seq_filename_prefix,
+            images,
+            clip_role,
+            agent,
+            ai_prompt,
         )
 
 

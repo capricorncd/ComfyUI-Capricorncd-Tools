@@ -11,7 +11,113 @@ import re
 import torch
 
 from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines
+from .cap_clip_prompt_vl import clear_clip_prompt_vl
+from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_project, resolve_clip_media
 from .timecode import resolve_media_path
+
+
+def _use_media_prompt(flags, index: int) -> bool:
+    if not isinstance(flags, list) or index >= len(flags):
+        return True
+    return flags[index] is not False
+
+
+def _media_enabled(flags, index: int) -> bool:
+    if not isinstance(flags, list) or index >= len(flags):
+        return True
+    return flags[index] is not False
+
+
+def _clip_visual_entries(project: dict, clip: dict) -> list[dict]:
+    rows = resolve_clip_media(project, clip)
+    visual = [
+        row for row in (rows or [])
+        if isinstance(row, dict) and str(row.get("kind") or "image").lower() != "audio"
+    ]
+    prompt_flags = clip.get("use_media_prompts") if isinstance(clip, dict) else None
+    enabled_flags = clip.get("media_enabled") if isinstance(clip, dict) else None
+    out = []
+    for index, row in enumerate(visual):
+        out.append({
+            "row": row,
+            "id": str(row.get("id") or ""),
+            "enabled": _media_enabled(enabled_flags, index),
+            "use_prompt": _use_media_prompt(prompt_flags, index),
+        })
+    return out
+
+
+def _clip_image_refs(entries: list) -> list[dict]:
+    out = []
+    for entry in entries or []:
+        mid = str(entry.get("id") or "").strip()
+        if not entry.get("enabled") or not mid:
+            continue
+        out.append({
+            "id": mid,
+            "use_media_prompt": entry.get("use_prompt") is not False,
+        })
+    return out
+
+
+_CLIP_ROLES = ("multi_ref", "first_last", "t2v", "video_ref", "video_edit", "other")
+_CLIP_AGENTS = ("MiniMaxH3", "LTX", "Bernini", "Wan", "other")
+
+
+def _clip_role_fields(clip: dict) -> tuple[str, str]:
+    role = str(clip.get("clip_role") or "multi_ref").strip()
+    if role not in _CLIP_ROLES:
+        role = "multi_ref"
+    custom = str(clip.get("clip_role_custom") or "").strip() if role == "other" else ""
+    return role, custom
+
+
+def _clip_agent_fields(clip: dict) -> tuple[str, str]:
+    agent = str(clip.get("agent") or "MiniMaxH3").strip()
+    if agent not in _CLIP_AGENTS:
+        agent = "MiniMaxH3"
+    custom = str(clip.get("agent_custom") or "").strip() if agent == "other" else ""
+    return agent, custom
+
+
+def _material_row(row: dict, resolve_media) -> dict | None:
+    if not isinstance(row, dict):
+        return None
+    file = str(row.get("file") or "").strip()
+    if not file:
+        return None
+    kind = str(row.get("kind") or "image").lower()
+    if kind not in ("image", "video", "audio"):
+        kind = "image"
+    mid = str(row.get("id") or "").strip() or _media_id_for(kind, file)
+    tags = row.get("tags") if isinstance(row.get("tags"), list) else []
+    out = {
+        "id": mid,
+        "kind": kind,
+        "file": resolve_media(file),
+        "name": str(row.get("name") or file.replace("\\", "/").rsplit("/", 1)[-1]),
+        "prompt": _strip_comment_lines(row.get("prompt") or ""),
+        "media_type": str(row.get("media_type") or "").strip(),
+        "tags": [str(tag).strip() for tag in tags if str(tag).strip()],
+        "location": str(row.get("location") or "input"),
+    }
+    try:
+        stars = int(row.get("stars"))
+    except (TypeError, ValueError):
+        stars = 0
+    if 1 <= stars <= 5:
+        out["stars"] = stars
+    return out
+
+
+def _add_material(materials: list, seen: set, row: dict, resolve_media) -> str:
+    material = _material_row(row, resolve_media)
+    if not material:
+        return ""
+    if material["id"] not in seen:
+        seen.add(material["id"])
+        materials.append(material)
+    return material["id"]
 
 
 def _read_project_version() -> str:
@@ -61,24 +167,37 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
-                "width": ("INT", {"default": 1280, "min": 64, "max": 8192, "step": 1}),
-                "height": ("INT", {"default": 720, "min": 64, "max": 8192, "step": 1}),
+                "fps": (
+                    "FLOAT",
+                    {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1},
+                ),
+                "width": ("INT", {"default": 1344, "min": 64, "max": 8192, "step": 1}),
+                "height": ("INT", {"default": 768, "min": 64, "max": 8192, "step": 1}),
+                "swap_wh": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "tooltip": "切换时交换当前 width / height（如 1280×720 → 720×1280）",
+                    },
+                ),
                 "global_prompt": ("STRING", {"default": "", "multiline": True}),
                 "project_version": ("STRING", {"default": PROJECT_VERSION}),
                 "project_json": (
                     "STRING",
                     {
-                        "default": json.dumps({
-                            "project_version": PROJECT_VERSION,
-                            "schema_version": PROJECT_VERSION,
-                            "name": "未命名项目",
-                            "resources": [],
-                            "settings": {},
-                            "tracks": [],
-                        }, ensure_ascii=False),
+                        "default": json.dumps(
+                            {
+                                "project_version": PROJECT_VERSION,
+                                "schema_version": SCHEMA_VERSION,
+                                "name": "未命名项目",
+                                "media": [],
+                                "settings": {},
+                                "tracks": [],
+                            },
+                            ensure_ascii=False,
+                        ),
                         "multiline": True,
-                        "tooltip": "Track-nested editable timeline project (schema version 1).",
+                        "tooltip": "Track-nested editable timeline project (schema version 2: media catalog + clip media_ids).",
                     },
                 ),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1}),
@@ -87,8 +206,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     @classmethod
     def IS_CHANGED(cls, fps, width, height, global_prompt,
-                   project_version, project_json, trim_offset, **_):
-        return fps, width, height, global_prompt, project_version, project_json, trim_offset
+                   project_version, project_json, trim_offset, swap_wh=False, **_):
+        return fps, width, height, global_prompt, project_version, project_json, trim_offset, bool(swap_wh)
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -126,6 +245,19 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 return os.path.normpath(again)
         return os.path.normpath(resolved or path)
 
+    @staticmethod
+    def _audio_slice_file(row: dict, materials: dict | None = None) -> str:
+        materials = materials if isinstance(materials, dict) else {}
+        mid = str(row.get("id") or "").strip()
+        if mid and mid in materials:
+            path = str(materials[mid].get("file") or "").strip()
+            if path:
+                return path
+        path = str(row.get("file") or "").strip()
+        if path and path in materials:
+            return str(materials[path].get("file") or path)
+        return path
+
     def _resample_waveform(self, waveform, sample_rate, target_sample_rate):
         if sample_rate == target_sample_rate:
             return waveform
@@ -155,6 +287,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         duration_ms: int,
         sample_rate: int = 44100,
         timeline_start_ms: int = 0,
+        materials: dict | None = None,
     ):
         n = max(1, int(round(duration_ms / 1000 * sample_rate)))
         mixed = torch.zeros(1, 2, n)
@@ -163,9 +296,13 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         for row in rows:
             if not isinstance(row, dict):
                 continue
+            mid = str(row.get("id") or "").strip()
+            mat = (materials or {}).get(mid) if mid else {}
+            if not isinstance(mat, dict):
+                mat = {}
             path = self._resolve_audio_file(
-                row.get("file"),
-                str(row.get("location") or "input"),
+                self._audio_slice_file(row, materials),
+                str(mat.get("location") or row.get("location") or "input"),
             )
             if not path:
                 continue
@@ -232,6 +369,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         self,
         runtime_clips: list[dict],
         sample_rate: int = 44100,
+        materials: list | None = None,
     ):
         """Merge per-visual-segment audio in runtime order (gaps without visuals dropped).
 
@@ -241,6 +379,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         if not runtime_clips:
             return self._silent_audio(sample_rate, 1000)
 
+        mat_map = {
+            str(row["id"]): row
+            for row in (materials or [])
+            if isinstance(row, dict) and row.get("id")
+        }
         pieces = []
         for clip in runtime_clips:
             start = int(clip.get("start_ms", 0) or 0)
@@ -266,6 +409,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 dur_ms,
                 sample_rate,
                 timeline_start_ms=0,
+                materials=mat_map,
             )
             if mixed is None:
                 if rows:
@@ -286,19 +430,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         try:
             value = json.loads(raw or "{}")
         except (json.JSONDecodeError, TypeError):
-            return {"project_version": PROJECT_VERSION, "schema_version": PROJECT_VERSION, "settings": {}, "tracks": []}
+            value = {}
         if not isinstance(value, dict):
-            return {"project_version": PROJECT_VERSION, "schema_version": PROJECT_VERSION, "settings": {}, "tracks": []}
-        value["project_version"] = PROJECT_VERSION
-        value["schema_version"] = PROJECT_VERSION
+            value = {}
         value.setdefault("settings", {})
         value.setdefault("tracks", [])
-        value.setdefault("resources", [])
         value.setdefault("name", "未命名项目")
         if not isinstance(value["settings"], dict):
             value["settings"] = {}
         if not isinstance(value["tracks"], list):
             value["tracks"] = []
+        value = migrate_project(value)
+        value["project_version"] = PROJECT_VERSION
         return value
 
     @staticmethod
@@ -321,6 +464,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         return source if isinstance(source, dict) else {}
 
     @staticmethod
+    def _clip_media_rows(project: dict, clip: dict) -> list[dict]:
+        return resolve_clip_media(project, clip)
+
+    @classmethod
+    def _clip_media_file(cls, project: dict, clip: dict) -> str:
+        rows = cls._clip_media_rows(project, clip)
+        if rows:
+            return str(rows[0].get("file") or "")
+        source = cls._source(clip)
+        return str(source.get("file") or clip.get("audio_file") or clip.get("start_image") or "")
+
+    @staticmethod
     def _track_active(track: dict) -> bool:
         return track.get("enabled", True) is not False and track.get("visible", True) is not False
 
@@ -329,7 +484,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         # Match timeline playback: audio export ignores track visibility/eye toggle.
         return track.get("enabled", True) is not False
 
-    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media) -> list[dict]:
+    def _audio_slices(self, start_ms: int, end_ms: int, audio_clips: list[dict], resolve_media, project: dict, materials: list, seen: set) -> list[dict]:
         result = []
         for audio in audio_clips:
             audio_start, audio_end = self._clip_range(audio)
@@ -339,23 +494,28 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             source = self._source(audio)
             source_in = max(0, int(source.get("in_ms", 0) or 0))
-            file_name = str(
-                source.get("file")
-                or audio.get("audio_file")
-                or audio.get("start_image")
-                or ""
-            )
-            row = {
+            media_rows = resolve_clip_media(project, audio)
+            media = media_rows[0] if media_rows else None
+            if not isinstance(media, dict):
+                file_name = self._clip_media_file(project, audio)
+                if not file_name:
+                    continue
+                media = {
+                    "kind": str(source.get("kind") or "audio"),
+                    "file": file_name,
+                    "location": str(source.get("location") or "input"),
+                }
+            mid = _add_material(materials, seen, media, resolve_media)
+            if not mid:
+                continue
+            result.append({
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
-                "file": resolve_media(file_name, str(source.get("location") or "input")),
-                "location": "input",
+                "id": mid,
                 "source_start_ms": source_in + overlap_start - audio_start,
                 "source_end_ms": source_in + overlap_end - audio_start,
                 "clip_offset_ms": overlap_start - start_ms,
-            }
-            if row["file"]:
-                result.append(row)
+            })
         return result
 
     def _visual_segments(self, visual_clips: list[tuple[dict, dict, int]]) -> list[tuple[dict, int, int, int]]:
@@ -370,6 +530,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     def execute(self, fps, width, height, global_prompt,
                 project_version, project_json, trim_offset=1, **_):
+        clear_clip_prompt_vl()
         project = self._project(project_json)
         settings = project["settings"]
         fps = max(1.0, float(fps))
@@ -409,7 +570,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                     if clip.get("visible", True) is False:
                         continue
                     visual_clips.append((track, clip, z_index))
-                    if clip_type == "video" and clip.get("has_audio", False) and not clip.get("muted", False):
+                    media_rows = resolve_clip_media(project, clip)
+                    has_video_item = any(str(row.get("kind") or "").lower() == "video" for row in media_rows)
+                    source_kind = str(self._source(clip).get("kind") or clip_type).lower()
+                    is_video = clip_type == "video" or source_kind == "video" or has_video_item
+                    if is_video and clip.get("has_audio", False) and not clip.get("muted", False):
                         embedded = dict(clip)
                         embedded["source"] = dict(self._source(clip), kind="video")
                         audio_clips.append(embedded)
@@ -420,10 +585,14 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             return resolve_media_path(name, assets_dir="", location="input")
 
         runtime_clips = []
+        materials = []
+        seen_materials = set()
         for index, (clip, start, end, z_index) in enumerate(segments, start=1):
-            source = self._source(clip)
-            start_image = str(source.get("file") or clip.get("start_image") or "")
-            end_image = str(clip.get("end_image") or "")
+            entries = _clip_visual_entries(project, clip)
+            for entry in entries:
+                if not entry.get("enabled"):
+                    continue
+                _add_material(materials, seen_materials, entry.get("row") or {}, resolve_media)
             try:
                 head_sec = max(0, int(clip.get("head_extend_sec", 0) or 0))
             except (TypeError, ValueError):
@@ -440,10 +609,16 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             ext_end = int(end) + tail_ms
             if ext_end <= ext_start:
                 ext_end = ext_start + 1
+            clip_role, clip_role_custom = _clip_role_fields(clip)
+            agent, agent_custom = _clip_agent_fields(clip)
             runtime_clips.append({
                 "id": f"runtime_{index:04d}",
                 "source_clip_id": str(clip.get("id", "")),
                 "clip_type": str(clip.get("type") or "image"),
+                "clip_role": clip_role,
+                "clip_role_custom": clip_role_custom,
+                "agent": agent,
+                "agent_custom": agent_custom,
                 "start_ms": ext_start,
                 "end_ms": ext_end,
                 "preview_start_ms": int(start),
@@ -451,12 +626,15 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "head_extend_sec": head_sec,
                 "tail_extend_sec": tail_sec,
                 "generate_preview_video": bool(clip.get("generate_preview_video", False)),
-                "start_image": resolve_media(start_image),
-                "end_image": resolve_media(end_image) if end_image else "",
-                "prompt": _strip_comment_lines(clip.get("prompt") or ""),
+                "images": _clip_image_refs(entries),
+                "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
+                "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),
                 "use_global_prompt": _clip_use_global_prompt(clip),
+                "use_ai_prompt": clip.get("use_ai_prompt", True) is not False,
                 "z_index": z_index,
-                "audios": self._audio_slices(ext_start, ext_end, audio_clips, resolve_media),
+                "audios": self._audio_slices(
+                    ext_start, ext_end, audio_clips, resolve_media, project, materials, seen_materials,
+                ),
             })
 
         total_frame_count = max(1, sum(
@@ -465,11 +643,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         ))
         # Concatenate audio for each visual runtime segment (no gap filler),
         # matching the frame sequence / total_frame_count timeline.
-        clips_audio_out = self._concat_runtime_clips_audio(runtime_clips)
+        clips_audio_out = self._concat_runtime_clips_audio(runtime_clips, materials=materials)
         frame_seq_dir = self._prepare_frame_seq_dir()
         # Filesystem-safe stamp shared by this execute; downstream nodes can
         # use it as a unified filename / folder prefix.
-        run_prefix = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         data_json = json.dumps({
             "project_version": PROJECT_VERSION,
             "schema_version": PROJECT_VERSION,
@@ -478,7 +656,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "height": height,
             "global_prompt": global_prompt,
             "total_frame_count": total_frame_count,
-            "run_prefix": run_prefix,
+            "run_timestamp": run_timestamp,
+            "materials": materials,
             "clips": runtime_clips,
         }, ensure_ascii=False)
 

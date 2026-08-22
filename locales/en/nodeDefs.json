@@ -46,6 +46,7 @@
       "fps":            { "name": "FPS" },
       "width":          { "name": "Width" },
       "height":         { "name": "Height" },
+      "swap_wh":        { "name": "Swap Dimensions" },
       "global_prompt":  { "name": "Global Prompt" },
       "project_version":{ "name": "Project Version" },
       "project_json":   { "name": "Project JSON" },
@@ -78,11 +79,15 @@
       "first_frame": { "name": "First Frame" },
       "last_frame":  { "name": "Last Frame" },
       "prompt":      { "name": "Prompt" },
-      "run_prefix":  { "name": "Run Prefix" },
+      "run_timestamp": { "name": "Run Timestamp" },
       "generate_preview_video": { "name": "Generate Preview Video" },
       "from_start":  { "name": "FROM Start" },
       "from_preview_start": { "name": "FROM Preview Start" },
-      "seq_filename_prefix": { "name": "Seq Filename Prefix" }
+      "seq_filename_prefix": { "name": "Seq Filename Prefix" },
+      "images": { "name": "Images" },
+      "clip_role": { "name": "Clip Role" },
+      "agent": { "name": "Agent" },
+      "ai_prompt": { "name": "AI Prompt" }
     }
   },
 
@@ -241,6 +246,47 @@
       "negative_prompt":   { "name": "Negative Prompt" },
       "scene_prompt":      { "name": "Scene Prompt" },
       "effective_length":  { "name": "Effective Length" }
+    }
+  },
+
+  "CAP_ClipPromptVL": {
+    "display_name": "Clip Prompt VL",
+    "inputs": {
+      "model": { "name": "Model" },
+      "output_language": { "name": "Output Language" },
+      "system_prompt": { "name": "Agent Prompt" },
+      "skill": { "name": "Prompt Skill" },
+      "user_prompt": { "name": "User Prompt" },
+      "keep_model_loaded": { "name": "Keep Model Loaded" },
+      "max_new_tokens": { "name": "Max Tokens" },
+      "images": { "name": "Images" },
+      "video": { "name": "Video Frames" }
+    },
+    "outputs": {
+      "prompt": { "name": "Prompt" }
+    }
+  },
+
+  "CAP_MiniMaxH3ReferenceToVideo": {
+    "display_name": "MiniMaxH3",
+    "inputs": {
+      "clip": { "name": "CLIP" },
+      "vae": { "name": "VAE" },
+      "audio_vae": { "name": "Audio VAE" },
+      "width": { "name": "Width" },
+      "height": { "name": "Height" },
+      "ref_image_size": { "name": "Ref Image Size" },
+      "data_json": { "name": "Data JSON" },
+      "index": { "name": "Index" }
+    },
+    "outputs": {
+      "positive": { "name": "Positive" },
+      "latent": { "name": "Latent" },
+      "total_frame_count": { "name": "Total Frames" },
+      "prompt": { "name": "Prompt" },
+      "images": { "name": "Images" },
+      "videos": { "name": "Videos" },
+      "audio": { "name": "Audio" }
     }
   },
 

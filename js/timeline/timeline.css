@@ -176,16 +176,6 @@
   color: #f5d9a8;
 }
 
-.tl-btn-insert-material {
-  background: rgba(91, 180, 255, 0.12);
-  border-color: rgba(91, 180, 255, 0.35);
-  color: #9fd0ff;
-}
-.tl-btn-insert-material:hover {
-  background: rgba(91, 180, 255, 0.22);
-  color: #c8e8ff;
-}
-
 .tl-btn-history:disabled {
   opacity: 0.35;
   cursor: default;
@@ -636,6 +626,19 @@
   background: linear-gradient(180deg, var(--tl-red) 0%, rgba(255,68,102,0.3) 100%);
   pointer-events: none;
 }
+
+.tl-snap-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-left: 1px dashed rgba(210, 200, 255, 0.9);
+  pointer-events: none;
+  z-index: 45;
+  will-change: transform;
+}
+.tl-snap-guide[hidden] { display: none !important; }
 
 /* ── Responsive tweaks ────────────────────────────────────── */
 

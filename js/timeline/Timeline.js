@@ -6,6 +6,7 @@ import { TimeRuler } from './TimeRuler.js';
 import { PlayHead } from './PlayHead.js';
 
 const BASE_PPS = 100; // pixels per second at zoom = 1
+const SNAP_EDGE_PX = 8;
 
 export class Timeline extends EventEmitter {
   /**
@@ -76,6 +77,97 @@ export class Timeline extends EventEmitter {
   _snapTime(secs) {
     const fps = Math.max(1, this.fps || 24);
     return Math.round(secs * fps) / fps;
+  }
+
+  _seekSnapTime() {
+    return this._snapTime(this.currentTime);
+  }
+
+  _clipSnapTimes(excludeClip) {
+    const times = [];
+    for (const track of this.tracks) {
+      for (const clip of track.clips) {
+        if (excludeClip && clip.id === excludeClip.id) continue;
+        times.push(clip.startTime, clip.endTime);
+      }
+    }
+    times.push(this._seekSnapTime());
+    return times;
+  }
+
+  /**
+   * Magnetically snap a moving clip's start so its start or end aligns with
+   * another clip edge or the seek line. Returns the (possibly unchanged) start
+   * and the guide time to draw, or null when nothing is in range.
+   */
+  _snapMoveToClipEdges(clip, desiredStart) {
+    const threshold = SNAP_EDGE_PX / this.pixelsPerSecond;
+    if (!(threshold > 0)) return { start: desiredStart, guide: null };
+    const dur = clip.duration;
+    const desiredEnd = desiredStart + dur;
+    let bestDist = threshold;
+    let bestStart = desiredStart;
+    let guide = null;
+    for (const t of this._clipSnapTimes(clip)) {
+      const dStart = Math.abs(desiredStart - t);
+      if (dStart < bestDist) {
+        bestDist = dStart;
+        bestStart = t;
+        guide = t;
+      }
+      const dEnd = Math.abs(desiredEnd - t);
+      if (dEnd < bestDist) {
+        bestDist = dEnd;
+        bestStart = t - dur;
+        guide = t;
+      }
+    }
+    if (guide == null) return { start: desiredStart, guide: null };
+    return { start: this._snapTime(bestStart), guide };
+  }
+
+  _snapEdgeTime(clip, time) {
+    const threshold = SNAP_EDGE_PX / this.pixelsPerSecond;
+    if (!(threshold > 0)) return time;
+    let bestDist = threshold;
+    let best = time;
+    for (const t of this._clipSnapTimes(clip)) {
+      const d = Math.abs(time - t);
+      if (d < bestDist) {
+        bestDist = d;
+        best = t;
+      }
+    }
+    return this._snapTime(best);
+  }
+
+  _alignedClipEdge(clip, time = null) {
+    const fps = Math.max(1, this.fps || 24);
+    const eps = 0.51 / fps;
+    const edges = time == null ? [clip.startTime, clip.endTime] : [time];
+    for (const t of this._clipSnapTimes(clip)) {
+      for (const edge of edges) {
+        if (Math.abs(edge - t) <= eps) return t;
+      }
+    }
+    return null;
+  }
+
+  _showSnapGuide(time) {
+    if (!Number.isFinite(time)) {
+      this._hideSnapGuide();
+      return;
+    }
+    if (!this._snapGuideEl) {
+      this._snapGuideEl = el('div', 'tl-snap-guide');
+      this._contentEl.appendChild(this._snapGuideEl);
+    }
+    this._snapGuideEl.hidden = false;
+    this._snapGuideEl.style.transform = `translateX(${time * this.pixelsPerSecond}px)`;
+  }
+
+  _hideSnapGuide() {
+    if (this._snapGuideEl) this._snapGuideEl.hidden = true;
   }
 
   /** Current playhead position as a frame index. */
@@ -790,6 +882,7 @@ export class Timeline extends EventEmitter {
 
   destroy() {
     this.pause();
+    this._hideSnapGuide();
     window.removeEventListener('keydown', this._onKey, true);
     this._ro?.disconnect();
     this.removeAllListeners();
