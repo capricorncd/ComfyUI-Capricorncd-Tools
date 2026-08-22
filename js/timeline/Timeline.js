@@ -79,6 +79,10 @@ export class Timeline extends EventEmitter {
     return Math.round(secs * fps) / fps;
   }
 
+  _seekSnapTime() {
+    return this._snapTime(this.currentTime);
+  }
+
   _clipSnapTimes(excludeClip) {
     const times = [];
     for (const track of this.tracks) {
@@ -87,13 +91,14 @@ export class Timeline extends EventEmitter {
         times.push(clip.startTime, clip.endTime);
       }
     }
+    times.push(this._seekSnapTime());
     return times;
   }
 
   /**
    * Magnetically snap a moving clip's start so its start or end aligns with
-   * another clip edge. Returns the (possibly unchanged) start and the guide
-   * time to draw, or null when nothing is in range.
+   * another clip edge or the seek line. Returns the (possibly unchanged) start
+   * and the guide time to draw, or null when nothing is in range.
    */
   _snapMoveToClipEdges(clip, desiredStart) {
     const threshold = SNAP_EDGE_PX / this.pixelsPerSecond;
