@@ -61,13 +61,6 @@ const CLIP_AGENTS = [
     { id: "Wan", label: "Wan" },
     { id: "other", label: "其他" },
 ];
-const AI_AUDIO_MODES = [
-    { id: "none", label: "不使用背景音频" },
-    { id: "lipsync", label: "数字人对口型" },
-    { id: "perform", label: "只表演不对口型" },
-    { id: "auto", label: "其他（根据音频自由发挥）" },
-];
-const AI_AUDIO_MODE_IDS = new Set(AI_AUDIO_MODES.map((row) => row.id));
 const MEDIA_ASSET_TYPES = [
     { id: "character", label: "角色" },
     { id: "scene", label: "场景" },
@@ -152,9 +145,6 @@ function defaultImageMeta(trackIndex = 0) {
         items: [],
         generatedVideos: [],
         previewMode: "media",
-        aiAudioMode: "",
-        aiGenerateBgm: null,
-        aiLyrics: null,
         useAiPrompt: true,
     };
 }
@@ -1563,24 +1553,6 @@ export class CapTimelineEditorApp {
                       </select>
                     </label>
                   </div>
-                  <div class="cat-te-ai-field">
-                    <span>背景音频</span>
-                    <select class="cat-te-ai-audio-mode">
-                      <option value="none">不使用背景音频</option>
-                      <option value="lipsync">数字人对口型</option>
-                      <option value="perform">只表演不对口型</option>
-                      <option value="auto">其他（根据音频自由发挥）</option>
-                    </select>
-                    <span class="cat-te-ai-audio-hint"></span>
-                    <label class="cat-te-clip-setting-check cat-te-ai-bgm-check">
-                      <input class="cat-te-ai-generate-bgm" type="checkbox" />
-                      <span>生成 BGM</span>
-                    </label>
-                    <label class="cat-te-ai-field cat-te-ai-lyrics-field">
-                      <span>歌词</span>
-                      <textarea class="cat-te-ai-lyrics" rows="4" placeholder="把歌曲歌词贴到这里。模型听不到音频，用歌词对齐镜头。"></textarea>
-                    </label>
-                  </div>
                   <label class="cat-te-ai-field">
                     <span>Agent 提示词</span>
                     <textarea class="cat-te-ai-system" rows="6"></textarea>
@@ -1763,11 +1735,6 @@ export class CapTimelineEditorApp {
         this.aiOptimizeTitle = el.querySelector(".cat-te-ai-optimize-title");
         this.aiModelSelect = el.querySelector(".cat-te-ai-model");
         this.aiLangSelect = el.querySelector(".cat-te-ai-lang");
-        this.aiAudioModeSelect = el.querySelector(".cat-te-ai-audio-mode");
-        this.aiAudioHint = el.querySelector(".cat-te-ai-audio-hint");
-        this.aiGenerateBgmCb = el.querySelector(".cat-te-ai-generate-bgm");
-        this.aiLyricsField = el.querySelector(".cat-te-ai-lyrics-field");
-        this.aiLyricsInput = el.querySelector(".cat-te-ai-lyrics");
         this.aiSystemInput = el.querySelector(".cat-te-ai-system");
         this.aiSkillInput = el.querySelector(".cat-te-ai-skill");
         this.skillPickBtn = el.querySelector(".cat-te-skill-pick-btn");
@@ -1970,10 +1937,6 @@ export class CapTimelineEditorApp {
             const lang = this._aiOutputLanguage();
             localStorage.setItem(STORAGE_AI_PROMPT_LANG, lang);
         });
-        this.aiAudioModeSelect?.addEventListener("change", () => this._onAiAudioModeChange());
-        this.aiGenerateBgmCb?.addEventListener("change", () => this._onAiGenerateBgmChange());
-        this.aiLyricsInput?.addEventListener("change", () => this._onAiLyricsChange());
-        this.aiLyricsInput?.addEventListener("blur", () => this._onAiLyricsChange());
         this.skillPickBtn?.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -5383,11 +5346,6 @@ export class CapTimelineEditorApp {
                 generatePreviewVideo: !!c.generate_preview_video,
                 generatedVideos: this._generatedVideosFromJson(c),
                 previewMode: this._previewModeFromJson(c),
-                aiAudioMode: AI_AUDIO_MODE_IDS.has(String(c.ai_audio_mode || "").trim())
-                    ? String(c.ai_audio_mode).trim()
-                    : "",
-                aiGenerateBgm: typeof c.generate_bgm === "boolean" ? c.generate_bgm : null,
-                aiLyrics: typeof c.ai_lyrics === "string" ? c.ai_lyrics : null,
             };
             if (first?.kind === "video") {
                 meta.sourceDuration = sourceDur;
@@ -8133,9 +8091,9 @@ export class CapTimelineEditorApp {
         return lines.join("\n").trim() || "（当前 clip 没有素材提示词）";
     }
 
-    _clipAiOptimizeFiles(clip, { includeTimelineAudio = false } = {}) {
+    _clipAiOptimizeFiles(clip) {
         const m = this._ensureClipMeta(clip);
-        const files = this._clipItems(m)
+        return this._clipItems(m)
             .filter((item) => item.enabled !== false)
             .map((item) => {
             const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
@@ -8150,157 +8108,6 @@ export class CapTimelineEditorApp {
                 use_prompt: item.useMediaPrompt !== false,
             };
         });
-        if (!includeTimelineAudio) return files;
-        for (const row of this._overlappingBackgroundAudio(clip)) {
-            if (files.some((item) => item.kind === "audio" && item.file === row.file)) continue;
-            files.push({
-                kind: "audio",
-                file: row.file,
-                location: row.location || "input",
-                prompt: row.prompt || "",
-                media_type: row.media_type || "",
-                tags: row.tags || [],
-                use_prompt: true,
-            });
-        }
-        return files;
-    }
-
-    _clipRange(clip) {
-        const start = Number(clip?.startTime) || 0;
-        const duration = Number(clip?.duration);
-        const end = Number.isFinite(Number(clip?.endTime))
-            ? Number(clip.endTime)
-            : start + (Number.isFinite(duration) ? duration : 0);
-        return { start, end };
-    }
-
-    _rangesOverlap(a0, a1, b0, b1) {
-        return a0 < b1 - 1e-6 && b0 < a1 - 1e-6;
-    }
-
-    _overlappingBackgroundAudio(clip) {
-        if (!clip || clip.track?.type === "audio") return [];
-        const { start, end } = this._clipRange(clip);
-        const out = [];
-        const seen = new Set();
-        for (const track of this._allAudioTracks()) {
-            if (track.muted) continue;
-            for (const audioClip of track.clips || []) {
-                const meta = this._meta.get(audioClip.id);
-                if (meta?.muted || meta?.disabled) continue;
-                const range = this._clipRange(audioClip);
-                if (!this._rangesOverlap(start, end, range.start, range.end)) continue;
-                const file = String(audioClip.src || "").trim();
-                if (!file || seen.has(`audio:${file}`)) continue;
-                seen.add(`audio:${file}`);
-                const media = (meta?.mediaId && this._findMediaById(meta.mediaId))
-                    || this._findMedia("audio", file);
-                const status = this._mediaStatus.get(`audio:${file}`);
-                out.push({
-                    file,
-                    location: status?.location || media?.location || "input",
-                    prompt: String(media?.prompt || ""),
-                    media_type: String(media?.media_type || ""),
-                    tags: Array.isArray(media?.tags) ? media.tags : [],
-                    name: file.split(/[\\/]/).pop() || file,
-                });
-            }
-        }
-        return out;
-    }
-
-    _resolvedAiAudioMode(clip, meta = null) {
-        const m = meta || (clip ? this._ensureClipMeta(clip) : null);
-        const saved = AI_AUDIO_MODE_IDS.has(String(m?.aiAudioMode || "").trim())
-            ? String(m.aiAudioMode).trim()
-            : "";
-        if (saved) return saved;
-        return this._overlappingBackgroundAudio(clip).length ? "auto" : "none";
-    }
-
-    _defaultAiGenerateBgm(mode, hasAudio) {
-        return !hasAudio || mode === "none";
-    }
-
-    _resolvedAiGenerateBgm(clip, meta = null, { reset = false } = {}) {
-        const m = meta || (clip ? this._ensureClipMeta(clip) : null);
-        const mode = this._resolvedAiAudioMode(clip, m);
-        const hasAudio = this._overlappingBackgroundAudio(clip).length > 0;
-        if (!reset && typeof m?.aiGenerateBgm === "boolean") return m.aiGenerateBgm;
-        return this._defaultAiGenerateBgm(mode, hasAudio);
-    }
-
-    _syncAiAudioModeUi(clip, { resetBgm = false } = {}) {
-        const hasAudio = this._overlappingBackgroundAudio(clip).length > 0;
-        const mode = this._resolvedAiAudioMode(clip);
-        if (this.aiAudioModeSelect) this.aiAudioModeSelect.value = mode;
-        if (this.aiAudioHint) {
-            if (!hasAudio) {
-                this.aiAudioHint.textContent = "当前 clip 时间段内没有背景音频";
-            } else {
-                const names = this._overlappingBackgroundAudio(clip).map((row) => row.name).join("、");
-                this.aiAudioHint.textContent = `检测到背景音频：${names}`;
-            }
-        }
-        const generateBgm = this._resolvedAiGenerateBgm(clip, null, { reset: resetBgm });
-        if (this.aiGenerateBgmCb) this.aiGenerateBgmCb.checked = generateBgm;
-        if (this.aiLyricsField) {
-            this.aiLyricsField.hidden = !hasAudio || mode === "none";
-        }
-        if (this.aiLyricsInput) this.aiLyricsInput.value = this._resolvedAiLyrics(clip);
-        if (clip && resetBgm) {
-            const meta = this._ensureClipMeta(clip);
-            meta.aiGenerateBgm = generateBgm;
-            this._meta.set(clip.id, meta);
-        }
-    }
-
-    _resolvedAiLyrics(clip, meta = null) {
-        const m = meta || (clip ? this._ensureClipMeta(clip) : null);
-        if (typeof m?.aiLyrics === "string") return m.aiLyrics;
-        return this._overlappingBackgroundAudio(clip)
-            .map((row) => String(row.prompt || "").trim())
-            .filter(Boolean)
-            .join("\n\n");
-    }
-
-    _onAiLyricsChange() {
-        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
-        if (!clip || clip.track?.type === "audio") return;
-        this._recordUndo();
-        const meta = this._ensureClipMeta(clip);
-        meta.aiLyrics = String(this.aiLyricsInput?.value || "");
-        this._meta.set(clip.id, meta);
-        this._saveToWidgets();
-    }
-
-    _onAiAudioModeChange() {
-        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
-        if (!clip || clip.track?.type === "audio") return;
-        const mode = AI_AUDIO_MODE_IDS.has(this.aiAudioModeSelect?.value)
-            ? this.aiAudioModeSelect.value
-            : "none";
-        this._recordUndo();
-        const meta = this._ensureClipMeta(clip);
-        meta.aiAudioMode = mode;
-        meta.aiGenerateBgm = this._defaultAiGenerateBgm(
-            mode,
-            this._overlappingBackgroundAudio(clip).length > 0,
-        );
-        this._meta.set(clip.id, meta);
-        this._saveToWidgets();
-        this._syncAiAudioModeUi(clip, { resetBgm: true });
-    }
-
-    _onAiGenerateBgmChange() {
-        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
-        if (!clip || clip.track?.type === "audio") return;
-        this._recordUndo();
-        const meta = this._ensureClipMeta(clip);
-        meta.aiGenerateBgm = !!this.aiGenerateBgmCb?.checked;
-        this._meta.set(clip.id, meta);
-        this._saveToWidgets();
     }
 
     _setAiOptimizeSrcTab(tab) {
@@ -8363,7 +8170,6 @@ export class CapTimelineEditorApp {
             this.aiSkillInput.value = localStorage.getItem(STORAGE_AI_PROMPT_SKILL) || "";
         }
         this._restoreAiOutputLanguage();
-        this._syncAiAudioModeUi(clip);
         this._setAiOptimizeSrcTab("clip");
         await this._loadAiOptimizeModels();
         await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
@@ -8495,21 +8301,6 @@ export class CapTimelineEditorApp {
         localStorage.setItem(STORAGE_AI_PROMPT_SKILL, skill);
         const outputLanguage = this._aiOutputLanguage();
         localStorage.setItem(STORAGE_AI_PROMPT_LANG, outputLanguage);
-        const fromSelect = AI_AUDIO_MODE_IDS.has(this.aiAudioModeSelect?.value)
-            ? this.aiAudioModeSelect.value
-            : "";
-        const audioMode = fromSelect || this._resolvedAiAudioMode(clip, meta);
-        const generateBgm = this.aiGenerateBgmCb
-            ? !!this.aiGenerateBgmCb.checked
-            : this._resolvedAiGenerateBgm(clip, meta);
-        const lyrics = this.aiLyricsField?.hidden
-            ? ""
-            : String(this.aiLyricsInput?.value || this._resolvedAiLyrics(clip, meta) || "").trim();
-        meta.aiAudioMode = audioMode;
-        meta.aiGenerateBgm = generateBgm;
-        meta.aiLyrics = this.aiLyricsField?.hidden ? meta.aiLyrics : String(this.aiLyricsInput?.value || "");
-        this._meta.set(clip.id, meta);
-        const useTimelineAudio = audioMode !== "none";
         const ac = new AbortController();
         this._aiOptimizeAbort = ac;
         this._setAiOptimizeBusy(true);
@@ -8522,13 +8313,13 @@ export class CapTimelineEditorApp {
                 output_language: outputLanguage,
                 agent: meta.agent || "MiniMaxH3",
                 clip_role: meta.clipRole || "multi_ref",
-                audio_mode: audioMode,
-                generate_bgm: generateBgm,
-                lyrics,
+                audio_mode: "none",
+                generate_bgm: false,
+                lyrics: "",
                 duration_sec: Number(clip.duration) || 0,
                 clip_prompt: String(meta.prompt || ""),
                 global_prompt: meta.useGlobalPrompt === false ? "" : this._readGlobalPromptFromWidget(),
-                files: this._clipAiOptimizeFiles(clip, { includeTimelineAudio: useTimelineAudio }),
+                files: this._clipAiOptimizeFiles(clip),
                 keep_loaded: false,
             };
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/optimize_clip_prompt"), {
@@ -8815,11 +8606,6 @@ export class CapTimelineEditorApp {
                     row.clip_role_custom = m.clipRole === "other" ? (m.clipRoleCustom || "") : "";
                     row.agent = m.agent || "MiniMaxH3";
                     row.agent_custom = m.agent === "other" ? (m.agentCustom || "") : "";
-                    row.ai_audio_mode = AI_AUDIO_MODE_IDS.has(String(m.aiAudioMode || "").trim())
-                        ? m.aiAudioMode
-                        : "";
-                    if (typeof m.aiGenerateBgm === "boolean") row.generate_bgm = m.aiGenerateBgm;
-                    if (typeof m.aiLyrics === "string") row.ai_lyrics = m.aiLyrics;
                     const generated = this._clipGeneratedVideos(m);
                     if (generated.length) {
                         row.generated_videos = generated.map((v) => ({
