@@ -1909,19 +1909,34 @@ export class CapTimelineEditorApp {
                   </div>
                 </div>
                 <div class="cat-te-compose-settings">
-                  <label class="cat-te-compose-field">
-                    <span>文件名前缀</span>
+                  <div class="cat-te-compose-field">
+                    <span class="cat-te-ai-field-label">
+                      文件名前缀
+                      <span class="cat-te-info-tip" tabindex="0" aria-label="文件名前缀说明">
+                        ${iconHtml("info", 12)}
+                        <span class="cat-te-info-tip-pop">
+                          前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。需要本机已安装 ffmpeg。
+                        </span>
+                      </span>
+                    </span>
                     <input class="cat-te-compose-prefix" type="text" value="cap_timeline_compose/" />
-                  </label>
+                  </div>
                   <label class="cat-te-compose-field">
                     <span>文件名</span>
                     <input class="cat-te-compose-filename" type="text" />
                   </label>
-                  <label class="cat-te-compose-check">
-                    <input class="cat-te-compose-ignore-audio" type="checkbox" />
-                    <span>忽略音频轨道</span>
-                  </label>
-                  <p class="cat-te-compose-hint">前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。勾选「忽略音频轨道」时不合并音频轨上的 clip（生成视频音轨仍会按禁音设置处理）。需要本机已安装 ffmpeg。</p>
+                  <div class="cat-te-compose-check-row">
+                    <label class="cat-te-compose-check">
+                      <input class="cat-te-compose-ignore-audio" type="checkbox" />
+                      <span>忽略音频轨道</span>
+                    </label>
+                    <span class="cat-te-info-tip" tabindex="0" aria-label="忽略音频轨道说明">
+                      ${iconHtml("info", 12)}
+                      <span class="cat-te-info-tip-pop">
+                        勾选后不合并音频轨上的 clip（生成视频音轨仍会按禁音设置处理）。
+                      </span>
+                    </span>
+                  </div>
 
                   <div class="cat-te-wm-section">
                     <div class="cat-te-wm-heading">水印</div>

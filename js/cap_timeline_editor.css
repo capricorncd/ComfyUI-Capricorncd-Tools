@@ -2559,6 +2559,11 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-compose-field textarea {
     resize: vertical;
 }
+.cat-te-compose-check-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
 .cat-te-compose-check {
     display: flex;
     align-items: center;
@@ -2572,12 +2577,6 @@ body.cat-te-media-dnd-over-tl {
     width: 14px;
     height: 14px;
     accent-color: #5b4eff;
-}
-.cat-te-compose-hint {
-    margin: 0;
-    font-size: 11px;
-    line-height: 1.45;
-    color: #6868a0;
 }
 .cat-te-compose-status {
     font-size: 12px;
@@ -2915,7 +2914,8 @@ body.cat-te-media-dnd-over-tl {
     left: 0;
     top: calc(100% + 6px);
     z-index: 30;
-    width: 300px;
+    /* TODO：太宽会被祖先元素的overflow截掉，显示不完整 */
+    width: 200px;
     padding: 8px 10px;
     background: #16162a;
     border: 1px solid #3a3a60;
