@@ -21,17 +21,53 @@ log = logging.getLogger(__name__)
 _VIDEO_EXTS = (".mp4", ".mov", ".webm", ".mkv", ".m4v")
 
 
+_FFMPEG_ERROR_MARKERS = (
+    "Error", "error", "Invalid", "Unable", "No such", "Conversion failed",
+    "Cannot", "cannot", "failed", "Failed",
+)
+
+
+def _extract_ffmpeg_error(stderr: str, limit: int = 4000) -> str:
+    """Pull the most relevant tail out of ffmpeg's stderr.
+
+    With many -i inputs (several clips + audio tracks + a watermark image),
+    ffmpeg's per-input banner text alone can run past a fixed last-N-chars
+    window, burying the actual fatal error (which is printed *after* all the
+    input banners). Search backwards for the last error-looking line instead
+    of blindly slicing the tail.
+    """
+    stderr = stderr or ""
+    lines = stderr.splitlines()
+    for i in range(len(lines) - 1, -1, -1):
+        if any(marker in lines[i] for marker in _FFMPEG_ERROR_MARKERS):
+            snippet = "\n".join(lines[max(0, i - 5):])
+            return snippet[-limit:]
+    return stderr[-limit:]
+
+
 def _run_ffmpeg(cmd: list) -> None:
-    kwargs: dict = {"capture_output": True, "text": True, "timeout": 1800}
+    kwargs: dict = {
+        "capture_output": True,
+        "text": True,
+        # ffmpeg's stderr can contain non-ASCII (Chinese filenames, embedded
+        # metadata, etc.) encoded as UTF-8. Without an explicit encoding,
+        # Python decodes subprocess output using the OS locale codepage
+        # (e.g. cp932 on some Windows setups), which raises inside the
+        # internal reader thread on those bytes and leaves stderr truncated
+        # or empty — masking the real ffmpeg error.
+        "encoding": "utf-8",
+        "errors": "replace",
+        "timeout": 1800,
+    }
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     result = subprocess.run(cmd, **kwargs)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg 执行失败:\n{(result.stderr or '')[-2000:]}")
+        raise RuntimeError(f"ffmpeg 执行失败:\n{_extract_ffmpeg_error(result.stderr)}")
 
 
 def _probe_duration_sec(path: str) -> float | None:
-    kwargs: dict = {"capture_output": True, "text": True, "timeout": 30}
+    kwargs: dict = {"capture_output": True, "text": True, "encoding": "utf-8", "errors": "replace", "timeout": 30}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
@@ -52,7 +88,7 @@ def _probe_duration_sec(path: str) -> float | None:
 
 
 def _probe_has_audio(path: str) -> bool:
-    kwargs: dict = {"capture_output": True, "text": True, "timeout": 30}
+    kwargs: dict = {"capture_output": True, "text": True, "encoding": "utf-8", "errors": "replace", "timeout": 30}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
