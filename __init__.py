@@ -511,7 +511,7 @@ def _register_routes():
         except OSError:
             rows = []
         rows.sort(key=lambda item: item[0], reverse=True)
-        files = [rel for _, rel in rows[:400]]
+        files = [{"file": rel, "mtime": mtime} for mtime, rel in rows[:400]]
         return web.json_response({"files": files, "count": len(files)})
 
     @routes.get("/audio_keyframe_timeline/vl_models")

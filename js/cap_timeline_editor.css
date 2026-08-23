@@ -2425,6 +2425,25 @@ body.cat-te-media-dnd-over-tl {
     padding: 6px 8px;
     font-size: 12px;
 }
+.cat-te-output-videos-time-filter {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+.cat-te-output-videos-time-btn {
+    border: 1px solid #2a2a48;
+    border-radius: 4px;
+    background: #121226;
+    color: #8888b0;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.cat-te-output-videos-time-btn.is-active {
+    color: #e8e0ff;
+    border-color: #6a5aaa;
+    background: rgba(91, 78, 255, 0.22);
+}
 .cat-te-output-videos-body {
     padding: 10px 12px;
     overflow: auto;

@@ -51,6 +51,12 @@ const WATERMARK_POSITION_LABELS = {
     "random-interval": "随机（10-30秒换位）",
     "random-fixed": "随机（固定位置）",
 };
+const OUTPUT_VIDEOS_TIME_RANGES = [
+    { id: "1h", label: "1小时", hours: 1 },
+    { id: "4h", label: "4小时", hours: 4 },
+    { id: "1d", label: "1天", hours: 24 },
+    { id: "all", label: "全部", hours: null },
+];
 const MEDIA_KIND_FILTERS = [
     { id: "image", label: "图片" },
     { id: "video", label: "视频" },
@@ -333,6 +339,7 @@ export class CapTimelineEditorApp {
         this._genVideoState = null;
         this._outputVideosClipId = null;
         this._outputVideosCache = [];
+        this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
         this._outputVideosThumbIo = null;
         this._composeBusy = false;
         this._watermark = this._defaultWatermark();
@@ -1887,11 +1894,16 @@ export class CapTimelineEditorApp {
           <div class="cat-te-modal-backdrop cat-te-output-videos-modal" hidden>
             <div class="cat-te-modal cat-te-output-videos-dialog">
               <div class="cat-te-modal-header">
-                <span>添加生成的视频</span>
+                <span>关联生成的视频</span>
                 <button type="button" class="cat-te-modal-close cat-te-output-videos-close" title="关闭">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-output-videos-toolbar">
                 <input class="cat-te-output-videos-filter" type="search" placeholder="筛选文件名…" />
+                <div class="cat-te-output-videos-time-filter">
+                  ${OUTPUT_VIDEOS_TIME_RANGES.map((r) => `
+                    <button type="button" class="cat-te-output-videos-time-btn${r.id === "1h" ? " is-active" : ""}" data-range="${r.id}">${r.label}</button>
+                  `).join("")}
+                </div>
               </div>
               <div class="cat-te-output-videos-body"></div>
             </div>
@@ -2269,6 +2281,7 @@ export class CapTimelineEditorApp {
         this.outputVideosModal = el.querySelector(".cat-te-output-videos-modal");
         this.outputVideosBody = el.querySelector(".cat-te-output-videos-body");
         this.outputVideosFilter = el.querySelector(".cat-te-output-videos-filter");
+        this.outputVideosTimeButtons = el.querySelectorAll(".cat-te-output-videos-time-btn");
         this.composeModal = el.querySelector(".cat-te-compose-modal");
         this.composePrefixInput = el.querySelector(".cat-te-compose-prefix");
         this.composeFilenameInput = el.querySelector(".cat-te-compose-filename");
@@ -2484,6 +2497,13 @@ export class CapTimelineEditorApp {
         this.genVideoDeleteBtn?.addEventListener("click", () => this._deleteCurrentGenVideo());
         el.querySelector(".cat-te-output-videos-close")?.addEventListener("click", () => this._closeOutputVideosPicker());
         this.outputVideosFilter?.addEventListener("input", () => this._renderOutputVideosPicker());
+        this.outputVideosTimeButtons?.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                this._outputVideosTimeRange = btn.dataset.range;
+                this.outputVideosTimeButtons.forEach((b) => b.classList.toggle("is-active", b === btn));
+                this._renderOutputVideosPicker();
+            });
+        });
         el.querySelector(".cat-te-compose-close")?.addEventListener("click", () => this._closeComposeModal());
         el.querySelector(".cat-te-compose-cancel")?.addEventListener("click", () => this._closeComposeModal());
         this.composeRunBtn?.addEventListener("click", () => {
@@ -4001,6 +4021,8 @@ export class CapTimelineEditorApp {
         this._outputVideosClipId = clip.id;
         this.outputVideosModal.hidden = false;
         if (this.outputVideosFilter) this.outputVideosFilter.value = "";
+        this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
+        this.outputVideosTimeButtons?.forEach((b) => b.classList.toggle("is-active", b.dataset.range === this._outputVideosTimeRange));
         if (this.outputVideosBody) this.outputVideosBody.textContent = "加载中…";
         try {
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/output_videos"));
@@ -4030,9 +4052,14 @@ export class CapTimelineEditorApp {
                 .map((row) => normalizeOutputVideoPath(row.file) || row.file),
         );
         const q = String(this.outputVideosFilter?.value || "").trim().toLowerCase();
-        const files = this._outputVideosCache.filter((file) => !q || String(file).toLowerCase().includes(q));
+        const range = OUTPUT_VIDEOS_TIME_RANGES.find((r) => r.id === this._outputVideosTimeRange) || OUTPUT_VIDEOS_TIME_RANGES[0];
+        const cutoff = range.hours != null ? (Date.now() / 1000 - range.hours * 3600) : null;
+        const rows = this._outputVideosCache.filter((row) => {
+            if (cutoff != null && Number(row?.mtime) < cutoff) return false;
+            return !q || String(row?.file || "").toLowerCase().includes(q);
+        });
         this.outputVideosBody.replaceChildren();
-        if (!files.length) {
+        if (!rows.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-output-videos-empty";
             empty.textContent = this._outputVideosCache.length ? "没有匹配的视频" : "output 目录下没有视频";
@@ -4052,7 +4079,8 @@ export class CapTimelineEditorApp {
             }
         }, { root: this.outputVideosBody, rootMargin: "120px 0px" });
         this._outputVideosThumbIo = io;
-        for (const file of files) {
+        for (const row of rows) {
+            const file = row.file;
             const key = normalizeOutputVideoPath(file) || file;
             const btn = document.createElement("button");
             btn.type = "button";
@@ -7261,7 +7289,7 @@ export class CapTimelineEditorApp {
                 { label: "禁用其他素材  Ctrl+G", fn: () => this._disableOthers(clip) },
                 { label: "设置标题", fn: () => this._renameClip(clip) },
                 { label: "查看素材", fn: () => this._openClipItemsModal(clip) },
-                { label: "添加生成的视频", fn: () => void this._openOutputVideosPicker(clip) },
+                { label: "关联生成的视频", fn: () => void this._openOutputVideosPicker(clip) },
             );
             if (this._clipUsesGeneratedPreview(m)) {
                 const gen = this._firstEnabledGeneratedVideo(m);
