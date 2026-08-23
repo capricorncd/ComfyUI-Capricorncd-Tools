@@ -651,6 +651,11 @@ export class Timeline extends EventEmitter {
         this.emit('clip:resizeend', { clip, track: clip.track, moved: true });
         return;
       }
+      // Cutting away the left portion reveals later source content, same
+      // as dragging the left handle — advance sourceOffset by however much
+      // startTime is moving forward, or playback keeps reading from the
+      // original (pre-trim) point in the source.
+      clip.sourceOffset = (clip.sourceOffset || 0) + (t - clip.startTime);
       clip.duration = clip.endTime - t;
       clip.startTime = t;
     } else {
