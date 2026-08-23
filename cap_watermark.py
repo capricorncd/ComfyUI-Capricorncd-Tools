@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from functools import lru_cache
 
 _FONT_EXTS = (".ttf", ".ttc", ".otf")
+# Hiragana/Katakana, CJK unified ideographs (+ext A), CJK compatibility
+# ideographs, Hangul syllables — enough to detect "this string is actually
+# CJK text" without needing a full Unicode script database.
+_CJK_RE = re.compile(
+    "[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7a3]"
+)
 
 _STYLE_RANK = {"regular": 0, "normal": 0, "book": 1}
 
@@ -46,6 +53,30 @@ def _style_rank(style: str) -> int:
     return _STYLE_RANK.get((style or "").strip().lower(), 5)
 
 
+def _looks_garbled(name: str) -> bool:
+    """Some (mostly older CJK) font files only carry a name-table entry in a
+    legacy encoding that FreeType/Pillow decodes with the wrong codec —
+    instead of raising, it substitutes '?' (or the Unicode replacement
+    character) for each byte it can't map, so the family name comes out as
+    strings of literal '?'. Real font family names never contain '?', so
+    filter those out rather than showing unusable garbage in the picker."""
+    return "?" in name or "\ufffd" in name
+
+
+def _display_name(family: str, path: str) -> str:
+    """Prefer the font's own family name, but some (mostly Chinese) font
+    files carry only a terse PostScript-style name in their name table
+    (e.g. "FZZJ-XTCSJW") while the file itself was given a proper, readable
+    name — fall back to the filename (minus extension) whenever it's
+    clearly more informative (contains CJK text the internal name lacks)."""
+    if _CJK_RE.search(family):
+        return family
+    base = os.path.splitext(os.path.basename(path))[0].strip()
+    if base and _CJK_RE.search(base):
+        return base
+    return family
+
+
 @lru_cache(maxsize=1)
 def list_system_fonts() -> tuple[dict, ...]:
     """Scan OS font directories once per process and return one entry per
@@ -61,8 +92,9 @@ def list_system_fonts() -> tuple[dict, ...]:
             except Exception:
                 continue
             family = (family or "").strip()
-            if not family:
+            if not family or _looks_garbled(family):
                 continue
+            family = _display_name(family, path)
             rank = _style_rank(style)
             existing = by_family.get(family)
             if existing is None or rank < existing[0]:

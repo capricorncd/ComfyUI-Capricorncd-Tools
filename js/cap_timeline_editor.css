@@ -2656,6 +2656,9 @@ body.cat-te-media-dnd-over-tl {
     flex: 1;
     min-width: 0;
 }
+.cat-te-wm-text-style-row .cat-te-compose-field:not(:first-child) {
+    flex: 0 0 50px;
+}
 .cat-te-wm-narrow {
     flex: 0 0 72px;
 }

@@ -1935,7 +1935,7 @@ export class CapTimelineEditorApp {
                         <span>文字内容</span>
                         <textarea class="cat-te-wm-text-content" rows="2" placeholder="输入水印文字…"></textarea>
                       </label>
-                      <div class="cat-te-wm-row">
+                      <div class="cat-te-wm-row cat-te-wm-text-style-row">
                         <label class="cat-te-compose-field">
                           <span>字体</span>
                           <select class="cat-te-wm-font-family"></select>
