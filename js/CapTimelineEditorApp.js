@@ -38,6 +38,19 @@ const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
 /** Must match CAP_TimelineEditor INPUT_TYPES defaults. */
 const PY_SCALAR_DEFAULTS = { fps: 24, width: 1344, height: 768, global_prompt: "" };
+const WATERMARK_FIXED_POSITIONS = [
+    "top-left", "top-center", "top-right",
+    "bottom-left", "bottom-center", "bottom-right",
+    "center",
+];
+const WATERMARK_POSITIONS = new Set([...WATERMARK_FIXED_POSITIONS, "random-interval", "random-fixed"]);
+const WATERMARK_POSITION_LABELS = {
+    "top-left": "左上角", "top-center": "顶部居中", "top-right": "右上角",
+    "bottom-left": "左下角", "bottom-center": "底部居中", "bottom-right": "右下角",
+    "center": "画面居中",
+    "random-interval": "随机（10-30秒换位）",
+    "random-fixed": "随机（固定位置）",
+};
 const MEDIA_KIND_FILTERS = [
     { id: "image", label: "图片" },
     { id: "video", label: "视频" },
@@ -322,6 +335,10 @@ export class CapTimelineEditorApp {
         this._outputVideosCache = [];
         this._outputVideosThumbIo = null;
         this._composeBusy = false;
+        this._watermark = this._defaultWatermark();
+        this._systemFonts = null;
+        this._systemFontsPromise = null;
+        this._composePreviewRaf = 0;
         this._videoThumbActive = 0;
         this._videoThumbWaiters = [];
         this._timelineReady = false;
@@ -992,8 +1009,18 @@ export class CapTimelineEditorApp {
             this.composeStatus.textContent = "";
             this.composeStatus.classList.remove("is-error", "is-ok");
         }
-        if (this.composeRunBtn) this.composeRunBtn.disabled = false;
+        this._composeDone = false;
+        this._lastComposeOutput = null;
+        if (this.composeRunBtn) {
+            this.composeRunBtn.disabled = false;
+            this.composeRunBtn.textContent = "开始合成";
+        }
+        this._clampWatermarkMargin();
+        this._wmActiveTab = this._watermark.image.file ? "image" : "text";
+        this._syncWatermarkUiFromState();
+        void this._ensureFontList();
         this.composeModal.hidden = false;
+        this._scheduleComposePreview();
     }
 
     _closeComposeModal(force = false) {
@@ -1038,6 +1065,7 @@ export class CapTimelineEditorApp {
                     filename_prefix: filenamePrefix,
                     filename,
                     ignore_audio_tracks: !!this.composeIgnoreAudioCb?.checked,
+                    watermark: this._watermark,
                 }),
             });
             const data = await response.json().catch(() => ({}));
@@ -1046,6 +1074,9 @@ export class CapTimelineEditorApp {
             const outName = data.filename || filename;
             const sub = String(data.subfolder || "").replace(/^\/+|\/+$/g, "");
             const rel = sub ? `${sub}/${outName}` : outName;
+            this._lastComposeOutput = { filename: outName, subfolder: sub };
+            this._composeDone = true;
+            if (this.composeRunBtn) this.composeRunBtn.textContent = "打开文件夹";
             this._setComposeStatus(`已保存到 ComfyUI/output/${rel}`, { ok: true });
         } catch (error) {
             if (error?.name === "AbortError") {
@@ -1057,6 +1088,400 @@ export class CapTimelineEditorApp {
             this._composeBusy = false;
             if (this.composeRunBtn) this.composeRunBtn.disabled = false;
         }
+    }
+
+    async _revealComposeOutput() {
+        if (!this._lastComposeOutput) return;
+        try {
+            const response = await fetch(api.apiURL("/audio_keyframe_timeline/reveal_output"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(this._lastComposeOutput),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.error || "打开文件夹失败");
+        } catch (error) {
+            alert(`打开文件夹失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    // ─── Watermark (compose modal) ─────────────────────────────────────────
+
+    _defaultWatermark() {
+        return {
+            mode: "none",
+            text: { content: "", fontFamily: "", fontPath: "", fontSize: 32, color: "#ffffff" },
+            image: { file: "", disabled: false },
+            opacity: 80,
+            scale: 100,
+            position: "bottom-right",
+            margin: { top: 24, right: 24, bottom: 24, left: 24, locked: true },
+        };
+    }
+
+    _normalizeWatermark(raw) {
+        const d = this._defaultWatermark();
+        const r = raw && typeof raw === "object" ? raw : {};
+        const text = r.text && typeof r.text === "object" ? r.text : {};
+        const image = r.image && typeof r.image === "object" ? r.image : {};
+        const margin = r.margin && typeof r.margin === "object" ? r.margin : {};
+        const num = (v, min, max, def) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : def;
+        };
+        const out = {
+            text: {
+                content: String(text.content ?? d.text.content),
+                fontFamily: String(text.fontFamily ?? d.text.fontFamily),
+                fontPath: String(text.fontPath ?? d.text.fontPath),
+                fontSize: num(text.fontSize, 6, 400, d.text.fontSize),
+                color: /^#[0-9a-fA-F]{6}$/.test(text.color || "") ? text.color : d.text.color,
+            },
+            image: {
+                file: String(image.file ?? d.image.file),
+                disabled: image.disabled === true,
+            },
+            opacity: num(r.opacity, 0, 100, d.opacity),
+            scale: num(r.scale, 10, 300, d.scale),
+            position: WATERMARK_POSITIONS.has(r.position) ? r.position : d.position,
+            margin: {
+                top: num(margin.top, 0, 100000, d.margin.top),
+                right: num(margin.right, 0, 100000, d.margin.right),
+                bottom: num(margin.bottom, 0, 100000, d.margin.bottom),
+                left: num(margin.left, 0, 100000, d.margin.left),
+                locked: margin.locked !== false,
+            },
+        };
+        out.mode = (out.image.file && !out.image.disabled) ? "image" : (out.text.content.trim() ? "text" : "none");
+        return out;
+    }
+
+    _clampWatermarkMargin() {
+        const { w, h } = this.getPreviewSize();
+        const maxX = Math.floor(w / 2);
+        const maxY = Math.floor(h / 2);
+        const m = this._watermark.margin;
+        m.top = Math.min(m.top, maxY);
+        m.bottom = Math.min(m.bottom, maxY);
+        m.left = Math.min(m.left, maxX);
+        m.right = Math.min(m.right, maxX);
+    }
+
+    _deriveWatermarkMode() {
+        const wm = this._watermark;
+        const useImage = wm.image.file && !wm.image.disabled;
+        wm.mode = useImage ? "image" : (String(wm.text.content || "").trim() ? "text" : "none");
+    }
+
+    async _ensureFontList() {
+        if (this._systemFonts) return this._systemFonts;
+        if (this._systemFontsPromise) return this._systemFontsPromise;
+        this._systemFontsPromise = fetch(api.apiURL("/audio_keyframe_timeline/system_fonts"))
+            .then((r) => r.json())
+            .then((data) => {
+                this._systemFonts = Array.isArray(data?.fonts) ? data.fonts : [];
+                this._populateFontSelect();
+                this._scheduleComposePreview();
+                return this._systemFonts;
+            })
+            .catch(() => {
+                this._systemFonts = [];
+                return this._systemFonts;
+            });
+        return this._systemFontsPromise;
+    }
+
+    _populateFontSelect() {
+        const select = this.wmFontFamily;
+        if (!select) return;
+        const fonts = this._systemFonts || [];
+        const current = this._watermark.text.fontFamily;
+        select.innerHTML = "";
+        if (!fonts.length) {
+            const opt = document.createElement("option");
+            opt.value = "";
+            opt.textContent = this._systemFonts ? "（未找到字体）" : "（加载中…）";
+            select.appendChild(opt);
+            return;
+        }
+        for (const f of fonts) {
+            const opt = document.createElement("option");
+            opt.value = f.family;
+            opt.dataset.path = f.path;
+            opt.textContent = f.family;
+            select.appendChild(opt);
+        }
+        if (current && fonts.some((f) => f.family === current)) {
+            select.value = current;
+        } else {
+            select.value = fonts[0].family;
+            this._watermark.text.fontFamily = fonts[0].family;
+            this._watermark.text.fontPath = fonts[0].path;
+        }
+    }
+
+    async _onWatermarkImagePicked(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        try {
+            const uploaded = await this._uploadImportBlob("image", file.name, file);
+            this._watermark.image.file = uploaded.file;
+            this._watermark.image.disabled = false;
+            this._deriveWatermarkMode();
+            this._wmActiveTab = "image";
+            this._syncWatermarkUiFromState();
+            this._scheduleComposePreview();
+        } catch (error) {
+            alert(`上传水印图片失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    _removeWatermarkImage() {
+        this._watermark.image.file = "";
+        this._watermark.image.disabled = false;
+        this._deriveWatermarkMode();
+        this._wmActiveTab = "text";
+        this._syncWatermarkUiFromState();
+        this._scheduleComposePreview();
+    }
+
+    _bindWatermarkUi() {
+        this.wmTabs?.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                this._wmActiveTab = btn.dataset.mode;
+                this._syncWatermarkUiFromState();
+            });
+        });
+        this.wmTextContent?.addEventListener("input", () => {
+            this._watermark.text.content = this.wmTextContent.value;
+            this._deriveWatermarkMode();
+            this._scheduleComposePreview();
+        });
+        this.wmFontFamily?.addEventListener("change", () => {
+            const opt = this.wmFontFamily.selectedOptions?.[0];
+            this._watermark.text.fontFamily = this.wmFontFamily.value;
+            this._watermark.text.fontPath = opt?.dataset.path || "";
+            this._scheduleComposePreview();
+        });
+        this.wmFontSize?.addEventListener("input", () => {
+            this._watermark.text.fontSize = Math.max(6, Math.min(400, Number(this.wmFontSize.value) || 32));
+            this._scheduleComposePreview();
+        });
+        this.wmFontColor?.addEventListener("input", () => {
+            this._watermark.text.color = this.wmFontColor.value;
+            this._scheduleComposePreview();
+        });
+        this.wmImageUploadBtn?.addEventListener("click", () => this.wmImageFileInput?.click());
+        this.wmImageFileInput?.addEventListener("change", (e) => void this._onWatermarkImagePicked(e));
+        this.wmImageDeleteBtn?.addEventListener("click", () => this._removeWatermarkImage());
+        this.wmImageDisabledCb?.addEventListener("change", () => {
+            this._watermark.image.disabled = !!this.wmImageDisabledCb.checked;
+            this._deriveWatermarkMode();
+            this._scheduleComposePreview();
+        });
+        this.wmOpacity?.addEventListener("input", () => {
+            this._watermark.opacity = Number(this.wmOpacity.value) || 0;
+            if (this.wmOpacityReadout) this.wmOpacityReadout.textContent = `${this._watermark.opacity}%`;
+            this._scheduleComposePreview();
+        });
+        this.wmScale?.addEventListener("input", () => {
+            this._watermark.scale = Number(this.wmScale.value) || 100;
+            if (this.wmScaleReadout) this.wmScaleReadout.textContent = `${this._watermark.scale}%`;
+            this._scheduleComposePreview();
+        });
+        this.wmPosButtons?.forEach((btn) => {
+            btn.addEventListener("click", () => {
+                this._watermark.position = btn.dataset.pos;
+                this._syncWatermarkPositionUi();
+                this._scheduleComposePreview();
+            });
+        });
+        const marginInputs = [
+            [this.wmMarginTop, "top"], [this.wmMarginRight, "right"],
+            [this.wmMarginBottom, "bottom"], [this.wmMarginLeft, "left"],
+        ];
+        marginInputs.forEach(([input, key]) => {
+            if (!input) return;
+            input.addEventListener("input", () => {
+                const { w, h } = this.getPreviewSize();
+                const limit = (key === "top" || key === "bottom") ? Math.floor(h / 2) : Math.floor(w / 2);
+                const v = Math.max(0, Math.min(limit, Math.round(Number(input.value) || 0)));
+                input.value = String(v);
+                if (this._watermark.margin.locked) {
+                    this._watermark.margin.top = v;
+                    this._watermark.margin.right = v;
+                    this._watermark.margin.bottom = v;
+                    this._watermark.margin.left = v;
+                    if (this.wmMarginTop) this.wmMarginTop.value = String(v);
+                    if (this.wmMarginRight) this.wmMarginRight.value = String(v);
+                    if (this.wmMarginBottom) this.wmMarginBottom.value = String(v);
+                    if (this.wmMarginLeft) this.wmMarginLeft.value = String(v);
+                } else {
+                    this._watermark.margin[key] = v;
+                }
+                this._scheduleComposePreview();
+            });
+        });
+        this.wmMarginLockBtn?.addEventListener("click", () => {
+            this._watermark.margin.locked = !this._watermark.margin.locked;
+            if (this._watermark.margin.locked) {
+                const v = this._watermark.margin.top;
+                this._watermark.margin.right = v;
+                this._watermark.margin.bottom = v;
+                this._watermark.margin.left = v;
+                if (this.wmMarginRight) this.wmMarginRight.value = String(v);
+                if (this.wmMarginBottom) this.wmMarginBottom.value = String(v);
+                if (this.wmMarginLeft) this.wmMarginLeft.value = String(v);
+                this._scheduleComposePreview();
+            }
+            this._syncWatermarkMarginLockUi();
+        });
+    }
+
+    _syncWatermarkMarginLockUi() {
+        const locked = this._watermark.margin.locked;
+        if (this.wmMarginLockBtn) {
+            this.wmMarginLockBtn.innerHTML = iconHtml(locked ? "lock" : "lockOpen", 14);
+            this.wmMarginLockBtn.classList.toggle("is-active", locked);
+            this.wmMarginLockBtn.title = locked ? "已锁定：四边同步（点击解锁）" : "已解锁：四边独立设置（点击锁定）";
+        }
+    }
+
+    _syncWatermarkPositionUi() {
+        const pos = this._watermark.position;
+        this.wmPosButtons?.forEach((btn) => btn.classList.toggle("is-active", btn.dataset.pos === pos));
+    }
+
+    _syncWatermarkUiFromState() {
+        const wm = this._watermark;
+        if (this.wmTextContent) this.wmTextContent.value = wm.text.content;
+        if (this.wmFontSize) this.wmFontSize.value = String(wm.text.fontSize);
+        if (this.wmFontColor) this.wmFontColor.value = wm.text.color;
+        if (this.wmOpacity) this.wmOpacity.value = String(wm.opacity);
+        if (this.wmOpacityReadout) this.wmOpacityReadout.textContent = `${wm.opacity}%`;
+        if (this.wmScale) this.wmScale.value = String(wm.scale);
+        if (this.wmScaleReadout) this.wmScaleReadout.textContent = `${wm.scale}%`;
+        if (this.wmMarginTop) this.wmMarginTop.value = String(wm.margin.top);
+        if (this.wmMarginRight) this.wmMarginRight.value = String(wm.margin.right);
+        if (this.wmMarginBottom) this.wmMarginBottom.value = String(wm.margin.bottom);
+        if (this.wmMarginLeft) this.wmMarginLeft.value = String(wm.margin.left);
+        this._syncWatermarkMarginLockUi();
+        this._syncWatermarkPositionUi();
+        if (this.wmImagePreview) {
+            if (wm.image.file) {
+                this.wmImagePreview.src = this._imgUrl(wm.image.file);
+                this.wmImagePreview.hidden = false;
+            } else {
+                this.wmImagePreview.hidden = true;
+                this.wmImagePreview.removeAttribute("src");
+            }
+        }
+        if (this.wmImageDeleteBtn) this.wmImageDeleteBtn.hidden = !wm.image.file;
+        if (this.wmImageDisabledRow) this.wmImageDisabledRow.hidden = !wm.image.file;
+        if (this.wmImageDisabledCb) this.wmImageDisabledCb.checked = !!wm.image.disabled;
+        const tab = this._wmActiveTab || (wm.image.file ? "image" : "text");
+        this.wmTabs?.forEach((btn) => btn.classList.toggle("is-active", btn.dataset.mode === tab));
+        if (this.wmPanelText) this.wmPanelText.hidden = tab !== "text";
+        if (this.wmPanelImage) this.wmPanelImage.hidden = tab !== "image";
+        this._populateFontSelect();
+    }
+
+    _scheduleComposePreview() {
+        if (!this.composePreviewCanvas) return;
+        if (this._composePreviewRaf) return;
+        this._composePreviewRaf = requestAnimationFrame(() => {
+            this._composePreviewRaf = 0;
+            this._renderComposePreview();
+        });
+    }
+
+    _layoutComposePreviewCanvas() {
+        const stage = this.composePreviewStage;
+        const canvas = this.composePreviewCanvas;
+        if (!stage || !canvas) return null;
+        const { w, h } = this.getPreviewSize();
+        const sw = stage.clientWidth;
+        const sh = stage.clientHeight;
+        if (sw < 2 || sh < 2) return null;
+        const scale = Math.min(sw / w, sh / h);
+        const cssW = Math.max(1, Math.floor(w * scale));
+        const cssH = Math.max(1, Math.floor(h * scale));
+        canvas.style.width = `${cssW}px`;
+        canvas.style.height = `${cssH}px`;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const pw = Math.max(1, Math.round(cssW * dpr));
+        const ph = Math.max(1, Math.round(cssH * dpr));
+        if (canvas.width !== pw) canvas.width = pw;
+        if (canvas.height !== ph) canvas.height = ph;
+        return { canvasW: pw, canvasH: ph };
+    }
+
+    _watermarkXY(position, margin, cw, ch, ow, oh) {
+        switch (position) {
+            case "top-left": return { x: margin.left, y: margin.top };
+            case "top-right": return { x: cw - ow - margin.right, y: margin.top };
+            case "bottom-left": return { x: margin.left, y: ch - oh - margin.bottom };
+            case "bottom-right": return { x: cw - ow - margin.right, y: ch - oh - margin.bottom };
+            case "top-center": return { x: (cw - ow) / 2, y: margin.top };
+            case "bottom-center": return { x: (cw - ow) / 2, y: ch - oh - margin.bottom };
+            case "center":
+            default: return { x: (cw - ow) / 2, y: (ch - oh) / 2 };
+        }
+    }
+
+    _drawWatermarkOnCanvas(ctx, cw, ch) {
+        const wm = this._watermark;
+        if (!wm || wm.mode === "none") return;
+        const previewPos = (wm.position === "random-interval" || wm.position === "random-fixed")
+            ? "bottom-right" : wm.position;
+        const { w: baseW } = this.getPreviewSize();
+        const scaleFactor = cw / baseW;
+        const margin = {
+            top: wm.margin.top * scaleFactor,
+            right: wm.margin.right * scaleFactor,
+            bottom: wm.margin.bottom * scaleFactor,
+            left: wm.margin.left * scaleFactor,
+        };
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, (wm.opacity ?? 80) / 100));
+        if (wm.mode === "image" && wm.image.file) {
+            const entry = this._ensurePreviewImage(this._imgUrl(wm.image.file));
+            if (entry?.ready) {
+                const iw = entry.el.naturalWidth * scaleFactor * (wm.scale / 100);
+                const ih = entry.el.naturalHeight * scaleFactor * (wm.scale / 100);
+                const { x, y } = this._watermarkXY(previewPos, margin, cw, ch, iw, ih);
+                ctx.drawImage(entry.el, x, y, iw, ih);
+            }
+        } else if (wm.mode === "text" && wm.text.content) {
+            const fontSize = Math.max(1, wm.text.fontSize * scaleFactor * (wm.scale / 100));
+            const family = wm.text.fontFamily ? `"${wm.text.fontFamily}", sans-serif` : "sans-serif";
+            ctx.font = `${fontSize}px ${family}`;
+            ctx.fillStyle = wm.text.color || "#ffffff";
+            ctx.textBaseline = "top";
+            const lines = String(wm.text.content).split("\n");
+            const lineHeight = fontSize * 1.25;
+            const textW = Math.max(0, ...lines.map((l) => ctx.measureText(l).width));
+            const textH = lineHeight * lines.length;
+            const { x, y } = this._watermarkXY(previewPos, margin, cw, ch, textW, textH);
+            lines.forEach((line, i) => ctx.fillText(line, x, y + i * lineHeight));
+        }
+        ctx.restore();
+    }
+
+    _renderComposePreview() {
+        const layout = this._layoutComposePreviewCanvas();
+        const canvas = this.composePreviewCanvas;
+        if (!layout || !canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const { canvasW: cw, canvasH: ch } = layout;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, cw, ch);
+        const t = this._timeline?.currentTime ?? 0;
+        this._drawPreviewLayersOnce(ctx, cw, ch, t);
+        this._drawWatermarkOnCanvas(ctx, cw, ch);
     }
 
     async _exportAsZip() {
@@ -1478,20 +1903,128 @@ export class CapTimelineEditorApp {
                 <button type="button" class="cat-te-modal-close cat-te-compose-close" title="关闭">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-compose-body">
-                <label class="cat-te-compose-field">
-                  <span>文件名前缀</span>
-                  <input class="cat-te-compose-prefix" type="text" value="cap_timeline_compose/" />
-                </label>
-                <label class="cat-te-compose-field">
-                  <span>文件名</span>
-                  <input class="cat-te-compose-filename" type="text" />
-                </label>
-                <label class="cat-te-compose-check">
-                  <input class="cat-te-compose-ignore-audio" type="checkbox" />
-                  <span>忽略音频轨道</span>
-                </label>
-                <p class="cat-te-compose-hint">前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。勾选「忽略音频轨道」时不合并音频轨上的 clip（生成视频音轨仍会按禁音设置处理）。需要本机已安装 ffmpeg。</p>
-                <div class="cat-te-compose-status" hidden></div>
+                <div class="cat-te-compose-preview">
+                  <div class="cat-te-compose-preview-stage">
+                    <canvas class="cat-te-compose-preview-canvas"></canvas>
+                  </div>
+                </div>
+                <div class="cat-te-compose-settings">
+                  <div class="cat-te-compose-field">
+                    <span class="cat-te-ai-field-label">
+                      文件名前缀
+                      <span class="cat-te-info-tip" tabindex="0" aria-label="文件名前缀说明">
+                        ${iconHtml("info", 12)}
+                        <span class="cat-te-info-tip-pop">
+                          前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。需要本机已安装 ffmpeg。
+                        </span>
+                      </span>
+                    </span>
+                    <input class="cat-te-compose-prefix" type="text" value="cap_timeline_compose/" />
+                  </div>
+                  <label class="cat-te-compose-field">
+                    <span>文件名</span>
+                    <input class="cat-te-compose-filename" type="text" />
+                  </label>
+                  <div class="cat-te-compose-check-row">
+                    <label class="cat-te-compose-check">
+                      <input class="cat-te-compose-ignore-audio" type="checkbox" />
+                      <span>忽略音频轨道</span>
+                    </label>
+                    <span class="cat-te-info-tip" tabindex="0" aria-label="忽略音频轨道说明">
+                      ${iconHtml("info", 12)}
+                      <span class="cat-te-info-tip-pop">
+                        勾选后不合并音频轨上的 clip（生成视频音轨仍会按禁音设置处理）。
+                      </span>
+                    </span>
+                  </div>
+
+                  <div class="cat-te-wm-section">
+                    <div class="cat-te-wm-heading">水印</div>
+                    <div class="cat-te-wm-tabs">
+                      <button type="button" class="cat-te-wm-tab cat-te-wm-tab-text" data-mode="text">${iconHtml("text", 12)}<span>文字水印</span></button>
+                      <button type="button" class="cat-te-wm-tab cat-te-wm-tab-image" data-mode="image">${iconHtml("image", 12)}<span>图片水印</span></button>
+                    </div>
+
+                    <div class="cat-te-wm-panel cat-te-wm-panel-text">
+                      <label class="cat-te-compose-field">
+                        <span>文字内容</span>
+                        <textarea class="cat-te-wm-text-content" rows="2" placeholder="输入水印文字…"></textarea>
+                      </label>
+                      <div class="cat-te-wm-row cat-te-wm-text-style-row">
+                        <label class="cat-te-compose-field">
+                          <span>字体</span>
+                          <select class="cat-te-wm-font-family"></select>
+                        </label>
+                        <label class="cat-te-compose-field cat-te-wm-narrow">
+                          <span>字号</span>
+                          <input class="cat-te-wm-font-size" type="number" min="6" max="400" step="1" />
+                        </label>
+                        <label class="cat-te-compose-field cat-te-wm-narrow">
+                          <span>颜色</span>
+                          <input class="cat-te-wm-font-color" type="color" />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="cat-te-wm-panel cat-te-wm-panel-image" hidden>
+                      <div class="cat-te-wm-image-row">
+                        <div class="cat-te-wm-image-thumb"><img class="cat-te-wm-image-preview" alt="" hidden /></div>
+                        <div class="cat-te-wm-image-actions">
+                          <button type="button" class="cat-te-btn cat-te-wm-image-upload">上传图片</button>
+                          <button type="button" class="cat-te-btn cat-te-wm-image-delete" hidden>${iconHtml("trash", 12)}<span>删除</span></button>
+                          <input class="cat-te-wm-image-file" type="file" accept="image/*" hidden />
+                        </div>
+                      </div>
+                      <label class="cat-te-compose-check cat-te-wm-image-disable-row" hidden>
+                        <input class="cat-te-wm-image-disabled" type="checkbox" />
+                        <span>不使用</span>
+                      </label>
+                    </div>
+
+                    <div class="cat-te-wm-row">
+                      <label class="cat-te-compose-field">
+                        <span>透明度<span class="cat-te-wm-readout cat-te-wm-opacity-readout"></span></span>
+                        <input class="cat-te-wm-opacity" type="range" min="0" max="100" step="1" />
+                      </label>
+                      <label class="cat-te-compose-field">
+                        <span>大小缩放<span class="cat-te-wm-readout cat-te-wm-scale-readout"></span></span>
+                        <input class="cat-te-wm-scale" type="range" min="10" max="300" step="1" />
+                      </label>
+                    </div>
+
+                    <div class="cat-te-compose-field">
+                      <span>位置</span>
+                      <div class="cat-te-wm-pos-row">
+                        <div class="cat-te-wm-pos-grid">
+                          <button type="button" class="cat-te-wm-pos" data-pos="top-left" title="左上角"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="top-center" title="顶部居中"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="top-right" title="右上角"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="center" title="画面居中"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-left" title="左下角"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-center" title="底部居中"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-right" title="右下角"></button>
+                        </div>
+                        <div class="cat-te-wm-pos-random">
+                          <button type="button" class="cat-te-wm-pos-chip" data-pos="random-interval">随机（10-30秒换位）</button>
+                          <button type="button" class="cat-te-wm-pos-chip" data-pos="random-fixed">随机（固定位置）</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="cat-te-compose-field">
+                      <span>边距（像素，不超过画面宽/高的 50%）</span>
+                      <div class="cat-te-wm-margin-box">
+                        <input class="cat-te-wm-margin cat-te-wm-margin-top" type="number" min="0" step="1" title="上" />
+                        <input class="cat-te-wm-margin cat-te-wm-margin-right" type="number" min="0" step="1" title="右" />
+                        <input class="cat-te-wm-margin cat-te-wm-margin-bottom" type="number" min="0" step="1" title="下" />
+                        <input class="cat-te-wm-margin cat-te-wm-margin-left" type="number" min="0" step="1" title="左" />
+                        <button type="button" class="cat-te-wm-margin-lock" title="锁定四边同步">${iconHtml("lock", 14)}</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="cat-te-compose-status" hidden></div>
+                </div>
               </div>
               <div class="cat-te-compose-actions">
                 <button type="button" class="cat-te-btn cat-te-compose-cancel">取消</button>
@@ -1742,6 +2275,31 @@ export class CapTimelineEditorApp {
         this.composeIgnoreAudioCb = el.querySelector(".cat-te-compose-ignore-audio");
         this.composeStatus = el.querySelector(".cat-te-compose-status");
         this.composeRunBtn = el.querySelector(".cat-te-compose-run");
+        this.composePreviewCanvas = el.querySelector(".cat-te-compose-preview-canvas");
+        this.composePreviewStage = el.querySelector(".cat-te-compose-preview-stage");
+        this.wmTabs = el.querySelectorAll(".cat-te-wm-tab");
+        this.wmPanelText = el.querySelector(".cat-te-wm-panel-text");
+        this.wmPanelImage = el.querySelector(".cat-te-wm-panel-image");
+        this.wmTextContent = el.querySelector(".cat-te-wm-text-content");
+        this.wmFontFamily = el.querySelector(".cat-te-wm-font-family");
+        this.wmFontSize = el.querySelector(".cat-te-wm-font-size");
+        this.wmFontColor = el.querySelector(".cat-te-wm-font-color");
+        this.wmImagePreview = el.querySelector(".cat-te-wm-image-preview");
+        this.wmImageUploadBtn = el.querySelector(".cat-te-wm-image-upload");
+        this.wmImageDeleteBtn = el.querySelector(".cat-te-wm-image-delete");
+        this.wmImageFileInput = el.querySelector(".cat-te-wm-image-file");
+        this.wmImageDisabledRow = el.querySelector(".cat-te-wm-image-disable-row");
+        this.wmImageDisabledCb = el.querySelector(".cat-te-wm-image-disabled");
+        this.wmOpacity = el.querySelector(".cat-te-wm-opacity");
+        this.wmOpacityReadout = el.querySelector(".cat-te-wm-opacity-readout");
+        this.wmScale = el.querySelector(".cat-te-wm-scale");
+        this.wmScaleReadout = el.querySelector(".cat-te-wm-scale-readout");
+        this.wmPosButtons = el.querySelectorAll(".cat-te-wm-pos, .cat-te-wm-pos-chip");
+        this.wmMarginTop = el.querySelector(".cat-te-wm-margin-top");
+        this.wmMarginRight = el.querySelector(".cat-te-wm-margin-right");
+        this.wmMarginBottom = el.querySelector(".cat-te-wm-margin-bottom");
+        this.wmMarginLeft = el.querySelector(".cat-te-wm-margin-left");
+        this.wmMarginLockBtn = el.querySelector(".cat-te-wm-margin-lock");
         this.aiOptimizeModal = el.querySelector(".cat-te-ai-optimize-modal");
         this.aiOptimizeTitle = el.querySelector(".cat-te-ai-optimize-title");
         this.aiModelSelect = el.querySelector(".cat-te-ai-model");
@@ -1928,7 +2486,11 @@ export class CapTimelineEditorApp {
         this.outputVideosFilter?.addEventListener("input", () => this._renderOutputVideosPicker());
         el.querySelector(".cat-te-compose-close")?.addEventListener("click", () => this._closeComposeModal());
         el.querySelector(".cat-te-compose-cancel")?.addEventListener("click", () => this._closeComposeModal());
-        this.composeRunBtn?.addEventListener("click", () => void this._runComposeVideoExport());
+        this.composeRunBtn?.addEventListener("click", () => {
+            if (this._composeDone) { void this._revealComposeOutput(); return; }
+            void this._runComposeVideoExport();
+        });
+        this._bindWatermarkUi();
         this.mediaPreviewDesc?.addEventListener("input", () => this._saveMediaPreviewMeta());
         this.mediaPreviewDesc?.addEventListener("change", () => this._saveMediaPreviewMeta());
         this.mediaPreviewDesc?.addEventListener("blur", () => this._saveMediaPreviewMeta());
@@ -5144,6 +5706,7 @@ export class CapTimelineEditorApp {
 
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
         this._applyScalarSettings(settings, { applySettingsFromProject });
+        this._watermark = this._normalizeWatermark(settings.watermark);
         project.settings = {
             ...settings,
             fps: Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps),
@@ -7430,7 +7993,13 @@ export class CapTimelineEditorApp {
 
     _previewVideoCanDraw(entry) {
         const v = entry?.el;
-        return !!(v && v.videoWidth > 0 && v.videoHeight > 0);
+        // While a seek is pending (e.g. re-entering a clip whose cached
+        // <video> element is still parked at wherever a previous playthrough
+        // left it), skip drawing rather than paint the stale pre-seek frame —
+        // that stale frame is what reads as "a few replayed frames" at the
+        // start of the clip. The pending "seeked" listener already reschedules
+        // a redraw once the correct frame lands.
+        return !!(v && !entry.seeking && v.videoWidth > 0 && v.videoHeight > 0);
     }
 
     _pauseUnusedPreviewVideos(usedKeys) {
@@ -7506,21 +8075,13 @@ export class CapTimelineEditorApp {
         return layers;
     }
 
-    async _renderProgramPreview() {
-        const layout = this._layoutProgramCanvas();
-        const canvas = this.programCanvas;
-        if (!layout || !canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        const { canvasW: cw, canvasH: ch } = layout;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = "#000";
-        ctx.fillRect(0, 0, cw, ch);
-
-        const t = this._timeline?.currentTime ?? 0;
+    /** Draw the timeline's layers (generated/video/image/package) at time `t`
+     * into any canvas context — shared by the main program monitor and the
+     * compose modal's watermark preview. Does not touch video pause/resume
+     * bookkeeping; pass `onVideoUsed` to track that in the caller. */
+    _drawPreviewLayersOnce(ctx, cw, ch, t, { onVideoUsed } = {}) {
         const layers = this._collectPreviewLayers(t);
         const generatedActive = layers.some((layer) => layer.kind === "generated");
-        const usedVideoKeys = new Set();
         let drew = false;
 
         for (const layer of layers) {
@@ -7541,7 +8102,7 @@ export class CapTimelineEditorApp {
                 const location = layer.kind === "generated" ? "output" : "input";
                 const entry = this._ensurePreviewVideo(file, location);
                 if (!entry) continue;
-                usedVideoKeys.add(`${location}:${file}`);
+                onVideoUsed?.(`${location}:${file}`);
                 const items = layer.items || [];
                 let mediaTime = (layer.clip.sourceOffset || 0) + (t - layer.clip.startTime);
                 if (layer.kind === "generated") mediaTime = t - layer.clip.startTime;
@@ -7567,6 +8128,23 @@ export class CapTimelineEditorApp {
                 if (this._drawCover(ctx, startEntry.el, cw, ch)) drew = true;
             }
         }
+        return drew;
+    }
+
+    async _renderProgramPreview() {
+        const layout = this._layoutProgramCanvas();
+        const canvas = this.programCanvas;
+        if (!layout || !canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const { canvasW: cw, canvasH: ch } = layout;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, cw, ch);
+
+        const t = this._timeline?.currentTime ?? 0;
+        const usedVideoKeys = new Set();
+        const drew = this._drawPreviewLayersOnce(ctx, cw, ch, t, { onVideoUsed: (key) => usedVideoKeys.add(key) });
 
         this._pauseUnusedPreviewVideos(usedVideoKeys);
         if (this.programEmpty) this.programEmpty.hidden = drew;
@@ -8714,6 +9292,7 @@ export class CapTimelineEditorApp {
                 current_time: Number(this._timeline?.currentTime ?? 0) || 0,
                 timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,
                 timeline_scroll_top: Number(this._timeline?.scrollEl?.scrollTop ?? 0) || 0,
+                watermark: this._watermark,
             },
             tracks,
         };

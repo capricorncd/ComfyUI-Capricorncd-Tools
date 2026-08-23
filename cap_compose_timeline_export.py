@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from typing import Any
 
 import folder_paths
@@ -13,6 +14,7 @@ import folder_paths
 from .cap_compose_clip_videos import _probe_has_audio, _run_ffmpeg
 from .cap_seq_to_video import _ffmpeg_path
 from .cap_timeline_project_io import _safe_name
+from .cap_watermark import resolve_font_path
 from .timecode import resolve_media_path
 
 log = logging.getLogger(__name__)
@@ -179,10 +181,187 @@ def _escape_enable(start: float, end: float) -> str:
     return f"between(t\\,{start:.6f}\\,{end:.6f})"
 
 
+_WM_POSITIONS = (
+    "top-left", "top-right", "bottom-left", "bottom-right",
+    "center", "top-center", "bottom-center",
+)
+
+
+def _clamp_margin(margin: dict, width: int, height: int) -> dict:
+    m = _as_dict(margin)
+
+    def clamp(value, limit):
+        try:
+            value = int(round(float(value)))
+        except (TypeError, ValueError):
+            value = 0
+        return max(0, min(value, limit))
+
+    return {
+        "top": clamp(m.get("top", 0), height // 2),
+        "bottom": clamp(m.get("bottom", 0), height // 2),
+        "left": clamp(m.get("left", 0), width // 2),
+        "right": clamp(m.get("right", 0), width // 2),
+    }
+
+
+def _overlay_xy(position: str, margin: dict) -> tuple[str, str]:
+    t, r, b, l = margin["top"], margin["right"], margin["bottom"], margin["left"]
+    table = {
+        "top-left": (f"{l}", f"{t}"),
+        "top-right": (f"main_w-overlay_w-{r}", f"{t}"),
+        "bottom-left": (f"{l}", f"main_h-overlay_h-{b}"),
+        "bottom-right": (f"main_w-overlay_w-{r}", f"main_h-overlay_h-{b}"),
+        "center": ("(main_w-overlay_w)/2", "(main_h-overlay_h)/2"),
+        "top-center": ("(main_w-overlay_w)/2", f"{t}"),
+        "bottom-center": ("(main_w-overlay_w)/2", f"main_h-overlay_h-{b}"),
+    }
+    return table.get(position, table["bottom-right"])
+
+
+def _render_text_watermark_png(text_cfg: dict, scale_pct: float) -> str:
+    """Render the watermark text to a transparent PNG with Pillow and return
+    its temp file path.
+
+    Deliberately not using ffmpeg's own `drawtext` filter: on this class of
+    Windows ffmpeg build (fontconfig + freetype + fribidi all compiled in),
+    `drawtext` segfaults with a native access violation regardless of
+    fontfile/config, which takes the whole compose down with it. Rendering
+    the text ourselves and compositing it as a plain image sidesteps that
+    entirely and reuses the same overlay path as an image watermark.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    lines = str(text_cfg.get("content") or "").split("\n") or [""]
+    try:
+        font_size = max(1, round(float(text_cfg.get("fontSize", 32)) * scale_pct))
+    except (TypeError, ValueError):
+        font_size = max(1, round(32 * scale_pct))
+    color = str(text_cfg.get("color") or "#ffffff").strip().lstrip("#") or "ffffff"
+    if len(color) != 6:
+        color = "ffffff"
+    rgb = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
+
+    font_path = resolve_font_path(text_cfg.get("fontPath") or "")
+    font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+
+    scratch = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    line_gap = max(2, round(font_size * 0.25))
+    boxes = [scratch.textbbox((0, 0), line or " ", font=font) for line in lines]
+    width = max(1, max(b[2] - b[0] for b in boxes))
+    height = max(1, sum(b[3] - b[1] for b in boxes) + line_gap * (len(lines) - 1))
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    y = 0
+    for line, box in zip(lines, boxes):
+        draw.text((-box[0], y - box[1]), line, font=font, fill=(*rgb, 255))
+        y += (box[3] - box[1]) + line_gap
+
+    fd, path = tempfile.mkstemp(suffix=".png", prefix="cap_wm_text_")
+    os.close(fd)
+    img.save(path)
+    return path
+
+
+def _random_schedule(total_sec: float, rng) -> list[tuple[float, float, str]]:
+    segments: list[tuple[float, float, str]] = []
+    t = 0.0
+    prev = None
+    while t < total_sec - 1e-6:
+        end = min(total_sec, t + rng.uniform(10.0, 30.0))
+        choices = [p for p in _WM_POSITIONS if p != prev] or list(_WM_POSITIONS)
+        pos = rng.choice(choices)
+        segments.append((t, end, pos))
+        prev = pos
+        t = end
+    return segments or [(0.0, total_sec, rng.choice(_WM_POSITIONS))]
+
+
+def _resolve_watermark_mode(watermark: dict) -> str:
+    image = _as_dict(watermark.get("image"))
+    if str(image.get("file") or "").strip() and image.get("disabled") is not True:
+        return "image"
+    if str(_as_dict(watermark.get("text")).get("content") or "").strip():
+        return "text"
+    return "none"
+
+
+def _build_watermark_filters(
+    watermark: dict,
+    width: int,
+    height: int,
+    total_sec: float,
+    image_input_index: int,
+) -> tuple[list[str], list[str], str, str | None]:
+    """Return (extra -i args, extra filter_complex fragments, final video
+    label, temp-file-to-delete-afterward-or-None).
+
+    The base video stream must already be available as `[vout]`; the returned
+    filters consume it (fanning out over one overlay per scheduled position
+    segment) and produce a new final label. Both text and image watermarks
+    end up as a plain image `overlay` — text is rendered to a transparent
+    PNG with Pillow first (see `_render_text_watermark_png` for why).
+    """
+    import random
+
+    watermark = _as_dict(watermark)
+    mode = _resolve_watermark_mode(watermark)
+    if mode == "none":
+        return [], [], "vout", None
+
+    try:
+        opacity = max(0.0, min(100.0, float(watermark.get("opacity", 80)))) / 100.0
+    except (TypeError, ValueError):
+        opacity = 0.8
+    try:
+        scale_pct = max(10.0, min(300.0, float(watermark.get("scale", 100)))) / 100.0
+    except (TypeError, ValueError):
+        scale_pct = 1.0
+    margin = _clamp_margin(watermark.get("margin"), width, height)
+    position = str(watermark.get("position") or "bottom-right")
+
+    if position == "random-fixed":
+        schedule = [(0.0, total_sec, random.choice(_WM_POSITIONS))]
+    elif position == "random-interval":
+        schedule = _random_schedule(total_sec, random.Random())
+    elif position in _WM_POSITIONS:
+        schedule = [(0.0, total_sec, position)]
+    else:
+        schedule = [(0.0, total_sec, "bottom-right")]
+
+    cleanup_path: str | None = None
+    if mode == "image":
+        file = str(_as_dict(watermark.get("image")).get("file") or "").strip()
+        path = resolve_media_path(file, location="input")
+        if not path or not os.path.isfile(path):
+            raise ValueError(f"找不到水印图片: {file}")
+        pre_scale = f"scale=iw*{scale_pct:.6f}:ih*{scale_pct:.6f},"
+    else:
+        path = _render_text_watermark_png(_as_dict(watermark.get("text")), scale_pct)
+        cleanup_path = path
+        pre_scale = ""  # scale is already baked into the rendered font size
+
+    input_args = ["-loop", "1", "-i", _ffmpeg_path(path)]
+    filters: list[str] = [
+        f"[{image_input_index}:v]{pre_scale}format=rgba,colorchannelmixer=aa={opacity:.6f}[wm]"
+    ]
+    label = "vout"
+    for i, (start, end, pos) in enumerate(schedule):
+        x, y = _overlay_xy(pos, margin)
+        out = f"vwm{i}"
+        filters.append(
+            f"[{label}][wm]overlay=x={x}:y={y}:eof_action=pass:enable='{_escape_enable(start, end)}'[{out}]"
+        )
+        label = out
+    return input_args, filters, label, cleanup_path
+
+
 def compose_timeline_project(
     project: dict,
     output_path: str,
     ignore_audio_tracks: bool = False,
+    watermark: dict | None = None,
 ) -> dict:
     if not shutil.which("ffmpeg"):
         raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
@@ -201,7 +380,7 @@ def compose_timeline_project(
     os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
 
     cmd: list[str] = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-y", "-hide_banner",
         "-f", "lavfi",
         "-i", f"color=c=black:s={width}x{height}:d={total:.6f}:r={fps}",
     ]
@@ -210,6 +389,12 @@ def compose_timeline_project(
     audio_input_offset = 1 + len(video_segs)
     for seg in audio_segs:
         cmd += ["-i", _ffmpeg_path(seg["path"])]
+
+    watermark_input_index = audio_input_offset + len(audio_segs)
+    wm_input_args, wm_filters, video_out_label, wm_cleanup_path = _build_watermark_filters(
+        watermark, width, height, total, watermark_input_index,
+    )
+    cmd += wm_input_args
 
     filters: list[str] = []
     for i, seg in enumerate(video_segs):
@@ -236,6 +421,7 @@ def compose_timeline_project(
         )
         prev = out
     filters.append(f"[{prev}]format=yuv420p[vout]")
+    filters += wm_filters
 
     amix_labels: list[str] = []
     for i, seg in enumerate(video_segs):
@@ -262,7 +448,7 @@ def compose_timeline_project(
         )
         amix_labels.append(label)
 
-    map_args: list[str] = ["-map", "[vout]"]
+    map_args: list[str] = ["-map", f"[{video_out_label}]"]
     if amix_labels:
         if len(amix_labels) == 1:
             a_map = f"[{amix_labels[0]}]"
@@ -293,7 +479,11 @@ def compose_timeline_project(
         output_path,
     )
     log.debug("[compose_timeline] ffmpeg: %s", " ".join(cmd))
-    _run_ffmpeg(cmd)
+    try:
+        _run_ffmpeg(cmd)
+    finally:
+        if wm_cleanup_path and os.path.exists(wm_cleanup_path):
+            os.unlink(wm_cleanup_path)
     return {
         "width": width,
         "height": height,
@@ -358,6 +548,7 @@ def compose_to_output(
     filename_prefix: str | None = None,
     filename: str | None = None,
     ignore_audio_tracks: bool = False,
+    watermark: dict | None = None,
 ) -> dict:
     project_name = _as_dict(project).get("name") or "未命名项目"
     leaf, subfolder, output_path = resolve_compose_output_path(
@@ -370,6 +561,7 @@ def compose_to_output(
         project,
         output_path,
         ignore_audio_tracks=bool(ignore_audio_tracks),
+        watermark=watermark,
     )
     meta["filename"] = leaf
     meta["subfolder"] = subfolder

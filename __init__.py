@@ -411,11 +411,13 @@ def _register_routes():
             if not filename:
                 filename = build_compose_filename(project.get("name") or "未命名项目")
             ignore_audio_tracks = bool(payload.get("ignore_audio_tracks"))
+            watermark = payload.get("watermark")
             meta = compose_to_output(
                 project,
                 filename_prefix=filename_prefix,
                 filename=filename,
                 ignore_audio_tracks=ignore_audio_tracks,
+                watermark=watermark if isinstance(watermark, dict) else None,
             )
             return web.json_response({
                 "ok": True,
@@ -434,6 +436,33 @@ def _register_routes():
             return web.json_response({"error": str(exc)}, status=500)
         except Exception as exc:
             logging.exception("[CapricorncdTools] compose_video error")
+            return web.json_response({"error": str(exc)}, status=500)
+
+    @routes.post("/audio_keyframe_timeline/reveal_output")
+    async def api_reveal_output(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        try:
+            data = await request.json()
+            filename = str(data.get("filename", "")).strip()
+            subfolder = str(data.get("subfolder", "")).strip().strip("/")
+            if not filename:
+                return web.json_response({"error": "Missing filename"}, status=400)
+            rel = f"{subfolder}/{filename}" if subfolder else filename
+            path = _safe_join(_fp.get_output_directory(), rel)
+            if not path or not os.path.isfile(path):
+                return web.json_response({"error": "文件不存在"}, status=404)
+            # Local desktop use only: reveals the file on the machine running
+            # this ComfyUI backend, which is the same machine as the browser
+            # for the standard local install this extension targets.
+            if sys.platform == "win32":
+                subprocess.Popen(["explorer", f"/select,{path}"])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", path])
+            else:
+                subprocess.Popen(["xdg-open", os.path.dirname(path)])
+            return web.json_response({"ok": True})
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] reveal_output error")
             return web.json_response({"error": str(exc)}, status=500)
 
     @routes.post("/audio_keyframe_timeline/import_project_zip")
@@ -616,6 +645,17 @@ def _register_routes():
             return web.json_response(data)
         except Exception as exc:
             logging.exception("[CapricorncdTools] h3_skills_sync error")
+            return web.json_response({"error": str(exc)}, status=500)
+
+    @routes.get("/audio_keyframe_timeline/system_fonts")
+    async def api_system_fonts(_request: web.Request) -> web.Response:
+        import asyncio
+        from .cap_watermark import list_system_fonts
+        try:
+            fonts = await asyncio.to_thread(list_system_fonts)
+            return web.json_response({"fonts": list(fonts)})
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] system_fonts error")
             return web.json_response({"error": str(exc)}, status=500)
 
     @routes.get("/cap/ffmpeg_status")
