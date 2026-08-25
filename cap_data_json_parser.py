@@ -20,12 +20,12 @@ class CAP_DataJsonClipParser:
                 "data_json": ("STRING", {"default": "", "multiline": True}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
-                                        "tooltip": "音频修剪偏移（秒），结束时间 = clip_end_ms + trim_offset × 1000"}),
+                                        "tooltip": "Audio trim offset (seconds); end time = clip_end_ms + trim_offset x 1000"}),
                 "seq_name_mode": (
                     ["from_start", "index"],
                     {
                         "default": "from_start",
-                        "tooltip": "序列帧合成视频文件名前缀后缀：from_start=FROM_… 标签，index=四位索引",
+                        "tooltip": "Frame-sequence video filename suffix: from_start = FROM_... label, index = 4-digit index",
                     },
                 ),
             },

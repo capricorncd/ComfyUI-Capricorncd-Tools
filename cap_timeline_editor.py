@@ -177,7 +177,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                     "BOOLEAN",
                     {
                         "default": False,
-                        "tooltip": "切换时交换当前 width / height（如 1280×720 → 720×1280）",
+                        "tooltip": "Swap the current width/height when toggled (e.g. 1280x720 -> 720x1280)",
                     },
                 ),
                 "project_version": ("STRING", {"default": PROJECT_VERSION}),
@@ -188,7 +188,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                             {
                                 "project_version": PROJECT_VERSION,
                                 "schema_version": SCHEMA_VERSION,
-                                "name": "未命名项目",
+                                "name": "Untitled Project",
                                 "media": [],
                                 "settings": {},
                                 "tracks": [],
@@ -434,7 +434,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             value = {}
         value.setdefault("settings", {})
         value.setdefault("tracks", [])
-        value.setdefault("name", "未命名项目")
+        value.setdefault("name", "Untitled Project")
         if not isinstance(value["settings"], dict):
             value["settings"] = {}
         if not isinstance(value["tracks"], list):

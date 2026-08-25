@@ -67,13 +67,13 @@ class CAP_SizeSettings:
                 }),
                 "lock_aspect": ("BOOLEAN", {
                     "default": True,
-                    "label_on": "锁定",
-                    "label_off": "自由",
+                    "label_on": "Locked",
+                    "label_off": "Free",
                     "tooltip": "When locked, editing width updates height (and vice versa) to keep the aspect ratio",
                 }),
                 "orientation": (ORIENTATIONS, {
                     "default": "纵向",
-                    "tooltip": "纵向 keeps preset WxH; 横向 swaps width and height",
+                    "tooltip": "Portrait keeps the preset's WxH as-is; Landscape swaps width and height",
                 }),
                 "custom_width": ("INT", {
                     "default": 720,

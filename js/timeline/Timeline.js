@@ -1,9 +1,10 @@
 import { EventEmitter } from './EventEmitter.js';
-import { clamp, formatTime as _formatTime, TRACK_TYPES } from './utils.js';
+import { clamp, formatTime as _formatTime, TRACK_TYPES, trackTypeLabel } from './utils.js';
 import { iconHtml } from '../cap_icons.js';
 import { Track } from './Track.js';
 import { TimeRuler } from './TimeRuler.js';
 import { PlayHead } from './PlayHead.js';
+import { t as i18nT } from '../i18n/timeline_widget.js';
 
 const BASE_PPS = 100; // pixels per second at zoom = 1
 const SNAP_EDGE_PX = 8;
@@ -257,8 +258,8 @@ export class Timeline extends EventEmitter {
 
     // Add track button in toolbar
     const addBtn = el('button', 'tl-btn tl-btn-add-track');
-    addBtn.textContent = '+ 轨道';
-    addBtn.title = '添加图片或音频轨道';
+    addBtn.textContent = i18nT('add_track');
+    addBtn.title = i18nT('add_track_title');
     addBtn.addEventListener('click', () => this._showAddTrackMenu(addBtn));
     this.toolbarEl.appendChild(addBtn);
 
@@ -417,7 +418,7 @@ export class Timeline extends EventEmitter {
     Object.entries(TRACK_TYPES).forEach(([type, meta]) => {
       if (allowed && !allowed.includes(type)) return;
       const item = el('button', 'tl-add-menu-item');
-      item.innerHTML = `<span class="tl-add-menu-icon" style="color:${meta.color}">${meta.icon}</span> ${meta.label}`;
+      item.innerHTML = `<span class="tl-add-menu-icon" style="color:${meta.color}">${meta.icon}</span> ${trackTypeLabel(type)}`;
       item.addEventListener('click', () => {
         this.addTrack({ type });
         menu.remove();

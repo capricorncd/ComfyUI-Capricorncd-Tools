@@ -1,5 +1,7 @@
 /** Built-in prompt presets for Rich Prompt library. */
 
+import { t } from "./i18n/prompt_library.js";
+
 function ensureComma(text) {
     const t = String(text ?? "").trim();
     if (!t) return t;
@@ -361,11 +363,11 @@ export const BUILTIN_PRESETS = [
 ];
 
 export const PRESET_CATEGORIES = {
-    gu_feng_female: { id: "gu_feng_female", label: "古风女" },
-    gu_feng_male: { id: "gu_feng_male", label: "古风男" },
-    style: { id: "style", label: "风格" },
-    quality: { id: "quality", label: "质量" },
-    other: { id: "other", label: "其他" },
+    gu_feng_female: { id: "gu_feng_female", get label() { return t("cat_gu_feng_female"); } },
+    gu_feng_male: { id: "gu_feng_male", get label() { return t("cat_gu_feng_male"); } },
+    style: { id: "style", get label() { return t("cat_style"); } },
+    quality: { id: "quality", get label() { return t("cat_quality"); } },
+    other: { id: "other", get label() { return t("cat_other"); } },
 };
 
 export const PRESET_FILTER_ORDER = [
@@ -377,13 +379,13 @@ export const PRESET_FILTER_ORDER = [
 ];
 
 export const GU_FENG_FEMALE_SUB_FILTERS = [
-    { id: "all", label: "全部" },
-    { id: "layout", label: "构图" },
-    { id: "overall", label: "整体" },
-    { id: "face", label: "脸型" },
-    { id: "hair", label: "发饰" },
-    { id: "outfit", label: "服装" },
-    { id: "body", label: "身材" },
+    { id: "all", get label() { return t("sub_all"); } },
+    { id: "layout", get label() { return t("sub_layout"); } },
+    { id: "overall", get label() { return t("sub_overall"); } },
+    { id: "face", get label() { return t("sub_face"); } },
+    { id: "hair", get label() { return t("sub_hair"); } },
+    { id: "outfit", get label() { return t("sub_outfit"); } },
+    { id: "body", get label() { return t("sub_body"); } },
 ];
 
 export function getBuiltinPresets(category) {

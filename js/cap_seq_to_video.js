@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
 import { loadExtensionCss } from "./cap_ui.js";
+import { t } from "./i18n/seq_to_video.js";
 
 const NODE_CLASS     = "CAP_SeqToVideo";
 const PLAYER_H       = 200;  // placeholder / initial height in px
@@ -148,7 +149,7 @@ function _buildPlayer(node) {
 
     const holder = document.createElement("div");
     holder.className = "stv-placeholder";
-    holder.textContent = "等待合成…";
+    holder.textContent = t("waiting_compose");
     root.appendChild(holder);
 
     const w = node.addDOMWidget("stv_ui", "stv_player", root, {
@@ -200,7 +201,7 @@ function _buildPlayer(node) {
         if (!node._stvRoot) return;
         if (node._stvVideo) return;
         if (!status.available) {
-            _showError(node, "未检测到 ffmpeg，请安装后重启 ComfyUI");
+            _showError(node, t("ffmpeg_not_found"));
         }
     });
 }

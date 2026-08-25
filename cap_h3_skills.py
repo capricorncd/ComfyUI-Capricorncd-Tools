@@ -9,6 +9,8 @@ import sys
 import threading
 from pathlib import Path
 
+from .cap_i18n import get_last_known_lang, t
+
 SKILL_REPO_URL = "https://github.com/T8mars/minimax-h3-prompt-skill-T8"
 _SKILL_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,120}$")
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
@@ -165,7 +167,7 @@ def load_skill_text(skill_id: str) -> str:
 def _run_git(args: list[str], cwd: Path | None = None, timeout: int = 300) -> str:
     git = shutil.which("git")
     if not git:
-        raise RuntimeError("未找到 git，请先安装 Git 后再更新 Skill 库")
+        raise RuntimeError(t("git_not_found", get_last_known_lang()))
     kwargs: dict = {"capture_output": True, "text": True, "timeout": timeout}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
@@ -180,7 +182,7 @@ def _run_git(args: list[str], cwd: Path | None = None, timeout: int = 300) -> st
 
 def sync_skill_repo() -> dict:
     if not _SYNC_LOCK.acquire(blocking=False):
-        raise RuntimeError("正在同步 Skill 库，请稍候")
+        raise RuntimeError(t("skill_sync_in_progress", get_last_known_lang()))
     try:
         root = skill_repo_root()
         root.parent.mkdir(parents=True, exist_ok=True)

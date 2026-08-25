@@ -72,7 +72,7 @@ class CAP_AudioTimeline:
                     },
                 ),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1,
-                                        "tooltip": "音频修剪时长偏移（秒），trimmed_audio 的结束时间 = end_ms + trim_offset × 1000，不影响 data_json 时间轴与 clips_audio。"}),
+                                        "tooltip": "Audio trim duration offset (seconds); trimmed_audio's end time = end_ms + trim_offset x 1000. Does not affect the data_json timeline or clips_audio."}),
             },
         }
 

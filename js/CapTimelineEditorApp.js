@@ -5,6 +5,7 @@ import { parseTimecode, formatTimecode, frameIndexFromSecs, encodeClipTimingMs, 
 import { attachRichPromptHandler, setRichPromptValue, toggleComment, resolvePromptTextarea, updateRichPromptMirror } from "./rich_prompt.js";
 import { loadExtensionCss } from "./cap_ui.js";
 import { iconHtml } from "./cap_icons.js";
+import { t as T } from "./i18n/timeline_editor.js";
 
 /** Right-side empty margin as a fraction of the timeline viewport width. */
 const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
@@ -45,46 +46,50 @@ const WATERMARK_FIXED_POSITIONS = [
 ];
 const WATERMARK_POSITIONS = new Set([...WATERMARK_FIXED_POSITIONS, "random-interval", "random-fixed"]);
 const WATERMARK_POSITION_LABELS = {
-    "top-left": "左上角", "top-center": "顶部居中", "top-right": "右上角",
-    "bottom-left": "左下角", "bottom-center": "底部居中", "bottom-right": "右下角",
-    "center": "画面居中",
-    "random-interval": "随机（10-30秒换位）",
-    "random-fixed": "随机（固定位置）",
+    get "top-left"() { return T("wm_pos_top_left"); },
+    get "top-center"() { return T("wm_pos_top_center"); },
+    get "top-right"() { return T("wm_pos_top_right"); },
+    get "bottom-left"() { return T("wm_pos_bottom_left"); },
+    get "bottom-center"() { return T("wm_pos_bottom_center"); },
+    get "bottom-right"() { return T("wm_pos_bottom_right"); },
+    get "center"() { return T("wm_pos_center"); },
+    get "random-interval"() { return T("wm_pos_random_interval"); },
+    get "random-fixed"() { return T("wm_pos_random_fixed"); },
 };
 const OUTPUT_VIDEOS_TIME_RANGES = [
-    { id: "1h", label: "1小时", hours: 1 },
-    { id: "4h", label: "4小时", hours: 4 },
-    { id: "1d", label: "1天", hours: 24 },
-    { id: "all", label: "全部", hours: null },
+    { id: "1h", get label() { return T("time_range_1h"); }, hours: 1 },
+    { id: "4h", get label() { return T("time_range_4h"); }, hours: 4 },
+    { id: "1d", get label() { return T("time_range_1d"); }, hours: 24 },
+    { id: "all", get label() { return T("time_range_all"); }, hours: null },
 ];
 const MEDIA_KIND_FILTERS = [
-    { id: "image", label: "图片" },
-    { id: "video", label: "视频" },
-    { id: "audio", label: "音频" },
-    { id: "text", label: "文本" },
-    { id: "other", label: "其他" },
+    { id: "image", get label() { return T("media_kind_image"); } },
+    { id: "video", get label() { return T("media_kind_video"); } },
+    { id: "audio", get label() { return T("media_kind_audio"); } },
+    { id: "text", get label() { return T("media_kind_text"); } },
+    { id: "other", get label() { return T("media_kind_other"); } },
 ];
 const MEDIA_KIND_CORE = new Set(["image", "video", "audio", "text"]);
 const CLIP_ROLES = [
-    { id: "multi_ref", label: "多图参考" },
-    { id: "first_last", label: "首尾帧" },
-    { id: "t2v", label: "文生视频" },
-    { id: "video_ref", label: "视频参考" },
-    { id: "video_edit", label: "视频编辑" },
-    { id: "other", label: "其他" },
+    { id: "multi_ref", get label() { return T("clip_role_multi_ref"); } },
+    { id: "first_last", get label() { return T("clip_role_first_last"); } },
+    { id: "t2v", get label() { return T("clip_role_t2v"); } },
+    { id: "video_ref", get label() { return T("clip_role_video_ref"); } },
+    { id: "video_edit", get label() { return T("clip_role_video_edit"); } },
+    { id: "other", get label() { return T("clip_role_other"); } },
 ];
 const CLIP_AGENTS = [
     { id: "MiniMaxH3", label: "MiniMaxH3" },
     { id: "LTX", label: "LTX" },
     { id: "Bernini", label: "Bernini" },
     { id: "Wan", label: "Wan" },
-    { id: "other", label: "其他" },
+    { id: "other", get label() { return T("clip_role_other"); } },
 ];
 const MEDIA_ASSET_TYPES = [
-    { id: "character", label: "角色" },
-    { id: "scene", label: "场景" },
-    { id: "prop", label: "道具" },
-    { id: "other", label: "其他" },
+    { id: "character", get label() { return T("asset_type_character"); } },
+    { id: "scene", get label() { return T("asset_type_scene"); } },
+    { id: "prop", get label() { return T("asset_type_prop"); } },
+    { id: "other", get label() { return T("asset_type_other"); } },
 ];
 const DEFAULT_CLIP_NAME = "Clip";
 const LEGACY_CLIP_NAMES = new Set(["Clip", "Package", "clip", "package"]);
@@ -371,8 +376,8 @@ export class CapTimelineEditorApp {
         const root = document.createElement("div");
         root.className = "cat-te-launcher";
         root.innerHTML = `
-          <button type="button" class="cat-te-open-btn">⛶ 编辑时间轴</button>
-          <div class="cat-te-launcher-hint">全屏编辑 · 拖入素材 · Ctrl+B/G · Alt+滚轮平移</div>
+          <button type="button" class="cat-te-open-btn">${T("launcher_open_btn")}</button>
+          <div class="cat-te-launcher-hint">${T("launcher_hint")}</div>
         `;
         const btn = root.querySelector(".cat-te-open-btn");
         // Stop LiteGraph/ComfyUI from treating launcher clicks as node selection
@@ -498,7 +503,7 @@ export class CapTimelineEditorApp {
             await this._initTimelineFromWidgets();
         } catch (error) {
             this._discardTimeline();
-            alert(`加载时间轴失败，未覆盖原工程：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("load_timeline_failed", { msg: error instanceof Error ? error.message : String(error) }));
             return;
         }
         if (gen !== this._openGen || CapTimelineEditorApp._open !== this || !this._overlay?.classList.contains("open")) {
@@ -640,7 +645,7 @@ export class CapTimelineEditorApp {
         try {
             const project = JSON.parse(text);
             if (!project || typeof project !== "object" || Array.isArray(project)) {
-                return { project: null, error: new Error("工程 JSON 根节点无效") };
+                return { project: null, error: new Error(T("project_json_root_invalid")) };
             }
             return { project, error: null };
         } catch (error) {
@@ -650,7 +655,6 @@ export class CapTimelineEditorApp {
 
     _openSettings() {
         if (!this.settingsModal) return;
-        this.langSelect.value = localStorage.getItem("cat-te-lang") || "zh";
         this.autosaveIntervalInput.value = String(this._getAutosaveIntervalSec());
         this.settingsModal.hidden = false;
         void this._loadAgentConfigs();
@@ -663,7 +667,7 @@ export class CapTimelineEditorApp {
 
     async _loadAgentConfigs() {
         if (!this.agentList) return;
-        this.agentList.textContent = "加载中…";
+        this.agentList.textContent = T("loading_ellipsis");
         try {
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/agents"));
             const data = await response.json().catch(() => ({}));
@@ -671,7 +675,7 @@ export class CapTimelineEditorApp {
             this._agentConfigs = Array.isArray(data.agents) ? data.agents : [];
             this._renderAgentConfigs();
         } catch (error) {
-            this.agentList.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
+            this.agentList.textContent = T("load_failed", { msg: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -681,7 +685,7 @@ export class CapTimelineEditorApp {
         if (!this._agentConfigs?.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-agent-empty";
-            empty.textContent = "尚未添加 Agent";
+            empty.textContent = T("no_agents_yet");
             this.agentList.appendChild(empty);
             return;
         }
@@ -691,14 +695,14 @@ export class CapTimelineEditorApp {
             const text = document.createElement("div");
             text.className = "cat-te-agent-row-text";
             const title = document.createElement("strong");
-            title.textContent = config.label || "未命名";
+            title.textContent = config.label || T("unnamed");
             const detail = document.createElement("span");
-            detail.textContent = `${config.provider === "gemini" ? "Gemini" : "OpenAI"} · ${config.model}${config.enabled ? "" : " · 已停用"}`;
+            detail.textContent = `${config.provider === "gemini" ? "Gemini" : "OpenAI"} · ${config.model}${config.enabled ? "" : T("agent_disabled_suffix")}`;
             text.append(title, detail);
             const edit = document.createElement("button");
             edit.type = "button";
             edit.className = "cat-te-btn";
-            edit.textContent = "编辑";
+            edit.textContent = T("edit_btn");
             edit.addEventListener("click", () => this._editAgentConfig(config));
             row.append(text, edit);
             this.agentList.appendChild(row);
@@ -712,7 +716,7 @@ export class CapTimelineEditorApp {
         this.agentProviderSelect.value = config?.provider || "openai";
         this.agentModelInput.value = config?.model || AGENT_DEFAULT_MODELS[this.agentProviderSelect.value] || "";
         this.agentKeyInput.value = "";
-        this.agentKeyInput.placeholder = config?.has_key ? "留空则保留现有 Key" : "输入 API Key";
+        this.agentKeyInput.placeholder = config?.has_key ? T("leave_blank_keep_key") : T("enter_api_key");
         this.agentEnabledCb.checked = config?.enabled !== false;
         this.agentDeleteBtn.hidden = !config;
         this.agentForm.hidden = false;
@@ -745,12 +749,12 @@ export class CapTimelineEditorApp {
             this._cancelAgentEdit();
             await this._loadAgentConfigs();
         } catch (error) {
-            alert(`保存 Agent 失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("save_agent_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
     async _deleteAgentConfig() {
-        if (!this._editingAgentId || !confirm("确定删除这个 Agent 配置？")) return;
+        if (!this._editingAgentId || !confirm(T("confirm_delete_agent"))) return;
         try {
             const response = await fetch(api.apiURL(`/audio_keyframe_timeline/agents/${encodeURIComponent(this._editingAgentId)}`), { method: "DELETE" });
             const data = await response.json().catch(() => ({}));
@@ -758,32 +762,32 @@ export class CapTimelineEditorApp {
             this._cancelAgentEdit();
             await this._loadAgentConfigs();
         } catch (error) {
-            alert(`删除 Agent 失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("delete_agent_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
     _confirmOverwriteImport() {
-        return !(this._hasUnsavedChanges() && !confirm("当前时间轴已有未保存的更改，是否用导入的项目覆盖？"));
+        return !(this._hasUnsavedChanges() && !confirm(T("confirm_overwrite_import")));
     }
 
     _showImportMenu(e) {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
-            { label: "从目录导入项目", fn: () => void this._importFromDirectory() },
-            { label: "从ZIP导入项目", fn: () => this._chooseZipImport() },
+            { label: T("import_from_directory"), fn: () => void this._importFromDirectory() },
+            { label: T("import_from_zip"), fn: () => this._chooseZipImport() },
         ], r.left, r.bottom + 4);
     }
 
     _showExportMenu(e) {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
-            { label: "导出项目及素材到目录", fn: () => void this._exportToDirectory() },
-            { label: "导出项目及素材为ZIP", fn: () => void this._exportAsZip() },
-            { label: "合成视频", fn: () => void this._composeGeneratedVideosExport() },
+            { label: T("export_to_directory"), fn: () => void this._exportToDirectory() },
+            { label: T("export_as_zip"), fn: () => void this._exportAsZip() },
+            { label: T("compose_video_menu"), fn: () => void this._composeGeneratedVideosExport() },
         ], r.left, r.bottom + 4);
     }
 
-    _safeProjectFilename(fallback = "未命名项目") {
+    _safeProjectFilename(fallback = T("untitled_project")) {
         const projectName = String(this.projectNameInput?.value || fallback).trim() || fallback;
         return projectName
             .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
@@ -793,14 +797,14 @@ export class CapTimelineEditorApp {
 
     async _pickDirectory(mode = "readwrite") {
         if (typeof window.showDirectoryPicker !== "function") {
-            throw new Error("当前环境不支持目录选择（请使用 Chrome / Edge，或改用 ZIP）");
+            throw new Error(T("directory_picker_unsupported"));
         }
         return window.showDirectoryPicker({ mode });
     }
 
     async _writeRelativeFile(root, relPath, data) {
         const parts = String(relPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
-        if (!parts.length) throw new Error("无效的导出路径");
+        if (!parts.length) throw new Error(T("invalid_export_path"));
         let dir = root;
         for (let i = 0; i < parts.length - 1; i++) {
             dir = await dir.getDirectoryHandle(parts[i], { create: true });
@@ -813,7 +817,7 @@ export class CapTimelineEditorApp {
 
     async _readRelativeFile(root, relPath) {
         const parts = String(relPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
-        if (!parts.length) throw new Error("无效的导入路径");
+        if (!parts.length) throw new Error(T("invalid_import_path"));
         let dir = root;
         for (let i = 0; i < parts.length - 1; i++) {
             dir = await dir.getDirectoryHandle(parts[i]);
@@ -840,7 +844,7 @@ export class CapTimelineEditorApp {
                 lastError = error;
             }
         }
-        throw lastError || new Error(`缺少素材：${file}`);
+        throw lastError || new Error(T("missing_asset_file", { file }));
     }
 
     _downloadBlob(blob, filename) {
@@ -856,10 +860,10 @@ export class CapTimelineEditorApp {
 
     _validateImportedProject(project) {
         if (!project || typeof project !== "object" || Array.isArray(project)) {
-            throw new Error("项目根节点必须是对象");
+            throw new Error(T("project_root_must_be_object"));
         }
         if (!Array.isArray(project.tracks) && !Array.isArray(project.media) && !Array.isArray(project.resources)) {
-            throw new Error("项目缺少 tracks / media");
+            throw new Error(T("project_missing_tracks_media"));
         }
         if (!Array.isArray(project.tracks)) project.tracks = [];
         return this._migrateProjectDocument(project);
@@ -879,7 +883,7 @@ export class CapTimelineEditorApp {
         this._updateHistoryButtons();
         requestAnimationFrame(() => this._timeline?._refresh());
         if (warnings?.length) {
-            alert(`导入完成，但有 ${warnings.length} 项警告：\n${warnings.slice(0, 8).join("\n")}${warnings.length > 8 ? "\n…" : ""}`);
+            alert(T("import_complete_with_warnings", { n: warnings.length, list: warnings.slice(0, 8).join("\n") + (warnings.length > 8 ? "\n…" : "") }));
         }
     }
 
@@ -952,7 +956,7 @@ export class CapTimelineEditorApp {
             body: form,
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || `上传素材失败：${filename}`);
+        if (!response.ok) throw new Error(data.error || T("upload_asset_failed", { filename }));
         return data;
     }
 
@@ -965,7 +969,7 @@ export class CapTimelineEditorApp {
                 body: JSON.stringify(this._buildProject()),
             });
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || "准备导出失败");
+            if (!response.ok) throw new Error(data.error || T("export_prepare_failed"));
             const missing = [...(data.missing || [])];
             await this._writeRelativeFile(
                 dir,
@@ -982,13 +986,13 @@ export class CapTimelineEditorApp {
                 await this._writeRelativeFile(dir, entry.arcname, await fileRes.blob());
             }
             if (missing.length) {
-                alert(`已导出到目录，但有 ${missing.length} 个素材缺失：\n${missing.slice(0, 8).join("\n")}${missing.length > 8 ? "\n…" : ""}`);
+                alert(T("export_to_dir_missing", { n: missing.length, list: missing.slice(0, 8).join("\n") + (missing.length > 8 ? "\n…" : "") }));
             } else {
-                alert("已导出到目录");
+                alert(T("exported_to_directory"));
             }
         } catch (error) {
             if (error?.name === "AbortError") return;
-            alert(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("export_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
@@ -1020,7 +1024,7 @@ export class CapTimelineEditorApp {
         this._lastComposeOutput = null;
         if (this.composeRunBtn) {
             this.composeRunBtn.disabled = false;
-            this.composeRunBtn.textContent = "开始合成";
+            this.composeRunBtn.textContent = T("compose_start_btn");
         }
         this._clampWatermarkMargin();
         this._wmActiveTab = this._watermark.image.file ? "image" : "text";
@@ -1062,7 +1066,7 @@ export class CapTimelineEditorApp {
         const project = this._buildProject();
         this._composeBusy = true;
         if (this.composeRunBtn) this.composeRunBtn.disabled = true;
-        this._setComposeStatus("正在合成，请稍候…");
+        this._setComposeStatus(T("composing_please_wait"));
         try {
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/compose_video"), {
                 method: "POST",
@@ -1076,15 +1080,15 @@ export class CapTimelineEditorApp {
                 }),
             });
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || `合成失败（HTTP ${response.status}）`);
+            if (!response.ok) throw new Error(data.error || T("compose_failed_http", { status: response.status }));
 
             const outName = data.filename || filename;
             const sub = String(data.subfolder || "").replace(/^\/+|\/+$/g, "");
             const rel = sub ? `${sub}/${outName}` : outName;
             this._lastComposeOutput = { filename: outName, subfolder: sub };
             this._composeDone = true;
-            if (this.composeRunBtn) this.composeRunBtn.textContent = "打开文件夹";
-            this._setComposeStatus(`已保存到 ComfyUI/output/${rel}`, { ok: true });
+            if (this.composeRunBtn) this.composeRunBtn.textContent = T("open_folder_btn");
+            this._setComposeStatus(T("saved_to_output", { rel }), { ok: true });
         } catch (error) {
             if (error?.name === "AbortError") {
                 this._setComposeStatus("");
@@ -1106,9 +1110,9 @@ export class CapTimelineEditorApp {
                 body: JSON.stringify(this._lastComposeOutput),
             });
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || "打开文件夹失败");
+            if (!response.ok) throw new Error(data.error || T("open_folder_prepare_failed"));
         } catch (error) {
-            alert(`打开文件夹失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("open_folder_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
@@ -1207,7 +1211,7 @@ export class CapTimelineEditorApp {
         if (!fonts.length) {
             const opt = document.createElement("option");
             opt.value = "";
-            opt.textContent = this._systemFonts ? "（未找到字体）" : "（加载中…）";
+            opt.textContent = this._systemFonts ? T("font_not_found") : T("font_loading");
             select.appendChild(opt);
             return;
         }
@@ -1240,7 +1244,7 @@ export class CapTimelineEditorApp {
             this._syncWatermarkUiFromState();
             this._scheduleComposePreview();
         } catch (error) {
-            alert(`上传水印图片失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("upload_watermark_image_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
@@ -1351,7 +1355,7 @@ export class CapTimelineEditorApp {
         if (this.wmMarginLockBtn) {
             this.wmMarginLockBtn.innerHTML = iconHtml(locked ? "lock" : "lockOpen", 14);
             this.wmMarginLockBtn.classList.toggle("is-active", locked);
-            this.wmMarginLockBtn.title = locked ? "已锁定：四边同步（点击解锁）" : "已解锁：四边独立设置（点击锁定）";
+            this.wmMarginLockBtn.title = locked ? T("watermark_lock_locked_title") : T("watermark_lock_unlocked_title");
         }
     }
 
@@ -1500,7 +1504,7 @@ export class CapTimelineEditorApp {
             });
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
-                throw new Error(data.error || "导出 ZIP 失败");
+                throw new Error(data.error || T("export_zip_failed"));
             }
             const blob = await response.blob();
             const headerName = response.headers.get("X-Export-Filename");
@@ -1520,11 +1524,11 @@ export class CapTimelineEditorApp {
                 }
             }
             if (missing.length) {
-                alert(`已导出 ZIP，但有 ${missing.length} 个素材缺失：\n${missing.slice(0, 8).join("\n")}${missing.length > 8 ? "\n…" : ""}`);
+                alert(T("export_zip_missing", { n: missing.length, list: missing.slice(0, 8).join("\n") + (missing.length > 8 ? "\n…" : "") }));
             }
         } catch (error) {
             if (error?.name === "AbortError") return;
-            alert(`导出失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("export_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
@@ -1547,7 +1551,7 @@ export class CapTimelineEditorApp {
                 try {
                     fileObj = await this._readImportMediaFile(dir, row.kind, row.file);
                 } catch {
-                    warnings.push(`缺少素材：${row.file}`);
+                    warnings.push(T("missing_asset_file", { file: row.file }));
                     continue;
                 }
                 const uploaded = await this._uploadImportBlob(row.kind, fileObj.name || row.file.split("/").pop(), fileObj);
@@ -1559,12 +1563,12 @@ export class CapTimelineEditorApp {
                 0,
             );
             if (!clipCount) {
-                alert("导入的 project.json 里没有 clip。如果这是清空后的备份，需要更早的目录或 ZIP。");
+                alert(T("import_no_clips"));
             }
             await this._applyImportedProject(remapped, warnings);
         } catch (error) {
             if (error?.name === "AbortError") return;
-            alert(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("import_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
@@ -1580,10 +1584,10 @@ export class CapTimelineEditorApp {
                 body: form,
             });
             const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || "导入 ZIP 失败");
+            if (!response.ok) throw new Error(data.error || T("import_zip_failed"));
             await this._applyImportedProject(data.project, data.warnings || []);
         } catch (error) {
-            alert(`导入失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("import_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
@@ -1631,55 +1635,55 @@ export class CapTimelineEditorApp {
           <header class="cat-te-header">
             <div class="cat-te-brand">
               ${iconHtml("rabbit", 22)}
-              <span class="cat-te-brand-name">时间轴编辑器</span>
+              <span class="cat-te-brand-name">${T("header_brand_name")}</span>
               <span class="cat-te-brand-sep"> | </span>
-              <button type="button" class="cat-te-brand-project" title="编辑项目名称">未命名项目</button>
+              <button type="button" class="cat-te-brand-project" title="${T("edit_project_name_title")}">${T("untitled_project")}</button>
             </div>
             <div class="cat-te-header-spacer"></div>
-            <div class="cat-te-header-scalars" title="节点尺寸与帧率"></div>
-            <button type="button" class="cat-te-btn cat-te-import">导入 ▾</button>
-            <button type="button" class="cat-te-btn cat-te-export">导出 ▾</button>
-            <button type="button" class="cat-te-btn cat-te-settings">⚙ 设置</button>
-            <button type="button" class="cat-te-btn cat-te-header-close" title="关闭">${iconHtml("close", 16)}</button>
+            <div class="cat-te-header-scalars" title="${T("node_size_fps_title")}"></div>
+            <button type="button" class="cat-te-btn cat-te-import">${T("import_btn_caret")}</button>
+            <button type="button" class="cat-te-btn cat-te-export">${T("export_btn_caret")}</button>
+            <button type="button" class="cat-te-btn cat-te-settings">${T("settings_btn")}</button>
+            <button type="button" class="cat-te-btn cat-te-header-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
             <input class="cat-te-import-zip" type="file" accept=".zip,application/zip" hidden />
           </header>
           <div class="cat-te-main">
             <aside class="cat-te-media">
               <div class="cat-te-media-header">
-                <div class="cat-te-media-title">素材</div>
+                <div class="cat-te-media-title">${T("media_title")}</div>
                 <div class="cat-te-media-header-actions"></div>
               </div>
               <div class="cat-te-media-grid"></div>
             </aside>
-            <div class="cat-te-media-split" role="separator" aria-orientation="vertical" aria-label="调整素材栏宽度" title="拖动调整素材栏宽度"></div>
+            <div class="cat-te-media-split" role="separator" aria-orientation="vertical" aria-label="${T("media_split_aria")}" title="${T("media_split_title")}"></div>
             <div class="cat-te-center">
               <div class="cat-te-program">
                 <div class="cat-te-program-stage">
-                  <canvas class="cat-te-program-canvas" aria-label="时间轴预览"></canvas>
-                  <div class="cat-te-program-empty" hidden>无画面</div>
+                  <canvas class="cat-te-program-canvas" aria-label="${T("program_preview_aria")}"></canvas>
+                  <div class="cat-te-program-empty" hidden>${T("no_frame")}</div>
                 </div>
                 <div class="cat-te-program-meta"></div>
               </div>
-              <div class="cat-te-program-split" role="separator" aria-orientation="horizontal" aria-label="调整预览区高度" title="拖动调整预览区高度"></div>
+              <div class="cat-te-program-split" role="separator" aria-orientation="horizontal" aria-label="${T("program_split_aria")}" title="${T("program_split_title")}"></div>
               <div class="cat-te-timeline-host"></div>
             </div>
-            <div class="cat-te-sidebar-split" role="separator" aria-orientation="vertical" aria-label="调整右侧栏宽度" title="拖动调整右侧栏宽度"></div>
+            <div class="cat-te-sidebar-split" role="separator" aria-orientation="vertical" aria-label="${T("sidebar_split_aria")}" title="${T("sidebar_split_title")}"></div>
             <aside class="cat-te-sidebar">
-              <div class="cat-te-panel-title cat-te-sidebar-title">项目设置</div>
+              <div class="cat-te-panel-title cat-te-sidebar-title">${T("project_settings_title")}</div>
               <div class="cat-te-project-panel">
                 <div class="cat-te-project-body">
                   <label class="cat-te-project-name-row">
-                    <span>项目名称</span>
-                    <input class="cat-te-title" type="text" value="未命名项目" aria-label="项目名称" />
+                    <span>${T("project_name_label")}</span>
+                    <input class="cat-te-title" type="text" value="${T("untitled_project")}" aria-label="${T("project_name_label")}" />
                   </label>
-                  <div class="cat-te-project-scalars" aria-label="尺寸与帧率"></div>
+                  <div class="cat-te-project-scalars" aria-label="${T("scalars_aria")}"></div>
                   <div class="cat-te-prompt-wrap cat-te-global-prompt-wrap">
                     <div class="cat-te-prompt-label-row">
-                      <div class="cat-te-prompt-label">全局提示词</div>
-                      <button type="button" class="cat-te-prompt-comment-btn cat-te-global-prompt-comment-btn" title="注释 / 取消注释（Ctrl+/）">${iconHtml("comment", 12)}</button>
+                      <div class="cat-te-prompt-label">${T("global_prompt_label")}</div>
+                      <button type="button" class="cat-te-prompt-comment-btn cat-te-global-prompt-comment-btn" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
                     </div>
                     <div class="cat-te-prompt-input-wrap">
-                      <textarea class="cat-te-global-prompt-input" placeholder="全局提示词…"></textarea>
+                      <textarea class="cat-te-global-prompt-input" placeholder="${T("global_prompt_placeholder")}"></textarea>
                     </div>
                   </div>
                 </div>
@@ -1689,22 +1693,22 @@ export class CapTimelineEditorApp {
                 <div class="cat-te-clip-info-body">
                   <div class="cat-te-clip-info-detail" hidden>
                     <div class="cat-te-clip-swiper">
-                      <button type="button" class="cat-te-clip-swiper-nav prev" title="上一个素材" hidden>‹</button>
+                      <button type="button" class="cat-te-clip-swiper-nav prev" title="${T("prev_material")}" hidden>‹</button>
                       <div class="cat-te-clip-thumb-wrap">
                         <img class="cat-te-clip-thumb" alt="" />
                         <video class="cat-te-clip-thumb-video" muted playsinline hidden></video>
-                        <div class="cat-te-clip-thumb-empty" hidden>空 Clip</div>
-                        <button type="button" class="cat-te-clip-thumb-sort" title="查看素材" hidden>${iconHtml("squareArrowOutUpRight", 12)}</button>
-                        <button type="button" class="cat-te-clip-thumb-delete" title="从 Clip 中移除" hidden>${iconHtml("trash", 12)}</button>
+                        <div class="cat-te-clip-thumb-empty" hidden>${T("empty_clip")}</div>
+                        <button type="button" class="cat-te-clip-thumb-sort" title="${T("view_material_title")}" hidden>${iconHtml("squareArrowOutUpRight", 12)}</button>
+                        <button type="button" class="cat-te-clip-thumb-delete" title="${T("remove_from_clip_title")}" hidden>${iconHtml("trash", 12)}</button>
                       </div>
-                      <button type="button" class="cat-te-clip-swiper-nav next" title="下一个素材" hidden>›</button>
+                      <button type="button" class="cat-te-clip-swiper-nav next" title="${T("next_material")}" hidden>›</button>
                       <span class="cat-te-clip-item-index"></span>
                     </div>
                     <div class="cat-te-clip-meta">
                       <div class="cat-te-clip-name-row">
                         <div class="cat-te-clip-name"></div>
                       </div>
-                      
+
                       <div class="cat-te-clip-times">
                         <span class="cat-te-clip-start"></span>
                         <span class="cat-te-clip-sep">→</span>
@@ -1713,7 +1717,7 @@ export class CapTimelineEditorApp {
                       <div class="cat-te-clip-dur"></div>
                       <label class="cat-te-clip-setting-check cat-te-use-media-prompt">
                         <input class="cat-te-use-media-prompt-cb" type="checkbox" checked disabled />
-                        <span>使用素材提示词</span>
+                        <span>${T("use_media_prompt_label")}</span>
                       </label>
                     </div>
                   </div>
@@ -1721,19 +1725,19 @@ export class CapTimelineEditorApp {
               </div>
               <div class="cat-te-clip-settings">
                 <label class="cat-te-clip-setting-row">
-                  <span>类型</span>
+                  <span>${T("type_label")}</span>
                   <select class="cat-te-clip-role" disabled>
-                    <option value="multi_ref">多图参考</option>
-                    <option value="first_last">首尾帧</option>
-                    <option value="t2v">文生视频</option>
-                    <option value="video_ref">视频参考</option>
-                    <option value="video_edit">视频编辑</option>
-                    <option value="other">其他</option>
+                    <option value="multi_ref">${T("clip_role_multi_ref")}</option>
+                    <option value="first_last">${T("clip_role_first_last")}</option>
+                    <option value="t2v">${T("clip_role_t2v")}</option>
+                    <option value="video_ref">${T("clip_role_video_ref")}</option>
+                    <option value="video_edit">${T("clip_role_video_edit")}</option>
+                    <option value="other">${T("clip_role_other")}</option>
                   </select>
                 </label>
                 <label class="cat-te-clip-setting-row cat-te-clip-role-custom-row" hidden>
-                  <span>自定义类型</span>
-                  <input class="cat-te-clip-role-custom" type="text" placeholder="输入类型" disabled />
+                  <span>${T("custom_type_label")}</span>
+                  <input class="cat-te-clip-role-custom" type="text" placeholder="${T("enter_type_placeholder")}" disabled />
                 </label>
                 <label class="cat-te-clip-setting-row">
                   <span>Agent</span>
@@ -1742,24 +1746,24 @@ export class CapTimelineEditorApp {
                     <option value="LTX">LTX</option>
                     <option value="Bernini">Bernini</option>
                     <option value="Wan">Wan</option>
-                    <option value="other">其他</option>
+                    <option value="other">${T("clip_role_other")}</option>
                   </select>
                 </label>
                 <label class="cat-te-clip-setting-row cat-te-clip-agent-custom-row" hidden>
-                  <span>自定义 Agent</span>
-                  <input class="cat-te-clip-agent-custom" type="text" placeholder="输入模型名" disabled />
+                  <span>${T("custom_agent_label")}</span>
+                  <input class="cat-te-clip-agent-custom" type="text" placeholder="${T("enter_model_name_placeholder")}" disabled />
                 </label>
                 <label class="cat-te-clip-setting-row">
-                  <span>首扩展时长（秒）</span>
+                  <span>${T("head_extend_label")}</span>
                   <input class="cat-te-head-extend" type="number" min="0" max="600" step="1" value="0" disabled />
                 </label>
                 <label class="cat-te-clip-setting-row">
-                  <span>尾扩展时长（秒）</span>
+                  <span>${T("tail_extend_label")}</span>
                   <input class="cat-te-tail-extend" type="number" min="0" max="600" step="1" value="0" disabled />
                 </label>
                 <label class="cat-te-clip-setting-check">
                   <input class="cat-te-gen-preview-video" type="checkbox" disabled />
-                  <span>生成预览时长视频</span>
+                  <span>${T("gen_preview_video_label")}</span>
                 </label>
                 <label class="cat-te-clip-setting-check cat-te-use-global">
                   <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
@@ -1772,32 +1776,29 @@ export class CapTimelineEditorApp {
                     <button type="button" class="cat-te-prompt-tab is-active" data-tab="clip">Clip Prompt</button>
                     <button type="button" class="cat-te-prompt-tab" data-tab="ai">AI Prompt</button>
                   </div>
-                  <button type="button" class="cat-te-ai-optimize-btn" title="AI 优化提示词" disabled>${iconHtml("sparkles", 12)}<span>AI优化</span></button>
+                  <button type="button" class="cat-te-ai-optimize-btn" title="${T("ai_optimize_prompt_title")}" disabled>${iconHtml("sparkles", 12)}<span>${T("ai_optimize_short")}</span></button>
                 </div>
                 <div class="cat-te-prompt-input-wrap" data-prompt-tab="clip">
-                  <textarea class="cat-te-prompt-input" placeholder="选中 Clip 后编辑提示词…" disabled></textarea>
+                  <textarea class="cat-te-prompt-input" placeholder="${T("clip_prompt_placeholder")}" disabled></textarea>
                 </div>
                 <div class="cat-te-prompt-input-wrap" data-prompt-tab="ai" hidden>
-                  <textarea class="cat-te-ai-prompt-input" placeholder="AI 生成的提示词，可手动修改…" disabled></textarea>
+                  <textarea class="cat-te-ai-prompt-input" placeholder="${T("ai_prompt_placeholder")}" disabled></textarea>
                 </div>
               </div>
               <label class="cat-te-clip-setting-check cat-te-use-ai-prompt">
                 <input class="cat-te-use-ai-prompt-cb" type="checkbox" checked disabled />
-                <span>使用AI提示词</span>
+                <span>${T("use_ai_prompt_label")}</span>
               </label>
               <div class="cat-te-clip-videos" hidden>
                 <div class="cat-te-clip-videos-header">
-                  <span>生成视频</span>
-                  <button type="button" class="cat-te-clip-videos-open" title="预览和管理">${iconHtml("squareArrowOutUpRight", 12)}</button>
+                  <span>${T("gen_video_label")}</span>
+                  <button type="button" class="cat-te-clip-videos-open" title="${T("preview_manage_title")}">${iconHtml("squareArrowOutUpRight", 12)}</button>
                 </div>
                 <div class="cat-te-clip-videos-list"></div>
               </div>
               </div>
               <div class="cat-te-shortcuts">
-                Ctrl+点击 多选 · Del 删除（确认）<br>
-                Ctrl+C 复制 · Ctrl+V 粘贴<br>
-                选中素材时 Ctrl+B 禁用 · Ctrl+G 禁用其他<br>
-                Ctrl+滚轮 缩放 · Alt+滚轮 左右滚动
+                ${T("shortcuts_html")}
               </div>
             </aside>
           </div>
@@ -1809,47 +1810,47 @@ export class CapTimelineEditorApp {
           <div class="cat-te-modal-backdrop cat-te-media-preview-modal" hidden>
             <div class="cat-te-modal cat-te-media-preview-dialog">
               <div class="cat-te-modal-header cat-te-media-preview-header">
-                <span class="cat-te-media-preview-title">素材预览</span>
+                <span class="cat-te-media-preview-title">${T("media_preview_title")}</span>
                 <div class="cat-te-media-preview-stars"></div>
-                <button type="button" class="cat-te-modal-close cat-te-media-preview-close" title="关闭">${iconHtml("close", 16)}</button>
+                <button type="button" class="cat-te-modal-close cat-te-media-preview-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-media-preview-body">
-                <button type="button" class="cat-te-media-preview-nav prev" title="上一张（右键）" aria-label="上一张">‹</button>
+                <button type="button" class="cat-te-media-preview-nav prev" title="${T("prev_image_title")}" aria-label="${T("prev_image_aria")}">‹</button>
                 <div class="cat-te-media-preview-stage"></div>
-                <button type="button" class="cat-te-media-preview-nav next" title="下一张（左键）" aria-label="下一张">›</button>
+                <button type="button" class="cat-te-media-preview-nav next" title="${T("next_image_title")}" aria-label="${T("next_image_aria")}">›</button>
               </div>
               <div class="cat-te-media-preview-meta">
                 <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
-                  <span class="cat-te-media-preview-desc-label">描述 / 提示词</span>
+                  <span class="cat-te-media-preview-desc-label">${T("desc_prompt_label")}</span>
                   <div class="cat-te-media-preview-desc-wrap">
-                    <textarea class="cat-te-media-preview-desc" rows="3" placeholder="素材描述或提示词（Ctrl+/ 注释）"></textarea>
+                    <textarea class="cat-te-media-preview-desc" rows="3" placeholder="${T("asset_desc_placeholder")}"></textarea>
                   </div>
                 </div>
                 <div class="cat-te-media-preview-meta-grid">
                   <label class="cat-te-media-preview-meta-row">
-                    <span>类型</span>
+                    <span>${T("type_label")}</span>
                     <select class="cat-te-media-preview-type">
-                      <option value="">未设置</option>
-                      <option value="character">角色</option>
-                      <option value="scene">场景</option>
-                      <option value="prop">道具</option>
-                      <option value="other">其他</option>
+                      <option value="">${T("not_set_option")}</option>
+                      <option value="character">${T("asset_type_character")}</option>
+                      <option value="scene">${T("asset_type_scene")}</option>
+                      <option value="prop">${T("asset_type_prop")}</option>
+                      <option value="other">${T("asset_type_other")}</option>
                     </select>
                   </label>
                   <label class="cat-te-media-preview-meta-row cat-te-media-preview-type-custom-row" hidden>
-                    <span>自定义类型</span>
-                    <input class="cat-te-media-preview-type-custom" type="text" placeholder="输入类型" />
+                    <span>${T("custom_type_label")}</span>
+                    <input class="cat-te-media-preview-type-custom" type="text" placeholder="${T("enter_type_placeholder")}" />
                   </label>
                   <label class="cat-te-media-preview-meta-row cat-te-media-preview-tags-row">
-                    <span>标签</span>
-                    <input class="cat-te-media-preview-tags" type="text" placeholder="逗号分隔，如 室内, 夜景" />
+                    <span>${T("tags_label")}</span>
+                    <input class="cat-te-media-preview-tags" type="text" placeholder="${T("tags_placeholder")}" />
                   </label>
                 </div>
               </div>
               <div class="cat-te-media-preview-footer">
-                <span class="cat-te-media-preview-hint">← → 切换 · 左键下一张 · 右键上一张 · 点击星星设置评级</span>
+                <span class="cat-te-media-preview-hint">${T("media_preview_hint")}</span>
                 <div class="cat-te-media-preview-actions">
-                  <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-media-preview-insert">插入到当前位置</button>
+                  <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-media-preview-insert">${T("insert_at_position_btn")}</button>
                 </div>
               </div>
             </div>
@@ -1857,8 +1858,8 @@ export class CapTimelineEditorApp {
           <div class="cat-te-modal-backdrop cat-te-clip-items-modal" hidden>
             <div class="cat-te-modal cat-te-clip-items-dialog">
               <div class="cat-te-modal-header">
-                <span class="cat-te-clip-items-title">Clip 素材</span>
-                <button type="button" class="cat-te-modal-close cat-te-clip-items-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span class="cat-te-clip-items-title">${T("clip_items_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-clip-items-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-clip-items-body"></div>
             </div>
@@ -1866,39 +1867,39 @@ export class CapTimelineEditorApp {
           <div class="cat-te-modal-backdrop cat-te-gen-video-modal" hidden>
             <div class="cat-te-modal cat-te-media-preview-dialog">
               <div class="cat-te-modal-header cat-te-media-preview-header">
-                <span class="cat-te-gen-video-title">生成视频</span>
-                <button type="button" class="cat-te-modal-close cat-te-gen-video-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span class="cat-te-gen-video-title">${T("gen_video_label")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-gen-video-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-media-preview-body cat-te-gen-video-body">
-                <button type="button" class="cat-te-media-preview-nav prev cat-te-gen-video-prev" title="上一个" aria-label="上一个">‹</button>
+                <button type="button" class="cat-te-media-preview-nav prev cat-te-gen-video-prev" title="${T("prev_short")}" aria-label="${T("prev_short")}">‹</button>
                 <div class="cat-te-media-preview-stage cat-te-gen-video-stage"></div>
-                <button type="button" class="cat-te-media-preview-nav next cat-te-gen-video-next" title="下一个" aria-label="下一个">›</button>
+                <button type="button" class="cat-te-media-preview-nav next cat-te-gen-video-next" title="${T("next_short")}" aria-label="${T("next_short")}">›</button>
               </div>
               <div class="cat-te-media-preview-meta cat-te-gen-video-meta">
                 <label class="cat-te-clip-setting-check">
                   <input class="cat-te-gen-video-enabled" type="checkbox" checked />
-                  <span>启用</span>
+                  <span>${T("enabled_label")}</span>
                 </label>
                 <label class="cat-te-clip-setting-check">
                   <input class="cat-te-gen-video-muted" type="checkbox" />
-                  <span>禁音</span>
+                  <span>${T("muted_label")}</span>
                 </label>
                 <label class="cat-te-media-preview-meta-row">
-                  <span>备注</span>
-                  <textarea class="cat-te-gen-video-note" rows="3" placeholder="视频备注"></textarea>
+                  <span>${T("note_label")}</span>
+                  <textarea class="cat-te-gen-video-note" rows="3" placeholder="${T("video_note_placeholder")}"></textarea>
                 </label>
-                <button type="button" class="cat-te-btn cat-te-gen-video-delete">删除</button>
+                <button type="button" class="cat-te-btn cat-te-gen-video-delete">${T("delete_btn")}</button>
               </div>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-output-videos-modal" hidden>
             <div class="cat-te-modal cat-te-output-videos-dialog">
               <div class="cat-te-modal-header">
-                <span>关联生成的视频</span>
-                <button type="button" class="cat-te-modal-close cat-te-output-videos-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span>${T("linked_generated_videos_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-output-videos-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-output-videos-toolbar">
-                <input class="cat-te-output-videos-filter" type="search" placeholder="筛选文件名…" />
+                <input class="cat-te-output-videos-filter" type="search" placeholder="${T("filter_filename_placeholder")}" />
                 <div class="cat-te-output-videos-time-filter">
                   ${OUTPUT_VIDEOS_TIME_RANGES.map((r) => `
                     <button type="button" class="cat-te-output-videos-time-btn${r.id === "1h" ? " is-active" : ""}" data-range="${r.id}">${r.label}</button>
@@ -1911,8 +1912,8 @@ export class CapTimelineEditorApp {
           <div class="cat-te-modal-backdrop cat-te-compose-modal" hidden>
             <div class="cat-te-modal cat-te-compose-dialog">
               <div class="cat-te-modal-header">
-                <span>合成视频</span>
-                <button type="button" class="cat-te-modal-close cat-te-compose-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span>${T("compose_video_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-compose-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-compose-body">
                 <div class="cat-te-compose-preview">
@@ -1923,56 +1924,56 @@ export class CapTimelineEditorApp {
                 <div class="cat-te-compose-settings">
                   <div class="cat-te-compose-field">
                     <span class="cat-te-ai-field-label">
-                      文件名前缀
-                      <span class="cat-te-info-tip" tabindex="0" aria-label="文件名前缀说明">
+                      ${T("filename_prefix_label")}
+                      <span class="cat-te-info-tip" tabindex="0" aria-label="${T("filename_prefix_info_aria")}">
                         ${iconHtml("info", 12)}
                         <span class="cat-te-info-tip-pop">
-                          前缀相对 ComfyUI <code>output</code>（与其他节点相同）。默认保存到 <code>output/cap_timeline_compose/</code>。需要本机已安装 ffmpeg。
+                          ${T("filename_prefix_info_html")}
                         </span>
                       </span>
                     </span>
                     <input class="cat-te-compose-prefix" type="text" value="cap_timeline_compose/" />
                   </div>
                   <label class="cat-te-compose-field">
-                    <span>文件名</span>
+                    <span>${T("filename_label")}</span>
                     <input class="cat-te-compose-filename" type="text" />
                   </label>
                   <div class="cat-te-compose-check-row">
                     <label class="cat-te-compose-check">
                       <input class="cat-te-compose-ignore-audio" type="checkbox" />
-                      <span>忽略音频轨道</span>
+                      <span>${T("ignore_audio_track_label")}</span>
                     </label>
-                    <span class="cat-te-info-tip" tabindex="0" aria-label="忽略音频轨道说明">
+                    <span class="cat-te-info-tip" tabindex="0" aria-label="${T("ignore_audio_track_info_aria")}">
                       ${iconHtml("info", 12)}
                       <span class="cat-te-info-tip-pop">
-                        勾选后不合并音频轨上的 clip（生成视频音轨仍会按禁音设置处理）。
+                        ${T("ignore_audio_track_info_text")}
                       </span>
                     </span>
                   </div>
 
                   <div class="cat-te-wm-section">
-                    <div class="cat-te-wm-heading">水印</div>
+                    <div class="cat-te-wm-heading">${T("watermark_heading")}</div>
                     <div class="cat-te-wm-tabs">
-                      <button type="button" class="cat-te-wm-tab cat-te-wm-tab-text" data-mode="text">${iconHtml("text", 12)}<span>文字水印</span></button>
-                      <button type="button" class="cat-te-wm-tab cat-te-wm-tab-image" data-mode="image">${iconHtml("image", 12)}<span>图片水印</span></button>
+                      <button type="button" class="cat-te-wm-tab cat-te-wm-tab-text" data-mode="text">${iconHtml("text", 12)}<span>${T("text_watermark_label")}</span></button>
+                      <button type="button" class="cat-te-wm-tab cat-te-wm-tab-image" data-mode="image">${iconHtml("image", 12)}<span>${T("image_watermark_label")}</span></button>
                     </div>
 
                     <div class="cat-te-wm-panel cat-te-wm-panel-text">
                       <label class="cat-te-compose-field">
-                        <span>文字内容</span>
-                        <textarea class="cat-te-wm-text-content" rows="2" placeholder="输入水印文字…"></textarea>
+                        <span>${T("text_content_label")}</span>
+                        <textarea class="cat-te-wm-text-content" rows="2" placeholder="${T("watermark_text_placeholder")}"></textarea>
                       </label>
                       <div class="cat-te-wm-row cat-te-wm-text-style-row">
                         <label class="cat-te-compose-field">
-                          <span>字体</span>
+                          <span>${T("font_label")}</span>
                           <select class="cat-te-wm-font-family"></select>
                         </label>
                         <label class="cat-te-compose-field cat-te-wm-narrow">
-                          <span>字号</span>
+                          <span>${T("font_size_label")}</span>
                           <input class="cat-te-wm-font-size" type="number" min="6" max="400" step="1" />
                         </label>
                         <label class="cat-te-compose-field cat-te-wm-narrow">
-                          <span>颜色</span>
+                          <span>${T("color_label")}</span>
                           <input class="cat-te-wm-font-color" type="color" />
                         </label>
                       </div>
@@ -1982,55 +1983,55 @@ export class CapTimelineEditorApp {
                       <div class="cat-te-wm-image-row">
                         <div class="cat-te-wm-image-thumb"><img class="cat-te-wm-image-preview" alt="" hidden /></div>
                         <div class="cat-te-wm-image-actions">
-                          <button type="button" class="cat-te-btn cat-te-wm-image-upload">上传图片</button>
-                          <button type="button" class="cat-te-btn cat-te-wm-image-delete" hidden>${iconHtml("trash", 12)}<span>删除</span></button>
+                          <button type="button" class="cat-te-btn cat-te-wm-image-upload">${T("upload_image_btn")}</button>
+                          <button type="button" class="cat-te-btn cat-te-wm-image-delete" hidden>${iconHtml("trash", 12)}<span>${T("delete_btn")}</span></button>
                           <input class="cat-te-wm-image-file" type="file" accept="image/*" hidden />
                         </div>
                       </div>
                       <label class="cat-te-compose-check cat-te-wm-image-disable-row" hidden>
                         <input class="cat-te-wm-image-disabled" type="checkbox" />
-                        <span>不使用</span>
+                        <span>${T("not_used_label")}</span>
                       </label>
                     </div>
 
                     <div class="cat-te-wm-row">
                       <label class="cat-te-compose-field">
-                        <span>透明度<span class="cat-te-wm-readout cat-te-wm-opacity-readout"></span></span>
+                        <span>${T("opacity_label")}<span class="cat-te-wm-readout cat-te-wm-opacity-readout"></span></span>
                         <input class="cat-te-wm-opacity" type="range" min="0" max="100" step="1" />
                       </label>
                       <label class="cat-te-compose-field">
-                        <span>大小缩放<span class="cat-te-wm-readout cat-te-wm-scale-readout"></span></span>
+                        <span>${T("scale_label")}<span class="cat-te-wm-readout cat-te-wm-scale-readout"></span></span>
                         <input class="cat-te-wm-scale" type="range" min="10" max="300" step="1" />
                       </label>
                     </div>
 
                     <div class="cat-te-compose-field">
-                      <span>位置</span>
+                      <span>${T("position_label")}</span>
                       <div class="cat-te-wm-pos-row">
                         <div class="cat-te-wm-pos-grid">
-                          <button type="button" class="cat-te-wm-pos" data-pos="top-left" title="左上角"></button>
-                          <button type="button" class="cat-te-wm-pos" data-pos="top-center" title="顶部居中"></button>
-                          <button type="button" class="cat-te-wm-pos" data-pos="top-right" title="右上角"></button>
-                          <button type="button" class="cat-te-wm-pos" data-pos="center" title="画面居中"></button>
-                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-left" title="左下角"></button>
-                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-center" title="底部居中"></button>
-                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-right" title="右下角"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="top-left" title="${T("wm_pos_top_left")}"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="top-center" title="${T("wm_pos_top_center")}"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="top-right" title="${T("wm_pos_top_right")}"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="center" title="${T("wm_pos_center")}"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-left" title="${T("wm_pos_bottom_left")}"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-center" title="${T("wm_pos_bottom_center")}"></button>
+                          <button type="button" class="cat-te-wm-pos" data-pos="bottom-right" title="${T("wm_pos_bottom_right")}"></button>
                         </div>
                         <div class="cat-te-wm-pos-random">
-                          <button type="button" class="cat-te-wm-pos-chip" data-pos="random-interval">随机（10-30秒换位）</button>
-                          <button type="button" class="cat-te-wm-pos-chip" data-pos="random-fixed">随机（固定位置）</button>
+                          <button type="button" class="cat-te-wm-pos-chip" data-pos="random-interval">${T("wm_pos_random_interval")}</button>
+                          <button type="button" class="cat-te-wm-pos-chip" data-pos="random-fixed">${T("wm_pos_random_fixed")}</button>
                         </div>
                       </div>
                     </div>
 
                     <div class="cat-te-compose-field">
-                      <span>边距（像素，不超过画面宽/高的 50%）</span>
+                      <span>${T("margin_label")}</span>
                       <div class="cat-te-wm-margin-box">
-                        <input class="cat-te-wm-margin cat-te-wm-margin-top" type="number" min="0" step="1" title="上" />
-                        <input class="cat-te-wm-margin cat-te-wm-margin-right" type="number" min="0" step="1" title="右" />
-                        <input class="cat-te-wm-margin cat-te-wm-margin-bottom" type="number" min="0" step="1" title="下" />
-                        <input class="cat-te-wm-margin cat-te-wm-margin-left" type="number" min="0" step="1" title="左" />
-                        <button type="button" class="cat-te-wm-margin-lock" title="锁定四边同步">${iconHtml("lock", 14)}</button>
+                        <input class="cat-te-wm-margin cat-te-wm-margin-top" type="number" min="0" step="1" title="${T("margin_top_title")}" />
+                        <input class="cat-te-wm-margin cat-te-wm-margin-right" type="number" min="0" step="1" title="${T("margin_right_title")}" />
+                        <input class="cat-te-wm-margin cat-te-wm-margin-bottom" type="number" min="0" step="1" title="${T("margin_bottom_title")}" />
+                        <input class="cat-te-wm-margin cat-te-wm-margin-left" type="number" min="0" step="1" title="${T("margin_left_title")}" />
+                        <button type="button" class="cat-te-wm-margin-lock" title="${T("lock_margin_title")}">${iconHtml("lock", 14)}</button>
                       </div>
                     </div>
                   </div>
@@ -2039,38 +2040,38 @@ export class CapTimelineEditorApp {
                 </div>
               </div>
               <div class="cat-te-compose-actions">
-                <button type="button" class="cat-te-btn cat-te-compose-cancel">取消</button>
-                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-compose-run">开始合成</button>
+                <button type="button" class="cat-te-btn cat-te-compose-cancel">${T("cancel_btn")}</button>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-compose-run">${T("compose_start_btn")}</button>
               </div>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-add-material-modal" hidden>
             <div class="cat-te-modal cat-te-add-material-dialog">
               <div class="cat-te-modal-header">
-                <span class="cat-te-add-material-title">添加素材</span>
-                <button type="button" class="cat-te-modal-close cat-te-add-material-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span class="cat-te-add-material-title">${T("add_material_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-add-material-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-add-material-preview"></div>
               <div class="cat-te-add-material-options">
-                <label><input class="cat-te-insert-after-add" type="checkbox" /> 插入到时间轴</label>
+                <label><input class="cat-te-insert-after-add" type="checkbox" /> ${T("insert_to_timeline_label")}</label>
               </div>
               <div class="cat-te-add-material-actions">
-                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-add-material-confirm">确认</button>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-add-material-confirm">${T("confirm_btn")}</button>
               </div>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-ai-optimize-modal" hidden>
             <div class="cat-te-modal cat-te-ai-optimize-dialog">
               <div class="cat-te-modal-header">
-                <span class="cat-te-ai-optimize-title">AI 优化提示词</span>
-                <button type="button" class="cat-te-modal-close cat-te-ai-optimize-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span class="cat-te-ai-optimize-title">${T("ai_optimize_prompt_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-ai-optimize-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-ai-optimize-body">
                 <div class="cat-te-ai-optimize-left">
                   <div class="cat-te-ai-optimize-tabs">
-                    <button type="button" class="cat-te-ai-src-tab" data-src="media">素材提示词</button>
+                    <button type="button" class="cat-te-ai-src-tab" data-src="media">${T("media_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-active" data-src="clip">Clip Prompt</button>
-                    <button type="button" class="cat-te-ai-src-tab" data-src="global">全局提示词</button>
+                    <button type="button" class="cat-te-ai-src-tab" data-src="global">${T("global_prompt_tab")}</button>
                   </div>
                   <textarea class="cat-te-ai-src-text" readonly></textarea>
                 </div>
@@ -2078,25 +2079,18 @@ export class CapTimelineEditorApp {
                   <div class="cat-te-ai-field-row">
                     <div class="cat-te-ai-field">
                       <span class="cat-te-ai-field-label">
-                        模型
-                        <span class="cat-te-info-tip" tabindex="0" aria-label="模型说明">
+                        ${T("model_label")}
+                        <span class="cat-te-info-tip" tabindex="0" aria-label="${T("model_info_aria")}">
                           ${iconHtml("info", 12)}
                           <span class="cat-te-info-tip-pop">
-                            将 Qwen3-VL 模型文件夹放到：<br />
-                            <code>ComfyUI/models/prompt_generator/</code><br />
-                            也可放在 <code>ComfyUI/models/LLM/</code>。<br />
-                            目录内需有 <code>config.json</code>（Hugging Face 完整仓库）。<br /><br />
-                            下载示例：<br />
-                            <a href="https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct" target="_blank" rel="noopener">Hugging Face · Qwen3-VL-4B-Instruct</a><br />
-                            <a href="https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct" target="_blank" rel="noopener">Hugging Face · Qwen3-VL-2B-Instruct</a><br />
-                            <a href="https://modelscope.cn/models/Qwen/Qwen3-VL-4B-Instruct" target="_blank" rel="noopener">ModelScope · Qwen3-VL-4B-Instruct</a>
+                            ${T("model_info_html")}
                           </span>
                         </span>
                       </span>
                       <select class="cat-te-ai-model"></select>
                     </div>
                     <label class="cat-te-ai-field">
-                      <span>输出语言</span>
+                      <span>${T("output_language_label")}</span>
                       <select class="cat-te-ai-lang">
                         <option value="简体中文" selected>简体中文</option>
                         <option value="繁體中文">繁體中文</option>
@@ -2106,23 +2100,23 @@ export class CapTimelineEditorApp {
                     </label>
                   </div>
                   <label class="cat-te-ai-field">
-                    <span>Agent 提示词</span>
+                    <span>${T("agent_prompt_label")}</span>
                     <textarea class="cat-te-ai-system" rows="6"></textarea>
                   </label>
                   <div class="cat-te-ai-skill-head">
                     <span>Prompt Skill</span>
                     <div class="cat-te-ai-skill-actions">
-                      <button type="button" class="cat-te-btn cat-te-skill-pick-btn">选择</button>
-                      <button type="button" class="cat-te-btn cat-te-skill-sync-btn" title="从 GitHub 同步最新 Skill">${iconHtml("refresh", 12)}<span>更新</span></button>
+                      <button type="button" class="cat-te-btn cat-te-skill-pick-btn">${T("select_btn")}</button>
+                      <button type="button" class="cat-te-btn cat-te-skill-sync-btn" title="${T("sync_latest_skill_title")}">${iconHtml("refresh", 12)}<span>${T("update_btn")}</span></button>
                     </div>
                   </div>
-                  <textarea class="cat-te-ai-skill" rows="3" placeholder="可选。点击「选择」从本地 Skill 库填入…"></textarea>
+                  <textarea class="cat-te-ai-skill" rows="3" placeholder="${T("skill_placeholder")}"></textarea>
                   <label class="cat-te-ai-field cat-te-ai-result-field">
-                    <span>生成后的提示词</span>
-                    <textarea class="cat-te-ai-result" rows="8" placeholder="点击生成后显示，可手动修改"></textarea>
+                    <span>${T("generated_prompt_label")}</span>
+                    <textarea class="cat-te-ai-result" rows="8" placeholder="${T("generated_prompt_placeholder")}"></textarea>
                   </label>
                   <div class="cat-te-ai-optimize-actions">
-                    <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>生成</span></button>
+                    <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span></button>
                   </div>
                 </div>
               </div>
@@ -2131,9 +2125,9 @@ export class CapTimelineEditorApp {
           <div class="cat-te-modal-backdrop cat-te-skill-picker-modal" hidden>
             <div class="cat-te-modal cat-te-skill-picker-dialog">
               <div class="cat-te-modal-header">
-                <span>选择 Prompt Skill</span>
-                <input class="cat-te-skill-picker-filter" type="search" placeholder="搜索名称…" />
-                <button type="button" class="cat-te-modal-close cat-te-skill-picker-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span>${T("select_prompt_skill_title")}</span>
+                <input class="cat-te-skill-picker-filter" type="search" placeholder="${T("search_name_placeholder")}" />
+                <button type="button" class="cat-te-modal-close cat-te-skill-picker-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-skill-picker-body"></div>
             </div>
@@ -2141,41 +2135,34 @@ export class CapTimelineEditorApp {
           <div class="cat-te-modal-backdrop cat-te-settings-modal" hidden>
             <div class="cat-te-modal cat-te-settings-dialog">
               <div class="cat-te-modal-header">
-                <span>设置</span>
-                <button type="button" class="cat-te-modal-close" title="关闭">${iconHtml("close", 16)}</button>
+                <span>${T("settings_title")}</span>
+                <button type="button" class="cat-te-modal-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-modal-body">
                 <label class="cat-te-modal-row">
-                  <span>语言</span>
-                  <select class="cat-te-lang-select">
-                    <option value="zh">简体中文</option>
-                    <option value="en">English</option>
-                  </select>
-                </label>
-                <label class="cat-te-modal-row">
-                  <span>自动保存间隔（秒）</span>
+                  <span>${T("autosave_interval_label")}</span>
                   <input class="cat-te-autosave-interval" type="number" min="1" max="300" step="1" />
                 </label>
                 <div class="cat-te-agent-settings">
                   <div class="cat-te-agent-heading">
                     <span>AI Agent</span>
-                    <button type="button" class="cat-te-btn cat-te-agent-add">添加</button>
+                    <button type="button" class="cat-te-btn cat-te-agent-add">${T("add_btn")}</button>
                   </div>
                   <div class="cat-te-agent-list"></div>
                   <div class="cat-te-agent-form" hidden>
-                    <label><span>名称</span><input class="cat-te-agent-label" type="text" maxlength="80" placeholder="例如 ChatGPT" /></label>
-                    <label><span>服务商</span><select class="cat-te-agent-provider"><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label>
-                    <label><span>模型</span><input class="cat-te-agent-model" type="text" maxlength="120" placeholder="例如 gpt-5.4 或 gemini-3.7-flash" /></label>
-                    <label><span>API Key</span><input class="cat-te-agent-key" type="password" autocomplete="new-password" placeholder="输入 API Key" /></label>
-                    <label class="cat-te-agent-enabled"><input type="checkbox" checked /><span>启用并显示在 AI 优化模型中</span></label>
+                    <label><span>${T("name_label")}</span><input class="cat-te-agent-label" type="text" maxlength="80" placeholder="${T("eg_chatgpt_placeholder")}" /></label>
+                    <label><span>${T("provider_label")}</span><select class="cat-te-agent-provider"><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label>
+                    <label><span>${T("model_label")}</span><input class="cat-te-agent-model" type="text" maxlength="120" placeholder="${T("eg_model_placeholder")}" /></label>
+                    <label><span>API Key</span><input class="cat-te-agent-key" type="password" autocomplete="new-password" placeholder="${T("enter_api_key")}" /></label>
+                    <label class="cat-te-agent-enabled"><input type="checkbox" checked /><span>${T("enable_show_in_ai_optimize_label")}</span></label>
                     <div class="cat-te-agent-form-actions">
-                      <button type="button" class="cat-te-btn cat-te-agent-delete" hidden>删除</button>
+                      <button type="button" class="cat-te-btn cat-te-agent-delete" hidden>${T("delete_btn")}</button>
                       <span></span>
-                      <button type="button" class="cat-te-btn cat-te-agent-cancel">取消</button>
-                      <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-agent-save">保存</button>
+                      <button type="button" class="cat-te-btn cat-te-agent-cancel">${T("cancel_btn")}</button>
+                      <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-agent-save">${T("save_btn")}</button>
                     </div>
                   </div>
-                  <div class="cat-te-agent-note">API Key 仅保存在本机 ComfyUI 用户目录，不会写入项目或工作流。</div>
+                  <div class="cat-te-agent-note">${T("agent_note")}</div>
                 </div>
               </div>
             </div>
@@ -2330,7 +2317,6 @@ export class CapTimelineEditorApp {
         this.aiSrcTabs = el.querySelectorAll(".cat-te-ai-src-tab");
 
         this.settingsModal = el.querySelector(".cat-te-settings-modal");
-        this.langSelect = el.querySelector(".cat-te-lang-select");
         this.autosaveIntervalInput = el.querySelector(".cat-te-autosave-interval");
         this.agentList = el.querySelector(".cat-te-agent-list");
         this.agentForm = el.querySelector(".cat-te-agent-form");
@@ -2388,7 +2374,7 @@ export class CapTimelineEditorApp {
         });
         this.projectNameInput.addEventListener("input", () => this._syncBrandProjectName());
         this.projectNameInput.addEventListener("blur", () => {
-            this.projectNameInput.value = this.projectNameInput.value.trim() || "未命名项目";
+            this.projectNameInput.value = this.projectNameInput.value.trim() || T("untitled_project");
             this._projectNameUndoArmed = false;
             this._syncBrandProjectName();
         });
@@ -2412,9 +2398,6 @@ export class CapTimelineEditorApp {
             if (Object.values(AGENT_DEFAULT_MODELS).includes(this.agentModelInput.value) || !this.agentModelInput.value.trim()) {
                 this.agentModelInput.value = AGENT_DEFAULT_MODELS[this.agentProviderSelect.value] || "";
             }
-        });
-        this.langSelect.addEventListener("change", () => {
-            localStorage.setItem("cat-te-lang", this.langSelect.value);
         });
         this.autosaveIntervalInput.addEventListener("change", () => {
             const n = parseInt(this.autosaveIntervalInput.value, 10);
@@ -3010,7 +2993,7 @@ export class CapTimelineEditorApp {
             const render = () => {
                 btn.innerHTML = track.locked ? ICONS.lock : ICONS.lockOpen;
                 btn.classList.toggle("active", track.locked);
-                btn.title = track.locked ? "解锁轨道" : "锁定轨道";
+                btn.title = track.locked ? T("unlock_track_title") : T("lock_track_title");
             };
             btn.addEventListener("click", e => {
                 e.stopPropagation();
@@ -3024,7 +3007,7 @@ export class CapTimelineEditorApp {
                 btn.innerHTML = track.visible ? ICONS.eye : ICONS.eyeOff;
                 btn.classList.toggle("active", !track.visible);
             };
-            btn.title = "轨道可见性";
+            btn.title = T("track_visibility_title");
             btn.addEventListener("click", e => {
                 e.stopPropagation();
                 this._recordUndo();
@@ -3038,8 +3021,8 @@ export class CapTimelineEditorApp {
             const render = () => {
                 btn.innerHTML = track.muted ? ICONS.volumeOff : ICONS.volume;
                 btn.classList.toggle("active", track.muted);
-                const off = track.type === "audio" ? "解除静音" : "解除禁音";
-                const on = track.type === "audio" ? "轨道静音" : "轨道禁音";
+                const off = T("unmute_label");
+                const on = T("mute_label");
                 btn.title = track.muted ? off : on;
             };
             btn.addEventListener("click", e => {
@@ -3090,8 +3073,8 @@ export class CapTimelineEditorApp {
         e.stopImmediatePropagation?.();
         const n = clips.length;
         const msg = n === 1
-            ? `确定删除素材「${clips[0].name}」？`
-            : `确定删除选中的 ${n} 个素材？`;
+            ? T("confirm_delete_named_clip", { name: clips[0].name })
+            : T("confirm_delete_selected_n_clips", { n });
         if (!confirm(msg)) return true;
         this._recordUndo();
         for (const clip of clips) {
@@ -3242,7 +3225,7 @@ export class CapTimelineEditorApp {
             : {};
         if (!Array.isArray(src.tracks)) src.tracks = [];
         if (!src.settings || typeof src.settings !== "object") src.settings = {};
-        src.name = String(src.name || "未命名项目").trim() || "未命名项目";
+        src.name = String(src.name || T("untitled_project")).trim() || T("untitled_project");
         this._loadMediaStarsForDir();
         if (parseSchemaVersion(src) < 2) this._migrateProjectSchema1To2(src);
         else this._hydrateMediaCatalog(src);
@@ -3561,8 +3544,8 @@ export class CapTimelineEditorApp {
     }
 
     _clipRoleLabel(id, custom = "") {
-        if (id === "other") return String(custom || "").trim() || "其他";
-        return CLIP_ROLES.find((r) => r.id === id)?.label || "多图参考";
+        if (id === "other") return String(custom || "").trim() || T("clip_role_other");
+        return CLIP_ROLES.find((r) => r.id === id)?.label || T("clip_role_multi_ref");
     }
 
     _knownClipRole(id) {
@@ -3796,7 +3779,7 @@ export class CapTimelineEditorApp {
             enable.type = "checkbox";
             enable.className = "cat-te-clip-video-enabled";
             enable.checked = row.enabled !== false;
-            enable.title = row.enabled ? "禁用" : "启用";
+            enable.title = row.enabled ? T("disable_label") : T("enable_label");
             enable.addEventListener("click", (e) => e.stopPropagation());
             enable.addEventListener("change", () => {
                 this._setGeneratedVideoEnabled(clip, row.id, !!enable.checked);
@@ -3819,7 +3802,7 @@ export class CapTimelineEditorApp {
             const muted = row.muted === true;
             mute.innerHTML = muted ? ICONS.volumeOff : ICONS.volume;
             mute.classList.toggle("active", muted);
-            mute.title = muted ? "解除禁音" : "禁音";
+            mute.title = muted ? T("unmute_label") : T("mute_label");
             mute.addEventListener("click", (e) => {
                 e.stopPropagation();
                 this._setGeneratedVideoMuted(clip, row.id, !muted);
@@ -3828,7 +3811,7 @@ export class CapTimelineEditorApp {
             const del = document.createElement("button");
             del.type = "button";
             del.className = "cat-te-clip-video-del";
-            del.title = "删除";
+            del.title = T("delete_btn");
             del.textContent = "×";
             del.addEventListener("click", (e) => {
                 e.stopPropagation();
@@ -3891,7 +3874,7 @@ export class CapTimelineEditorApp {
         const row = rows.find((item) => item.id === videoId);
         if (!row) return;
         const name = row.file.split(/[\\/]/).pop();
-        if (!confirm(`确定从 clip 中移除「${name}」？\n不会删除磁盘文件。`)) return;
+        if (!confirm(T("confirm_remove_from_clip", { name }))) return;
         this._recordUndo();
         m.generatedVideos = rows.filter((item) => item.id !== videoId);
         if (!this._firstEnabledGeneratedVideo(m) && m.previewMode === "generated") {
@@ -3956,7 +3939,7 @@ export class CapTimelineEditorApp {
         index = ((index % n) + n) % n;
         this._genVideoState = { clipId: clip.id, index };
         const row = rows[index];
-        const name = row.file.split(/[\\/]/).pop() || "生成视频";
+        const name = row.file.split(/[\\/]/).pop() || T("gen_video_label");
         if (this.genVideoTitle) this.genVideoTitle.textContent = n > 1 ? `${index + 1} / ${n}  ${name}` : name;
         if (this.genVideoEnabledCb) this.genVideoEnabledCb.checked = row.enabled !== false;
         if (this.genVideoMutedCb) this.genVideoMutedCb.checked = row.muted === true;
@@ -4023,7 +4006,7 @@ export class CapTimelineEditorApp {
         if (this.outputVideosFilter) this.outputVideosFilter.value = "";
         this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
         this.outputVideosTimeButtons?.forEach((b) => b.classList.toggle("is-active", b.dataset.range === this._outputVideosTimeRange));
-        if (this.outputVideosBody) this.outputVideosBody.textContent = "加载中…";
+        if (this.outputVideosBody) this.outputVideosBody.textContent = T("loading_ellipsis");
         try {
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/output_videos"));
             const data = await response.json();
@@ -4062,7 +4045,7 @@ export class CapTimelineEditorApp {
         if (!rows.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-output-videos-empty";
-            empty.textContent = this._outputVideosCache.length ? "没有匹配的视频" : "output 目录下没有视频";
+            empty.textContent = this._outputVideosCache.length ? T("no_matching_videos") : T("no_videos_in_output_dir");
             this.outputVideosBody.appendChild(empty);
             return;
         }
@@ -4100,7 +4083,7 @@ export class CapTimelineEditorApp {
             name.title = file;
             const tag = document.createElement("span");
             tag.className = "cat-te-output-video-tag";
-            tag.textContent = added ? "已添加" : "添加";
+            tag.textContent = added ? T("added_tag") : T("add_btn");
             btn.append(thumb, name, tag);
             if (!added) {
                 btn.addEventListener("click", () => {
@@ -4108,7 +4091,7 @@ export class CapTimelineEditorApp {
                     // In-place mark — avoid re-rendering hundreds of rows / re-queuing thumbs.
                     btn.disabled = true;
                     btn.classList.add("is-added");
-                    tag.textContent = "已添加";
+                    tag.textContent = T("added_tag");
                 });
             }
             this.outputVideosBody.appendChild(btn);
@@ -4296,7 +4279,7 @@ export class CapTimelineEditorApp {
         const current = items[index];
         if (!current) return;
         const name = current.file.split(/[\\/]/).pop() || current.file;
-        if (!confirm(`确定从 clip 中移除「${name}」？\n不会删除磁盘文件。`)) return;
+        if (!confirm(T("confirm_remove_from_clip", { name }))) return;
         this._recordUndo();
         m.items = items.filter((_, i) => i !== index).map((item) => ({
             id: item.id,
@@ -4561,7 +4544,7 @@ export class CapTimelineEditorApp {
         refreshBtn.type = "button";
         refreshBtn.className = "cat-te-media-tool-btn cat-te-media-refresh";
         refreshBtn.innerHTML = iconHtml("refresh", 12);
-        refreshBtn.title = "刷新素材列表";
+        refreshBtn.title = T("refresh_media_list_title");
         if (this._mediaReloading) refreshBtn.classList.add("spinning");
         refreshBtn.addEventListener("click", () => this._refreshMediaLists());
         this.mediaStarFilterHost.appendChild(refreshBtn);
@@ -4571,7 +4554,7 @@ export class CapTimelineEditorApp {
         batchBtn.className = "cat-te-media-tool-btn";
         batchBtn.classList.toggle("active", this._mediaBatchMode);
         batchBtn.innerHTML = iconHtml("check", 12);
-        batchBtn.title = this._mediaBatchMode ? "退出批量选择" : "批量选择删除";
+        batchBtn.title = this._mediaBatchMode ? T("exit_batch_select_title") : T("batch_select_delete_title");
         batchBtn.addEventListener("click", () => this._toggleMediaBatchMode());
         this.mediaStarFilterHost.appendChild(batchBtn);
 
@@ -4581,7 +4564,7 @@ export class CapTimelineEditorApp {
             delBtn.type = "button";
             delBtn.className = "cat-te-media-tool-btn danger";
             delBtn.innerHTML = iconHtml("trash", 12);
-            delBtn.title = selectedCount ? `删除选中的 ${selectedCount} 个素材` : "请先选择素材";
+            delBtn.title = selectedCount ? T("delete_selected_n_assets_title", { n: selectedCount }) : T("select_asset_first_title");
             delBtn.disabled = selectedCount === 0;
             if (selectedCount) {
                 const badge = document.createElement("span");
@@ -4598,7 +4581,7 @@ export class CapTimelineEditorApp {
         viewBtn.className = "cat-te-media-tool-btn";
         viewBtn.classList.toggle("active", this._mediaListView);
         viewBtn.innerHTML = iconHtml(this._mediaListView ? "grid" : "list", 12);
-        viewBtn.title = this._mediaListView ? "切换为网格视图" : "切换为列表视图（每行一个）";
+        viewBtn.title = this._mediaListView ? T("switch_to_grid_view_title") : T("switch_to_list_view_title");
         viewBtn.addEventListener("click", () => this._toggleMediaListView());
         this.mediaStarFilterHost.appendChild(viewBtn);
 
@@ -4608,7 +4591,7 @@ export class CapTimelineEditorApp {
         filterBtn.type = "button";
         filterBtn.className = "cat-te-media-tool-btn cat-te-media-filter-btn";
         filterBtn.innerHTML = iconHtml("filter", 12);
-        filterBtn.title = "筛选素材";
+        filterBtn.title = T("filter_assets_title");
         filterBtn.classList.toggle("active", this._mediaFilterOpen || this._activeMediaFilterCount() > 0);
         const count = this._activeMediaFilterCount();
         if (count) {
@@ -4628,8 +4611,8 @@ export class CapTimelineEditorApp {
         const addBtn = document.createElement("button");
         addBtn.type = "button";
         addBtn.className = "cat-te-btn cat-te-media-add-btn";
-        addBtn.textContent = "添加素材";
-        addBtn.title = "添加素材（可多选）";
+        addBtn.textContent = T("add_material_title");
+        addBtn.title = T("add_material_multi_select_title");
         addBtn.addEventListener("click", () => this._chooseMaterialFile());
         this.mediaStarFilterHost.appendChild(addBtn);
 
@@ -4648,7 +4631,7 @@ export class CapTimelineEditorApp {
         kindRow.className = "cat-te-media-filter-section";
         const kindTitle = document.createElement("div");
         kindTitle.className = "cat-te-media-filter-label";
-        kindTitle.textContent = "分类";
+        kindTitle.textContent = T("category_label");
         const kindGroup = document.createElement("div");
         kindGroup.className = "cat-te-media-filter-chips";
         for (const opt of MEDIA_KIND_FILTERS) {
@@ -4671,7 +4654,7 @@ export class CapTimelineEditorApp {
         starRow.className = "cat-te-media-filter-section";
         const starTitle = document.createElement("div");
         starTitle.className = "cat-te-media-filter-label";
-        starTitle.textContent = "星级";
+        starTitle.textContent = T("star_rating_label");
         const starGroup = document.createElement("div");
         starGroup.className = "cat-te-media-star-filter-group";
         const activeStars = this._mediaStarFilter === "all" ? 0 : parseInt(this._mediaStarFilter, 10) || 0;
@@ -4680,7 +4663,7 @@ export class CapTimelineEditorApp {
             starBtn.type = "button";
             starBtn.className = "cat-te-media-star-filter-star";
             starBtn.innerHTML = iconHtml("star", 12);
-            starBtn.title = `筛选 ${i} 星素材`;
+            starBtn.title = T("filter_n_star_assets_title", { n: i });
             if (i <= activeStars) starBtn.classList.add("on");
             if (String(i) === this._mediaStarFilter) starBtn.classList.add("active");
             starBtn.addEventListener("click", () => {
@@ -4696,7 +4679,7 @@ export class CapTimelineEditorApp {
         typeRow.className = "cat-te-media-filter-section";
         const typeTitle = document.createElement("div");
         typeTitle.className = "cat-te-media-filter-label";
-        typeTitle.textContent = "类型";
+        typeTitle.textContent = T("type_label");
         const typeGroup = document.createElement("div");
         typeGroup.className = "cat-te-media-filter-chips";
         const extra = this._collectMediaFilterOptions();
@@ -4722,7 +4705,7 @@ export class CapTimelineEditorApp {
         if (!typeOptions.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-media-filter-empty";
-            empty.textContent = "暂无类型";
+            empty.textContent = T("no_types_yet");
             typeGroup.appendChild(empty);
         }
         typeRow.append(typeTitle, typeGroup);
@@ -4732,13 +4715,13 @@ export class CapTimelineEditorApp {
         tagRow.className = "cat-te-media-filter-section";
         const tagTitle = document.createElement("div");
         tagTitle.className = "cat-te-media-filter-label";
-        tagTitle.textContent = "标签";
+        tagTitle.textContent = T("tags_label");
         const tagGroup = document.createElement("div");
         tagGroup.className = "cat-te-media-filter-chips";
         if (!extra.tags.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-media-filter-empty";
-            empty.textContent = "暂无标签";
+            empty.textContent = T("no_tags_yet");
             tagGroup.appendChild(empty);
         } else {
             for (const tag of extra.tags) {
@@ -4761,7 +4744,7 @@ export class CapTimelineEditorApp {
         const clearBtn = document.createElement("button");
         clearBtn.type = "button";
         clearBtn.className = "cat-te-btn cat-te-media-filter-clear";
-        clearBtn.textContent = "一键清除过滤";
+        clearBtn.textContent = T("clear_all_filters_btn");
         clearBtn.disabled = this._activeMediaFilterCount() === 0;
         clearBtn.addEventListener("click", () => this._clearMediaFilters());
         panel.appendChild(clearBtn);
@@ -4777,7 +4760,7 @@ export class CapTimelineEditorApp {
         if (!library.length) {
             const msg = document.createElement("div");
             msg.className = "cat-te-media-empty";
-            msg.textContent = "暂无素材，拖入文件或点「添加素材」";
+            msg.textContent = T("no_assets_drag_or_add_hint");
             this.mediaGrid.appendChild(msg);
             return;
         }
@@ -4785,7 +4768,7 @@ export class CapTimelineEditorApp {
         if (!files.length) {
             const msg = document.createElement("div");
             msg.className = "cat-te-media-empty";
-            msg.textContent = "没有符合筛选条件的素材";
+            msg.textContent = T("no_assets_match_filter");
             this.mediaGrid.appendChild(msg);
             return;
         }
@@ -4821,8 +4804,8 @@ export class CapTimelineEditorApp {
         item.classList.toggle("cat-te-media-missing", status.location === "missing");
         item.classList.toggle("cat-te-media-selected", this._mediaBatchSelected.has(batchKey));
         item.title = this._mediaBatchMode
-            ? `${file}\n点击选择 / 取消选择`
-            : `${file}\n点击预览；右键可插入 / 替换 / 删除；也可拖到时间轴`;
+            ? T("media_item_title_batch", { file })
+            : T("media_item_title_normal", { file });
         // Native HTML5 DnD is unreliable in Tauri/WebView2 (no drag ghost /
         // drop disabled). Use pointer-driven drag instead; keep the attribute
         // off so the webview doesn't swallow the gesture.
@@ -4836,7 +4819,7 @@ export class CapTimelineEditorApp {
         if (this._isMediaOnTimeline(file, kind)) {
             const addedTag = document.createElement("div");
             addedTag.className = "cat-te-media-added-tag";
-            addedTag.textContent = "已添加";
+            addedTag.textContent = T("added_tag");
             item.appendChild(addedTag);
         }
         if (status.location === "missing") {
@@ -4887,7 +4870,7 @@ export class CapTimelineEditorApp {
                 this._toggleMediaBatchSelect(kind, file, item);
                 return;
             }
-            if (status.location === "missing") alert("素材文件缺失，请右键选择“重新关联文件”");
+            if (status.location === "missing") alert(T("asset_missing_relink_hint"));
             else this._openMediaPreview(file, kind);
         });
         item.addEventListener("contextmenu", (e) => {
@@ -4896,7 +4879,7 @@ export class CapTimelineEditorApp {
             if (this._mediaBatchMode) return;
             const items = [];
             if (status.location !== "missing") items.push({
-                label: "插入时间轴",
+                label: T("insert_to_timeline_ctx"),
                 fn: () => {
                     if (kind === "audio") void this._addAudioAtPlayhead(file);
                     else if (kind === "video") void this._addVideoAtPlayhead(file);
@@ -4904,15 +4887,15 @@ export class CapTimelineEditorApp {
                 },
             });
             if (status.location !== "missing") items.push({
-                label: "替换素材",
+                label: T("replace_material_label"),
                 fn: () => this._chooseMaterialFile({ file, kind }),
             });
             if (status.location === "missing") items.push({
-                label: "重新关联文件",
+                label: T("relink_file_menu"),
                 fn: () => this._chooseMaterialFile({ file, kind }),
             });
             items.push({
-                label: "删除",
+                label: T("delete_btn"),
                 fn: () => void this._deleteLibraryMedia(file, kind),
                 danger: true,
             });
@@ -5015,7 +4998,7 @@ export class CapTimelineEditorApp {
     _makeMediaDragGhost(item, file) {
         const ghost = document.createElement("div");
         ghost.className = "cat-te-media-drag-ghost";
-        ghost.textContent = file.split(/[\\/]/).pop() || "素材";
+        ghost.textContent = file.split(/[\\/]/).pop() || T("asset_fallback_name");
         const thumb = item.querySelector("img");
         if (thumb?.src) ghost.style.backgroundImage = `url(${thumb.src})`;
         return ghost;
@@ -5091,7 +5074,7 @@ export class CapTimelineEditorApp {
         const type = kind === "audio" ? "audio" : "image";
         const track = this._timeline.addTrack({
             type,
-            name: type === "audio" ? "音频" : "副轨道",
+            name: type === "audio" ? T("media_kind_audio") : T("overlay_track_name"),
             height: TRACK_HEIGHT,
         });
         this._trackInfo.set(track.id, {
@@ -5145,7 +5128,7 @@ export class CapTimelineEditorApp {
         if (!this._timeline) return;
         const track = this._pickInsertImageTrack(atSec);
         if (!track) {
-            alert("没有可插入的图片/视频轨道，或该位置已被占用");
+            alert(T("no_insertable_track"));
             return;
         }
         const dur = Math.min(2, this._timeline.duration / 4) || 0.1;
@@ -5496,7 +5479,7 @@ export class CapTimelineEditorApp {
 
     async _fetchPeaks(url) {
         const r = await fetch(url, { credentials: "same-origin" });
-        if (!r.ok) throw new Error(`无法加载音频 (${r.status})`);
+        if (!r.ok) throw new Error(T("audio_load_failed_status", { status: r.status }));
         const ab = await r.arrayBuffer();
         const ctx = new AudioContext();
         try {
@@ -5729,7 +5712,7 @@ export class CapTimelineEditorApp {
         }
         project = this._migrateProjectDocument(project);
         this._applyMediaCatalogFromProject(project);
-        this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
+        this.projectNameInput.value = String(project.name || T("untitled_project")).trim() || T("untitled_project");
         this._syncBrandProjectName();
 
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
@@ -5789,13 +5772,13 @@ export class CapTimelineEditorApp {
     _createDefaultTracks() {
         const tl = this._timeline;
         this._mainTrack = tl.addTrack({
-            type: "image", name: "主轨道", isMain: true, height: TRACK_HEIGHT, color: "#3d6ec4",
+            type: "image", name: T("main_track_name"), isMain: true, height: TRACK_HEIGHT, color: "#3d6ec4",
         });
         this._overlayTrack = tl.addTrack({
-            type: "image", name: "副轨道", height: TRACK_HEIGHT, color: "#8b4ec8",
+            type: "image", name: T("overlay_track_name"), height: TRACK_HEIGHT, color: "#8b4ec8",
         });
         this._audioTrack = tl.addTrack({
-            type: "audio", name: "音频", height: TRACK_HEIGHT, color: "#3dd68c",
+            type: "audio", name: T("audio_track_name"), height: TRACK_HEIGHT, color: "#3dd68c",
         });
         this._trackInfo.set(this._mainTrack.id, { trackIndex: 0, enabled: true, role: "main" });
         this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1, enabled: true, role: "overlay" });
@@ -5814,7 +5797,7 @@ export class CapTimelineEditorApp {
             const track = tl.addTrackAt({
                 id: row.id,
                 type: row.type || "image",
-                name: row.name || (row.type === "audio" ? "音频" : "轨道"),
+                name: row.name || (row.type === "audio" ? T("audio_track_name") : T("generic_track_name")),
                 isMain,
                 height: TRACK_HEIGHT,
                 color: row.color,
@@ -5908,7 +5891,7 @@ export class CapTimelineEditorApp {
             }
             const clip = this._timeline.addClip(track.id, {
                 id: c.id || uid(),
-                name: af.split(/[\\/]/).pop() || "音频",
+                name: af.split(/[\\/]/).pop() || T("media_kind_audio"),
                 startTime,
                 duration: dur,
                 sourceDuration: sourceDur,
@@ -5994,7 +5977,7 @@ export class CapTimelineEditorApp {
 
         if (clipType === "video") {
             const vf = c.start_image ?? c.src ?? "";
-            const fname = vf.split(/[\\/]/).pop() || "视频";
+            const fname = vf.split(/[\\/]/).pop() || T("media_kind_video");
             const sourceDur = Number(c.source_duration) || dur;
             const trimIn = Math.max(0, Number(c.trim_in) || 0);
             const url = vf ? this._videoUrl(vf) : null;
@@ -6061,7 +6044,7 @@ export class CapTimelineEditorApp {
         }
 
         const img = c.start_image ?? "";
-        const fname = img.split(/[\\/]/).pop() || "素材";
+        const fname = img.split(/[\\/]/).pop() || T("asset_fallback_name");
         const clip = this._timeline.addClip(track.id, {
             id: c.id || uid(),
             name: fname,
@@ -6191,7 +6174,7 @@ export class CapTimelineEditorApp {
                 clip.el.appendChild(muteBadge);
             }
             muteBadge.textContent = (m.muted || trackMuted) ? "🔇" : "🔊";
-            muteBadge.title = m.muted ? "解除禁音" : "禁音";
+            muteBadge.title = m.muted ? T("unmute_label") : T("mute_label");
         } else if (muteBadge) {
             muteBadge.remove();
         }
@@ -6214,7 +6197,7 @@ export class CapTimelineEditorApp {
             }
             const genMode = this._clipUsesGeneratedPreview(m);
             previewBadge.innerHTML = iconHtml(genMode ? "camera" : "video", 12);
-            previewBadge.title = genMode ? "切换为素材预览" : "切换为生成视频预览";
+            previewBadge.title = genMode ? T("switch_to_asset_preview_title") : T("switch_to_generated_preview_title");
         } else if (previewBadge) {
             previewBadge.remove();
             if (m.previewMode === "generated") {
@@ -6229,7 +6212,7 @@ export class CapTimelineEditorApp {
     _refreshClipAppearance(clip) {
         if (!clip?.el) return;
         const label = clip.el.querySelector(".tl-clip-label");
-        if (label) label.textContent = clip.name || "素材";
+        if (label) label.textContent = clip.name || T("asset_fallback_name");
         if (clip._thumbRow) {
             clip._applyThumbnail();
         } else {
@@ -6264,7 +6247,7 @@ export class CapTimelineEditorApp {
         const row = document.createElement("div");
         row.className = "cat-te-frame-preview-row";
 
-        for (const [label, src] of [["首", startSrc], ["尾", m.endImage ? this._imgUrl(m.endImage) : ""]]) {
+        for (const [label, src] of [[T("frame_first"), startSrc], [T("frame_last"), m.endImage ? this._imgUrl(m.endImage) : ""]]) {
             if (!src) continue;
             const item = document.createElement("div");
             item.className = "cat-te-frame-preview-item";
@@ -6317,7 +6300,7 @@ export class CapTimelineEditorApp {
             starBtn.type = "button";
             starBtn.className = "cat-te-media-preview-star-btn";
             starBtn.innerHTML = iconHtml("star", 14);
-            starBtn.title = `${i} 星`;
+            starBtn.title = T("star_n_title", { n: i });
             if (i <= current) starBtn.classList.add("on");
             starBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
@@ -6396,7 +6379,7 @@ export class CapTimelineEditorApp {
         const missing = status?.location === "missing";
         btn.disabled = missing;
         const t = this._timeline.formatTime(this._timeline.currentTime);
-        btn.title = missing ? "素材文件缺失，无法插入" : `插入到 Seek 位置（${t}）`;
+        btn.title = missing ? T("asset_missing_cannot_insert") : T("insert_at_seek_position", { time: t });
     }
 
     _insertMediaPreviewAtSeek() {
@@ -6405,7 +6388,7 @@ export class CapTimelineEditorApp {
         const { file, kind } = item;
         const status = this._mediaStatus.get(`${kind}:${file}`);
         if (status?.location === "missing") {
-            alert("素材文件缺失，无法插入");
+            alert(T("asset_missing_cannot_insert"));
             return;
         }
         if (kind === "audio") void this._addAudioAtPlayhead(file);
@@ -6431,7 +6414,7 @@ export class CapTimelineEditorApp {
         }
         this.mediaPreviewStage.replaceChildren();
 
-        const name = file.split(/[\\/]/).pop() || "素材预览";
+        const name = file.split(/[\\/]/).pop() || T("asset_preview_fallback_name");
         this.mediaPreviewTitle.textContent = n > 1 ? `${index + 1} / ${n}  ${name}` : name;
         this._renderMediaPreviewStars(kind, file);
         this._fillMediaPreviewMeta(kind, file);
@@ -6520,7 +6503,7 @@ export class CapTimelineEditorApp {
         const current = items[index];
         const status = this._mediaStatus.get(`${current.kind}:${current.file}`);
         if (status?.location === "missing") {
-            alert("素材文件缺失，无法预览");
+            alert(T("asset_missing_cannot_preview"));
             return;
         }
         this._mediaPreviewState = {
@@ -6616,7 +6599,7 @@ export class CapTimelineEditorApp {
         for (const file of fileList || []) {
             const kind = this._materialKind(file);
             if (!kind) {
-                unsupported.push(file?.name || "未知文件");
+                unsupported.push(file?.name || T("unknown_file"));
                 continue;
             }
             const item = { file, kind };
@@ -6698,7 +6681,7 @@ export class CapTimelineEditorApp {
         const overlay = this._overlay;
         if (!overlay) return;
         if (this.mediaPanel) {
-            this.mediaPanel.title = "可从系统拖入图片 / 视频 / 音频文件";
+            this.mediaPanel.title = T("media_panel_drop_hint_title");
         }
         if (overlay._catTeFileDropBound) return;
         overlay._catTeFileDropBound = true;
@@ -6785,12 +6768,12 @@ export class CapTimelineEditorApp {
         const { items, unsupported } = this._materialItemsFromFiles(fileList || []);
         if (!items.length) {
             alert(unsupported.length
-                ? `不支持的素材格式：\n${unsupported.slice(0, 8).join("\n")}`
-                : "未检测到可导入的图片 / 视频 / 音频文件");
+                ? T("unsupported_asset_format_list", { list: unsupported.slice(0, 8).join("\n") })
+                : T("no_importable_files_detected"));
             return;
         }
         if (unsupported.length) {
-            alert(`已忽略 ${unsupported.length} 个不支持的文件：\n${unsupported.slice(0, 8).join("\n")}`);
+            alert(T("ignored_unsupported_files", { n: unsupported.length, list: unsupported.slice(0, 8).join("\n") }));
         }
 
         let targetClip = null;
@@ -6802,10 +6785,10 @@ export class CapTimelineEditorApp {
         this._fileDropBusy = true;
         this._showFileDropStatus(
             targetClip
-                ? `正在导入并加入 Clip ${items.length} 个素材…`
+                ? T("importing_into_clip_status", { n: items.length })
                 : mode === "timeline"
-                    ? `正在导入并插入 ${items.length} 个素材…`
-                    : `正在导入 ${items.length} 个素材…`,
+                    ? T("importing_insert_status", { n: items.length })
+                    : T("importing_status", { n: items.length }),
         );
         try {
             await this._importMaterialItems(items, {
@@ -6815,15 +6798,15 @@ export class CapTimelineEditorApp {
             });
             this._showFileDropStatus(
                 mode === "timeline"
-                    ? `已插入 ${items.length} 个素材`
-                    : `已添加 ${items.length} 个素材`,
+                    ? T("inserted_n_assets", { n: items.length })
+                    : T("added_n_assets", { n: items.length }),
             );
             setTimeout(() => {
                 if (!this._fileDropBusy) this._showFileDropStatus("");
             }, 1600);
         } catch (error) {
             this._showFileDropStatus("");
-            alert(`导入素材失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("import_asset_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
             this._fileDropBusy = false;
         }
@@ -6831,11 +6814,11 @@ export class CapTimelineEditorApp {
 
     _setAddMaterialMode(isReplace, count = 1) {
         if (this.addMaterialTitle) {
-            if (isReplace) this.addMaterialTitle.textContent = "替换素材";
-            else this.addMaterialTitle.textContent = count > 1 ? `添加素材（${count}）` : "添加素材";
+            if (isReplace) this.addMaterialTitle.textContent = T("replace_material_label");
+            else this.addMaterialTitle.textContent = count > 1 ? T("add_material_with_count", { count }) : T("add_material_title");
         }
         if (this.addMaterialConfirmBtn) {
-            this.addMaterialConfirmBtn.textContent = isReplace ? "确认替换" : "确认";
+            this.addMaterialConfirmBtn.textContent = isReplace ? T("confirm_replace_btn") : T("confirm_btn");
         }
     }
 
@@ -6868,7 +6851,7 @@ export class CapTimelineEditorApp {
         if (!fileList.length) return;
 
         if (relink && fileList.length > 1) {
-            alert("替换素材一次只能选择一个文件");
+            alert(T("replace_material_single_file_only"));
             return;
         }
 
@@ -6878,18 +6861,18 @@ export class CapTimelineEditorApp {
                 for (const item of items) {
                     if (item.objectUrl) URL.revokeObjectURL(item.objectUrl);
                 }
-                const expect = relink.kind === "image" ? "图片"
-                    : relink.kind === "video" ? "视频" : "音频";
-                alert(`请选择同类型的${expect}文件`);
+                const expect = relink.kind === "image" ? T("media_kind_image")
+                    : relink.kind === "video" ? T("media_kind_video") : T("media_kind_audio");
+                alert(T("select_same_type_file", { expect }));
                 return;
             }
         }
         if (!items.length) {
-            alert(unsupported.length ? `不支持的素材格式：\n${unsupported.slice(0, 8).join("\n")}` : "不支持的素材格式");
+            alert(unsupported.length ? T("unsupported_asset_format_list", { list: unsupported.slice(0, 8).join("\n") }) : T("unsupported_asset_format_generic"));
             return;
         }
         if (unsupported.length) {
-            alert(`已忽略 ${unsupported.length} 个不支持的文件：\n${unsupported.slice(0, 8).join("\n")}`);
+            alert(T("ignored_unsupported_files", { n: unsupported.length, list: unsupported.slice(0, 8).join("\n") }));
         }
 
         this._pendingMaterial = { items, relink };
@@ -6959,8 +6942,8 @@ export class CapTimelineEditorApp {
         const relink = pending.relink;
         if (relink) {
             const oldName = String(relink.file || "").split(/[\\/]/).pop() || relink.file;
-            const newName = items[0].file?.name || "新素材";
-            if (!confirm(`确定用「${newName}」替换「${oldName}」？\n时间轴上引用该素材的片段将一并更新。`)) {
+            const newName = items[0].file?.name || T("new_asset_fallback_name");
+            if (!confirm(T("confirm_replace_asset", { newName, oldName }))) {
                 return;
             }
         }
@@ -6980,7 +6963,8 @@ export class CapTimelineEditorApp {
                 if (!uploaded.length) return;
             }
         } catch (error) {
-            alert(`${relink ? "替换" : "添加"}素材失败：${error instanceof Error ? error.message : String(error)}`);
+            const msg = error instanceof Error ? error.message : String(error);
+            alert(relink ? T("replace_asset_failed", { msg }) : T("add_asset_failed", { msg }));
         } finally {
             if (confirmBtn) confirmBtn.disabled = false;
         }
@@ -7164,7 +7148,7 @@ export class CapTimelineEditorApp {
             body: JSON.stringify({ name: file, kind }),
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "删除文件失败");
+        if (!response.ok) throw new Error(data.error || T("delete_file_failed"));
     }
 
     async _deleteLibraryMedia(file, kind) {
@@ -7173,10 +7157,10 @@ export class CapTimelineEditorApp {
         const status = this._mediaStatus.get(`${kind}:${file}`) || { location: "input" };
         const missing = status.location === "missing";
         const msg = missing
-            ? `确定删除失联素材「${label}」？相关时间轴素材将一并移除。`
+            ? T("confirm_delete_orphan_asset", { label })
             : onTimeline
-                ? `确定删除素材「${label}」？将从素材库与磁盘移除，时间轴上对该素材的引用也会移除。`
-                : `确定删除素材「${label}」？将从素材库与磁盘移除。`;
+                ? T("confirm_delete_asset_on_timeline", { label })
+                : T("confirm_delete_asset", { label });
         if (!confirm(msg)) return;
 
         this._recordUndo();
@@ -7187,7 +7171,7 @@ export class CapTimelineEditorApp {
             try {
                 await this._deleteDiskAsset(file, kind);
             } catch (error) {
-                alert(`素材已从工程移除，但磁盘文件删除失败：${error instanceof Error ? error.message : String(error)}`);
+                alert(T("asset_removed_disk_delete_failed", { msg: error instanceof Error ? error.message : String(error) }));
             }
         }
         this._renderMediaGrid();
@@ -7203,8 +7187,8 @@ export class CapTimelineEditorApp {
         if (!entries.length) return;
         const onTimeline = entries.some(({ file, kind }) => this._isMediaOnTimeline(file, kind));
         const msg = onTimeline
-            ? `确定删除选中的 ${entries.length} 个素材？将从素材库与磁盘移除，时间轴上对这些素材的引用也会移除。`
-            : `确定删除选中的 ${entries.length} 个素材？将从素材库与磁盘移除。`;
+            ? T("confirm_delete_selected_n_on_timeline", { n: entries.length })
+            : T("confirm_delete_selected_n", { n: entries.length });
         if (!confirm(msg)) return;
 
         this._recordUndo();
@@ -7223,7 +7207,7 @@ export class CapTimelineEditorApp {
         this._refreshTimelineDuration();
         this._scheduleProgramPreview();
         if (failed.length) {
-            alert(`已从工程移除，但有 ${failed.length} 个磁盘文件删除失败。`);
+            alert(T("removed_with_n_disk_delete_failures", { n: failed.length }));
         }
     }
 
@@ -7270,11 +7254,11 @@ export class CapTimelineEditorApp {
         const t = this._timeline.currentTime;
         const canSplit = t > clip.startTime && t < clip.endTime;
         const items = [
-            ...(canSplit ? [{ label: "分割", fn: () => this._splitClip(clip) }] : []),
+            ...(canSplit ? [{ label: T("menu_split"), fn: () => this._splitClip(clip) }] : []),
         ];
         if (isAudio) {
             items.push({
-                label: m.muted ? "解除禁音" : "禁音",
+                label: m.muted ? T("unmute_label") : T("mute_label"),
                 fn: () => {
                     m.muted = !m.muted;
                     this._meta.set(clip.id, m);
@@ -7283,29 +7267,29 @@ export class CapTimelineEditorApp {
             });
         } else {
             items.push(
-                { label: "运行", fn: () => void this._runClipDownstream(clip) },
-                { label: "AI优化提示词", fn: () => void this._openAiOptimizeModal() },
-                { label: m.disabled ? "启用  Ctrl+B" : "禁用  Ctrl+B", strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
-                { label: "禁用其他素材  Ctrl+G", fn: () => this._disableOthers(clip) },
-                { label: "设置标题", fn: () => this._renameClip(clip) },
-                { label: "查看素材", fn: () => this._openClipItemsModal(clip) },
-                { label: "关联生成的视频", fn: () => void this._openOutputVideosPicker(clip) },
+                { label: T("menu_run"), fn: () => void this._runClipDownstream(clip) },
+                { label: T("menu_ai_optimize_prompt"), fn: () => void this._openAiOptimizeModal() },
+                { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
+                { label: T("menu_disable_others_assets_shortcut"), fn: () => this._disableOthers(clip) },
+                { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
+                { label: T("view_material_title"), fn: () => this._openClipItemsModal(clip) },
+                { label: T("linked_generated_videos_title"), fn: () => void this._openOutputVideosPicker(clip) },
             );
             if (this._clipUsesGeneratedPreview(m)) {
                 const gen = this._firstEnabledGeneratedVideo(m);
                 if (gen) {
                     const muted = gen.muted === true;
                     items.push({
-                        label: muted ? "解除禁音" : "禁音",
+                        label: muted ? T("unmute_label") : T("mute_label"),
                         fn: () => this._setGeneratedVideoMuted(clip, gen.id, !muted),
                     });
                 }
             }
         }
         items.push(
-            { label: "复制  Ctrl+C", fn: () => this._copySelectedClips() },
-            { label: "粘贴  Ctrl+V", fn: () => this._pasteClips() },
-            { label: "删除", fn: () => this._deleteClip(clip), danger: true },
+            { label: T("menu_copy_shortcut"), fn: () => this._copySelectedClips() },
+            { label: T("menu_paste_shortcut"), fn: () => this._pasteClips() },
+            { label: T("delete_btn"), fn: () => this._deleteClip(clip), danger: true },
         );
         this._buildCtxMenu(items, e.clientX, e.clientY);
     }
@@ -7498,11 +7482,11 @@ export class CapTimelineEditorApp {
         if (!clip || !this.node) return;
         const m = this._meta.get(clip.id) ?? defaultImageMeta();
         if (clip.track?.type === "audio" || m.clipType === "audio") {
-            alert("音频片段不会进入 data_json，请选择图片/视频片段。");
+            alert(T("audio_clip_not_in_data_json"));
             return;
         }
         if (typeof app?.queuePrompt !== "function") {
-            alert("无法排队工作流：找不到 queuePrompt。");
+            alert(T("queue_prompt_not_found"));
             return;
         }
 
@@ -7543,7 +7527,7 @@ export class CapTimelineEditorApp {
         } catch (error) {
             this._pendingGeneratedClipId = null;
             this._pendingGeneratedFiles = [];
-            alert(`运行失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
             for (const row of snapshot) {
                 const c = this._findClipById(row.id);
@@ -7642,7 +7626,7 @@ export class CapTimelineEditorApp {
 
     _renameClip(clip) {
         if (!clip) return;
-        const next = prompt("Clip 标题", clip.name || DEFAULT_CLIP_NAME);
+        const next = prompt(T("clip_title_prompt"), clip.name || DEFAULT_CLIP_NAME);
         if (next == null) return;
         const name = String(next).trim();
         if (!name || name === clip.name) return;
@@ -7666,7 +7650,7 @@ export class CapTimelineEditorApp {
         this._normalizeVisualMeta(clip, m);
         this._clipItemsModalClipId = clip.id;
         this.clipItemsModal.hidden = false;
-        if (this.clipItemsTitle) this.clipItemsTitle.textContent = `${clip.name || DEFAULT_CLIP_NAME} · 素材`;
+        if (this.clipItemsTitle) this.clipItemsTitle.textContent = T("clip_items_title_dynamic", { name: clip.name || DEFAULT_CLIP_NAME });
         this._renderClipItemsModal(clip);
     }
 
@@ -7678,7 +7662,7 @@ export class CapTimelineEditorApp {
         if (!items.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-clip-items-empty";
-            empty.textContent = "空 Clip，可拖入图片或视频";
+            empty.textContent = T("empty_clip_drag_hint");
             this.clipItemsBody.appendChild(empty);
             return;
         }
@@ -7692,7 +7676,7 @@ export class CapTimelineEditorApp {
             const up = document.createElement("button");
             up.type = "button";
             up.className = "cat-te-clip-item-move-btn";
-            up.title = "上移";
+            up.title = T("move_up_title");
             up.innerHTML = iconHtml("arrowUp", 12);
             up.disabled = index === 0;
             up.addEventListener("click", (e) => {
@@ -7702,7 +7686,7 @@ export class CapTimelineEditorApp {
             const down = document.createElement("button");
             down.type = "button";
             down.className = "cat-te-clip-item-move-btn";
-            down.title = "下移";
+            down.title = T("move_down_title");
             down.innerHTML = iconHtml("arrowDown", 12);
             down.disabled = index === items.length - 1;
             down.addEventListener("click", (e) => {
@@ -7726,26 +7710,26 @@ export class CapTimelineEditorApp {
 
             const kind = document.createElement("span");
             kind.className = "cat-te-clip-item-kind";
-            kind.textContent = item.kind === "video" ? "视频" : "图片";
+            kind.textContent = item.kind === "video" ? T("media_kind_video") : T("media_kind_image");
 
             const enable = document.createElement("label");
             enable.className = "cat-te-clip-item-enable";
             const enableCb = document.createElement("input");
             enableCb.type = "checkbox";
             enableCb.checked = item.enabled !== false;
-            enableCb.title = item.enabled !== false ? "禁用" : "启用";
+            enableCb.title = item.enabled !== false ? T("disable_label") : T("enable_label");
             enableCb.addEventListener("click", (e) => e.stopPropagation());
             enableCb.addEventListener("change", () => {
                 this._setClipItemEnabled(clip, index, !!enableCb.checked);
             });
             const enableText = document.createElement("span");
-            enableText.textContent = "启用";
+            enableText.textContent = T("enable_label");
             enable.append(enableCb, enableText);
 
             const del = document.createElement("button");
             del.type = "button";
             del.className = "cat-te-clip-item-delete";
-            del.title = "删除素材";
+            del.title = T("delete_asset_title");
             del.innerHTML = iconHtml("trash", 12);
             del.addEventListener("click", (e) => {
                 e.stopPropagation();
@@ -8186,8 +8170,8 @@ export class CapTimelineEditorApp {
         const packageBtn = document.createElement("button");
         packageBtn.type = "button";
         packageBtn.className = "tl-btn tl-btn-add-package";
-        packageBtn.title = "在播放头位置插入一个空 Clip（文生视频）";
-        packageBtn.textContent = "+ 插入Clip";
+        packageBtn.title = T("insert_empty_clip_title");
+        packageBtn.textContent = T("insert_clip_btn");
         packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
         tl.toolbarEl.appendChild(packageBtn);
 
@@ -8199,15 +8183,15 @@ export class CapTimelineEditorApp {
         this.undoBtn = document.createElement("button");
         this.undoBtn.type = "button";
         this.undoBtn.className = "tl-btn tl-btn-history";
-        this.undoBtn.title = "还原";
-        this.undoBtn.textContent = "↶ 还原";
+        this.undoBtn.title = T("undo_title");
+        this.undoBtn.textContent = T("undo_btn_label");
         this.undoBtn.addEventListener("click", () => this.undo());
 
         this.redoBtn = document.createElement("button");
         this.redoBtn.type = "button";
         this.redoBtn.className = "tl-btn tl-btn-history";
-        this.redoBtn.title = "重做";
-        this.redoBtn.textContent = "↷ 重做";
+        this.redoBtn.title = T("redo_title");
+        this.redoBtn.textContent = T("redo_btn_label");
         this.redoBtn.addEventListener("click", () => this.redo());
         tl.toolbarEl.prepend(this.undoBtn, this.redoBtn);
 
@@ -8245,7 +8229,7 @@ export class CapTimelineEditorApp {
                 if (!CapTimelineEditorApp._clipClipboard?.length) return;
                 e.preventDefault();
                 this._buildCtxMenu(
-                    [{ label: "粘贴  Ctrl+V", fn: () => this._pasteClips() }],
+                    [{ label: T("menu_paste_shortcut"), fn: () => this._pasteClips() }],
                     e.clientX,
                     e.clientY,
                 );
@@ -8439,13 +8423,13 @@ export class CapTimelineEditorApp {
 
         const canPreview = isAudio ? !!clip.src : !!current;
         this.clipThumbWrap.classList.toggle("cat-te-clip-thumb-clickable", canPreview);
-        this.clipThumbWrap.title = canPreview ? "点击预览素材" : "";
+        this.clipThumbWrap.title = canPreview ? T("click_to_preview_asset_title") : "";
         this.clipNameEl.textContent = current?.file?.split(/[\\/]/).pop() || clip.name || DEFAULT_CLIP_NAME;
         this.clipStartEl.textContent = tl.formatTime(clip.startTime);
         this.clipEndEl.textContent = tl.formatTime(clip.endTime);
         const fps = this.getFps();
         const totalFrames = Math.max(0, frameIndexFromSecs(clip.endTime, fps) - frameIndexFromSecs(clip.startTime, fps));
-        this.clipDurEl.textContent = `时长 ${tl.formatTime(clip.duration)}（总帧数 ${totalFrames}）`;
+        this.clipDurEl.textContent = T("clip_duration_frames", { duration: tl.formatTime(clip.duration), frames: totalFrames });
         if (this.clipItemIndexEl) {
             this.clipItemIndexEl.textContent = current ? `${idx + 1}/${items.length}` : "";
         }
@@ -8618,7 +8602,7 @@ export class CapTimelineEditorApp {
     }
 
     _syncSidebarMode(hasClip) {
-        if (this.sidebarTitle) this.sidebarTitle.textContent = hasClip ? "clip设置" : "项目设置";
+        if (this.sidebarTitle) this.sidebarTitle.textContent = hasClip ? T("clip_settings_title") : T("project_settings_title");
         if (this.projectPanel) this.projectPanel.hidden = !!hasClip;
         if (this.clipPanel) this.clipPanel.hidden = !hasClip;
         if (hasClip) {
@@ -8630,7 +8614,7 @@ export class CapTimelineEditorApp {
     }
 
     _syncBrandProjectName() {
-        const name = String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目";
+        const name = String(this.projectNameInput?.value || T("untitled_project")).trim() || T("untitled_project");
         if (this.brandProjectBtn) this.brandProjectBtn.textContent = name;
     }
 
@@ -8744,18 +8728,18 @@ export class CapTimelineEditorApp {
         items.forEach((item, index) => {
             if (item.enabled === false) return;
             const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
-            const name = (item.file || "").split(/[\\/]/).pop() || item.file || `素材 ${index + 1}`;
-            const kind = item.kind === "video" ? "视频" : "图片";
+            const name = (item.file || "").split(/[\\/]/).pop() || item.file || T("asset_index_fallback", { index: index + 1 });
+            const kind = item.kind === "video" ? T("media_kind_video") : T("media_kind_image");
             const type = media?.media_type || "";
             const tags = Array.isArray(media?.tags) ? media.tags.filter(Boolean).join(", ") : "";
             const prompt = item.useMediaPrompt === false ? "" : String(media?.prompt || "");
             const meta = [kind, type, tags].filter(Boolean).join(" · ");
             lines.push(`${index + 1}. ${name}${meta ? `（${meta}）` : ""}`);
-            if (item.useMediaPrompt === false) lines.push("（未使用素材提示词）");
-            else lines.push(prompt || "（空）");
+            if (item.useMediaPrompt === false) lines.push(T("media_prompt_not_used_note"));
+            else lines.push(prompt || T("empty_paren"));
             lines.push("");
         });
-        return lines.join("\n").trim() || "（当前 clip 没有素材提示词）";
+        return lines.join("\n").trim() || T("no_media_prompt_for_clip");
     }
 
     _clipAiOptimizeFiles(clip) {
@@ -8807,8 +8791,8 @@ export class CapTimelineEditorApp {
         }
         const meta = this._ensureClipMeta(clip);
         const tab = this._aiOptimizeSrc || "clip";
-        if (tab === "clip") this.aiSrcText.value = String(meta.prompt || "") || "（空）";
-        else if (tab === "global") this.aiSrcText.value = this._readGlobalPrompt() || "（空）";
+        if (tab === "clip") this.aiSrcText.value = String(meta.prompt || "") || T("empty_paren");
+        else if (tab === "global") this.aiSrcText.value = this._readGlobalPrompt() || T("empty_paren");
         else this.aiSrcText.value = this._mediaPromptBlock(clip);
     }
 
@@ -8830,7 +8814,7 @@ export class CapTimelineEditorApp {
         this._aiOptimizeClipId = clip.id;
         this.aiOptimizeModal.hidden = false;
         if (this.aiOptimizeTitle) {
-            this.aiOptimizeTitle.textContent = `AI 优化 · ${clip.name || DEFAULT_CLIP_NAME}`;
+            this.aiOptimizeTitle.textContent = T("ai_optimize_title_dynamic", { name: clip.name || DEFAULT_CLIP_NAME });
         }
         if (this.aiResultInput) this.aiResultInput.value = String(meta.aiPrompt || "");
         if (this.aiSkillInput && !String(this.aiSkillInput.value || "").trim()) {
@@ -8866,7 +8850,7 @@ export class CapTimelineEditorApp {
             if (!models.length && !agents.length) {
                 const opt = document.createElement("option");
                 opt.value = "";
-                opt.textContent = "未找到可用模型或 Agent";
+                opt.textContent = T("no_model_or_agent_found");
                 this.aiModelSelect.appendChild(opt);
                 this.aiModelSelect.disabled = true;
                 return;
@@ -8874,7 +8858,7 @@ export class CapTimelineEditorApp {
             this.aiModelSelect.disabled = false;
             if (agents.length) {
                 const group = document.createElement("optgroup");
-                group.label = "已配置 Agent";
+                group.label = T("configured_agents_group_label");
                 for (const agent of agents) {
                     const opt = document.createElement("option");
                     opt.value = `agent:${agent.id}`;
@@ -8885,7 +8869,7 @@ export class CapTimelineEditorApp {
             }
             if (models.length) {
                 const group = document.createElement("optgroup");
-                group.label = "本地 Qwen3-VL";
+                group.label = T("local_qwen_group_label");
                 for (const name of models) {
                     const opt = document.createElement("option");
                     opt.value = `local:${name}`;
@@ -8901,7 +8885,7 @@ export class CapTimelineEditorApp {
             this.aiModelSelect.replaceChildren();
             const opt = document.createElement("option");
             opt.value = "";
-            opt.textContent = "无法加载模型列表";
+            opt.textContent = T("model_list_load_failed");
             this.aiModelSelect.appendChild(opt);
             this.aiModelSelect.disabled = true;
         }
@@ -8928,15 +8912,15 @@ export class CapTimelineEditorApp {
             this.aiOptimizeBtn.classList.toggle("is-loading", false);
             this.aiOptimizeBtn.classList.toggle("is-cancel", busy);
             const span = this.aiOptimizeBtn.querySelector("span");
-            if (span) span.textContent = busy ? "终止" : "AI优化";
+            if (span) span.textContent = busy ? T("terminate_label") : T("ai_optimize_short");
         }
         if (this.aiGenerateBtn) {
             this.aiGenerateBtn.disabled = false;
             this.aiGenerateBtn.classList.toggle("is-loading", false);
             this.aiGenerateBtn.classList.toggle("is-cancel", busy);
             this.aiGenerateBtn.innerHTML = busy
-                ? `${iconHtml("sparkles", 12)}<span>终止</span>`
-                : `${iconHtml("sparkles", 12)}<span>生成</span>`;
+                ? `${iconHtml("sparkles", 12)}<span>${T("terminate_label")}</span>`
+                : `${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span>`;
         }
     }
 
@@ -8957,7 +8941,7 @@ export class CapTimelineEditorApp {
         const meta = this._ensureClipMeta(clip);
         const modelChoice = String(this.aiModelSelect?.value || "").trim();
         if (!modelChoice) {
-            alert("没有可用的本地模型或 Agent，请先在设置中添加 Agent。");
+            alert(T("no_available_model_or_agent_alert"));
             return;
         }
         localStorage.setItem(STORAGE_AI_PROMPT_MODEL, modelChoice);
@@ -8999,7 +8983,7 @@ export class CapTimelineEditorApp {
             if (ac.signal.aborted || data.cancelled || response.status === 499) return;
             if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
             const text = String(data.prompt || "").trim();
-            if (!text) throw new Error("模型没有返回提示词");
+            if (!text) throw new Error(T("model_no_prompt_returned"));
             this._recordUndo();
             meta.aiPrompt = text;
             this._meta.set(clip.id, meta);
@@ -9011,7 +8995,7 @@ export class CapTimelineEditorApp {
             this._saveToWidgets();
         } catch (error) {
             if (ac.signal.aborted || error?.name === "AbortError") return;
-            alert(`AI 优化失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("ai_optimize_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
             if (this._aiOptimizeAbort === ac) this._aiOptimizeAbort = null;
             this._setAiOptimizeBusy(false);
@@ -9028,7 +9012,7 @@ export class CapTimelineEditorApp {
         this.skillSyncBtn.disabled = !!busy;
         this.skillSyncBtn.classList.toggle("is-loading", !!busy);
         const span = this.skillSyncBtn.querySelector("span");
-        if (span) span.textContent = busy ? "同步中…" : "更新";
+        if (span) span.textContent = busy ? T("syncing_ellipsis") : T("update_btn");
     }
 
     async _syncH3Skills() {
@@ -9040,9 +9024,9 @@ export class CapTimelineEditorApp {
             if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
             this._h3Skills = Array.isArray(data.skills) ? data.skills : [];
             if (!this.skillPickerModal?.hidden) this._renderSkillPicker();
-            alert(`已同步 ${this._h3Skills.length} 个 Prompt Skill`);
+            alert(T("synced_n_skills", { n: this._h3Skills.length }));
         } catch (error) {
-            alert(`同步失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("sync_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
             this._setSkillSyncBusy(false);
         }
@@ -9052,7 +9036,7 @@ export class CapTimelineEditorApp {
         if (!this.skillPickerModal) return;
         this.skillPickerModal.hidden = false;
         if (this.skillPickerFilter) this.skillPickerFilter.value = "";
-        this.skillPickerBody && (this.skillPickerBody.textContent = "加载中…");
+        this.skillPickerBody && (this.skillPickerBody.textContent = T("loading_ellipsis"));
         try {
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/h3_skills"));
             const data = await response.json().catch(() => ({}));
@@ -9060,7 +9044,7 @@ export class CapTimelineEditorApp {
             this._renderSkillPicker();
         } catch (error) {
             if (this.skillPickerBody) {
-                this.skillPickerBody.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
+                this.skillPickerBody.textContent = T("load_failed", { msg: error instanceof Error ? error.message : String(error) });
             }
         }
     }
@@ -9080,8 +9064,8 @@ export class CapTimelineEditorApp {
             const empty = document.createElement("div");
             empty.className = "cat-te-skill-picker-empty";
             empty.textContent = (this._h3Skills || []).length
-                ? "没有匹配的 Skill"
-                : "本地还没有 Skill。点击右侧「更新」从 GitHub 同步。";
+                ? T("no_matching_skill")
+                : T("no_local_skills_hint");
             body.appendChild(empty);
             return;
         }
@@ -9104,7 +9088,7 @@ export class CapTimelineEditorApp {
             apply.type = "button";
             apply.className = "cat-te-btn cat-te-btn-primary cat-te-skill-apply";
             apply.dataset.skillId = row.id;
-            apply.textContent = "应用";
+            apply.textContent = T("apply_btn");
             card.append(img, name, apply);
             grid.appendChild(card);
         }
@@ -9123,7 +9107,7 @@ export class CapTimelineEditorApp {
             localStorage.setItem(STORAGE_AI_PROMPT_SKILL, text);
             this._closeSkillPicker();
         } catch (error) {
-            alert(`应用 Skill 失败：${error instanceof Error ? error.message : String(error)}`);
+            alert(T("apply_skill_failed", { msg: error instanceof Error ? error.message : String(error) }));
         }
     }
 
@@ -9309,7 +9293,7 @@ export class CapTimelineEditorApp {
         return {
             project_version: this._currentVersion(),
             schema_version: SCHEMA_VERSION,
-            name: String(this.projectNameInput?.value || "未命名项目").trim() || "未命名项目",
+            name: String(this.projectNameInput?.value || T("untitled_project")).trim() || T("untitled_project"),
             media: this._serializeMediaCatalog(),
             settings: {
                 fps: Number(this._w("fps")?.value ?? 24),
@@ -9394,7 +9378,7 @@ export class CapTimelineEditorApp {
 
             const project = this._migrateProjectDocument(snapshot.project || {});
             this._applyMediaCatalogFromProject(project);
-            this.projectNameInput.value = String(project.name || "未命名项目").trim() || "未命名项目";
+            this.projectNameInput.value = String(project.name || T("untitled_project")).trim() || T("untitled_project");
             this._syncBrandProjectName();
             const snapSettings = snapshot.project?.settings ?? {};
             if (snapSettings.global_prompt != null) {

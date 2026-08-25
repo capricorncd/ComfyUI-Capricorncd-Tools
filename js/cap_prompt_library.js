@@ -19,6 +19,7 @@ import {
     formatPresetWriteText,
     getBuiltinPresets,
 } from "./cap_prompt_presets.js";
+import { t } from "./i18n/prompt_library.js";
 
 const STORAGE_HISTORY = "capricorncd.rich_prompt.history";
 const STORAGE_PRESETS = "capricorncd.rich_prompt.presets";
@@ -26,15 +27,18 @@ const STORAGE_HIDDEN_BUILTIN = "capricorncd.rich_prompt.hidden_builtin_presets";
 const STORAGE_PRESET_META = "capricorncd.rich_prompt.preset_meta";
 const HISTORY_MAX = 80;
 const NODE_CLASS = "CAP_RichPromptInput";
-const PRESET_CAT_FILTERS = [
-    { id: "all", label: "全部" },
-    ...PRESET_FILTER_ORDER.map((id) => ({ id, label: PRESET_CATEGORIES[id].label })),
-];
-const EMPTY_LABEL = {
-    history: "暂无历史记录",
-    preset: "暂无预设",
-};
-const NO_TARGET_MSG = "请选中提示词节点后再操作";
+function getPresetCatFilters() {
+    return [
+        { id: "all", label: t("cat_all") },
+        ...PRESET_FILTER_ORDER.map((id) => ({ id, label: PRESET_CATEGORIES[id].label })),
+    ];
+}
+function getEmptyLabel(kind) {
+    return kind === "history" ? t("no_history") : t("no_preset");
+}
+function getNoTargetMsg() {
+    return t("no_target_msg");
+}
 
 function uid() {
     return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -60,9 +64,9 @@ function normalizeText(text) {
 }
 
 function previewText(text, max = 120) {
-    const t = normalizeText(text).trim().replace(/\s+/g, " ");
-    if (t.length <= max) return t || "(空)";
-    return t.slice(0, max) + "…";
+    const s = normalizeText(text).trim().replace(/\s+/g, " ");
+    if (s.length <= max) return s || t("empty_placeholder");
+    return s.slice(0, max) + "…";
 }
 
 function formatTime(ts) {
@@ -367,7 +371,7 @@ function pickJsonFile() {
                 const text = await file.text();
                 resolve(JSON.parse(text));
             } catch {
-                alert("无法解析 JSON 文件");
+                alert(t("json_parse_failed"));
                 resolve(null);
             }
         });
@@ -430,7 +434,7 @@ function resolveActiveTarget() {
 function requireTarget() {
     const target = resolveActiveTarget();
     if (!target.textarea) {
-        alert(NO_TARGET_MSG);
+        alert(getNoTargetMsg());
         return null;
     }
     return target;
@@ -462,11 +466,12 @@ function updateModalTargetHint() {
     if (node && textarea) {
         const title = node.title || NODE_CLASS;
         hint.textContent = `· #${node.id} ${title}`;
-        hint.title = `目标节点：#${node.id} ${title}`;
+        hint.title = t("target_node_hint", { id: node.id, title });
         hint.classList.remove("cap-ui-target-warn");
     } else {
-        hint.textContent = `· ${NO_TARGET_MSG}`;
-        hint.title = NO_TARGET_MSG;
+        const noTargetMsg = getNoTargetMsg();
+        hint.textContent = `· ${noTargetMsg}`;
+        hint.title = noTargetMsg;
         hint.classList.add("cap-ui-target-warn");
     }
     refreshModalTargetState();
@@ -477,7 +482,7 @@ function refreshModalTargetState() {
     const ok = !!resolveActiveTarget().textarea;
     for (const btn of _modal.querySelectorAll("[data-cap-need-target='1']")) {
         btn.disabled = !ok;
-        if (!ok) btn.title = NO_TARGET_MSG;
+        if (!ok) btn.title = getNoTargetMsg();
         else if (btn.dataset.capTitle) btn.title = btn.dataset.capTitle;
     }
 }
@@ -630,7 +635,7 @@ function renderStarFilterBar(host, kind) {
         btn.type = "button";
         btn.className = "cap-ui-star-btn";
         btn.innerHTML = iconHtml("star", 14);
-        btn.title = `${i} 星`;
+        btn.title = t("star_title", { n: i });
         if (i <= current) btn.classList.add("on");
         btn.addEventListener("click", () => {
             _modalStarFilter = _modalStarFilter === String(i) ? "all" : String(i);
@@ -648,7 +653,7 @@ function renderCategoryBar(host, kind) {
         renderStarFilterBar(host, kind);
         return;
     }
-    renderFilterBar(host, kind, PRESET_CAT_FILTERS, _modalCatFilter, (id) => {
+    renderFilterBar(host, kind, getPresetCatFilters(), _modalCatFilter, (id) => {
         const next = _modalCatFilter === id ? "all" : id;
         _modalCatFilter = next;
         if (next !== "gu_feng_female") _modalSubCatFilter = "all";
@@ -670,7 +675,7 @@ function makeItemStars(item, kind, onChange) {
         btn.type = "button";
         btn.className = "cap-ui-star-btn";
         btn.innerHTML = iconHtml("star", 12);
-        btn.title = `${i} 星`;
+        btn.title = t("star_title", { n: i });
         if (i <= current) btn.classList.add("on");
         btn.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -691,8 +696,8 @@ function appendTitleInput(metaMain, item, kind) {
     titleInput.type = "text";
     titleInput.className = "cap-ui-list-title-input";
     titleInput.value = item.title || "";
-    titleInput.placeholder = "标题（可选）";
-    titleInput.title = "点击编辑标题，失焦自动保存";
+    titleInput.placeholder = t("title_placeholder");
+    titleInput.title = t("title_edit_hint");
     titleInput.addEventListener("blur", () => {
         if (kind === "history") {
             updatePromptHistoryTitle(item.id, titleInput.value);
@@ -733,7 +738,7 @@ function renderList(body, kind) {
     if (!list.length) {
         const empty = document.createElement("div");
         empty.className = "cap-ui-empty";
-        empty.textContent = EMPTY_LABEL[kind] || "暂无内容";
+        empty.textContent = getEmptyLabel(kind) || t("no_content");
         scroll.appendChild(empty);
         refreshModalTargetState();
         return;
@@ -760,7 +765,7 @@ function renderList(body, kind) {
 
         const btnInsert = mkUiIconBtn(iconHtml("insert"), {
             needTarget: true,
-            title: "插入到光标位置（无光标则追加到末尾）",
+            title: t("insert_at_cursor_title"),
             onClick: () => {
                 const target = requireTarget();
                 if (!target) return;
@@ -773,7 +778,7 @@ function renderList(body, kind) {
         const btnReplace = mkUiIconBtn(iconHtml("replace"), {
             variant: "primary",
             needTarget: true,
-            title: "替换输入框全部内容",
+            title: t("replace_all_title"),
             onClick: () => {
                 const target = requireTarget();
                 if (!target) return;
@@ -788,9 +793,9 @@ function renderList(body, kind) {
         if (kind === "history") {
             const defaultName = item.title || previewText(item.text, 40);
             const btnToPreset = mkUiIconBtn(iconHtml("toPreset"), {
-                title: "设为预设",
+                title: t("set_as_preset_title"),
                 onClick: () => {
-                    const name = prompt("预设名称（可留空）", defaultName);
+                    const name = prompt(t("preset_name_prompt"), defaultName);
                     if (name === null) return;
                     addPromptPreset(item.text, name, "other");
                 },
@@ -801,13 +806,13 @@ function renderList(body, kind) {
         if (kind === "history" || kind === "preset") {
             const btnDel = mkUiIconBtn(iconHtml("trash"), {
                 variant: "danger",
-                title: "删除",
+                title: t("delete_title"),
                 onClick: () => {
                     const msg = kind === "history"
-                        ? "删除这条历史记录？"
+                        ? t("confirm_delete_history")
                         : item.builtin
-                            ? "删除这条内置预设？"
-                            : "删除这条预设？";
+                            ? t("confirm_delete_builtin_preset")
+                            : t("confirm_delete_preset");
                     if (!confirm(msg)) return;
                     if (kind === "history") removePromptHistory(item.id);
                     else if (item.builtin) hideBuiltinPreset(item.id);
@@ -844,7 +849,7 @@ function renderToolbar(toolbar, body, kind) {
     toolbar.innerHTML = "";
 
     if (kind === "preset") {
-        const btnSave = mkUiBtn("保存当前为预设", {
+        const btnSave = mkUiBtn(t("save_current_as_preset_btn"), {
             variant: "primary",
             needTarget: true,
             onClick: () => {
@@ -852,10 +857,10 @@ function renderToolbar(toolbar, body, kind) {
                 if (!target) return;
                 const text = target.textarea.value ?? "";
                 if (!String(text).trim()) {
-                    alert("当前提示词为空");
+                    alert(t("current_prompt_empty_alert"));
                     return;
                 }
-                const name = prompt("预设名称（可留空）", previewText(text, 40));
+                const name = prompt(t("preset_name_prompt"), previewText(text, 40));
                 if (name === null) return;
                 const cat = _modalCatFilter !== "all" && PRESET_CATEGORIES[_modalCatFilter]
                     ? _modalCatFilter
@@ -868,14 +873,14 @@ function renderToolbar(toolbar, body, kind) {
     } else if (kind === "history") {
         const btnSave = mkUiIconBtn(iconHtml("save", 14), {
             variant: "primary",
-            title: "保存当前到历史",
+            title: t("save_current_to_history_title"),
             needTarget: true,
             onClick: () => {
                 const target = requireTarget();
                 if (!target) return;
                 const text = target.textarea.value ?? "";
                 if (!String(text).trim()) {
-                    alert("当前提示词为空");
+                    alert(t("current_prompt_empty_alert"));
                     return;
                 }
                 addPromptHistory(text);
@@ -886,7 +891,7 @@ function renderToolbar(toolbar, body, kind) {
     }
 
     if (kind === "history" || kind === "preset") {
-        toolbar.appendChild(mkUiBtn("导出", { onClick: () => {
+        toolbar.appendChild(mkUiBtn(t("export_btn"), { onClick: () => {
             const list = kind === "history" ? getPromptHistory() : getPromptPresets();
             const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
             downloadJson(
@@ -895,17 +900,17 @@ function renderToolbar(toolbar, body, kind) {
             );
         }}));
 
-        toolbar.appendChild(mkUiBtn("导入", { onClick: async () => {
+        toolbar.appendChild(mkUiBtn(t("import_btn"), { onClick: async () => {
             const data = await pickJsonFile();
             if (!data) return;
             const items = Array.isArray(data) ? data : data.items;
             if (!Array.isArray(items)) {
-                alert("JSON 格式无效，需要 items 数组");
+                alert(t("invalid_json_format_alert"));
                 return;
             }
-            const merge = confirm("确定导入？\n确定 = 合并到现有列表\n取消 = 终止");
+            const merge = confirm(t("confirm_import"));
             if (!merge) return;
-            const replace = confirm("是否清空现有列表后导入？\n确定 = 替换\n取消 = 追加合并");
+            const replace = confirm(t("confirm_import_replace"));
             if (kind === "history") {
                 let list = replace ? [] : getPromptHistory();
                 for (const item of items) {
@@ -944,8 +949,8 @@ function renderToolbar(toolbar, body, kind) {
             renderList(body, kind);
         }}));
 
-        toolbar.appendChild(mkUiBtn("清空", { variant: "danger", onClick: () => {
-            if (!confirm(kind === "history" ? "清空全部历史记录？" : "清空全部自定义预设？")) return;
+        toolbar.appendChild(mkUiBtn(t("clear_btn"), { variant: "danger", onClick: () => {
+            if (!confirm(kind === "history" ? t("confirm_clear_history") : t("confirm_clear_presets"))) return;
             if (kind === "history") clearPromptHistory();
             else clearPromptPresets();
             renderList(body, kind);
@@ -967,14 +972,14 @@ function buildModal(initialKind = "history") {
     overlay.innerHTML = `
       <div class="cap-ui-dialog" role="dialog" aria-modal="false">
         <div class="cap-ui-hd cap-ui-drag">
-          <h3 class="cap-ui-hd-title">历史记录 / 预设</h3>
+          <h3 class="cap-ui-hd-title">${t("history_preset_header")}</h3>
           <span class="cap-ui-target-hint"></span>
-          <button type="button" class="cap-ui-close" title="关闭">${iconHtml("close", 16)}</button>
+          <button type="button" class="cap-ui-close" title="${t("close_title")}">${iconHtml("close", 16)}</button>
         </div>
         <div class="cap-ui-tabs">
           <div class="cap-ui-tab-list">
-            <button type="button" class="cap-ui-tab" data-kind="history">历史记录</button>
-            <button type="button" class="cap-ui-tab" data-kind="preset">预设</button>
+            <button type="button" class="cap-ui-tab" data-kind="history">${t("tab_history")}</button>
+            <button type="button" class="cap-ui-tab" data-kind="preset">${t("tab_preset")}</button>
           </div>
           <div class="cap-ui-toolbar"></div>
         </div>
@@ -1076,7 +1081,7 @@ function bindPromptHeaderButtons(wrap, node, openHistory, openPreset) {
     }
     historyBtn.classList.add("cap-ui-node-btn-icon");
     historyBtn.innerHTML = iconHtml("history", 13);
-    historyBtn.title = "历史记录";
+    historyBtn.title = t("tab_history");
     historyBtn.onmousedown = (e) => e.stopPropagation();
     historyBtn.onclick = (e) => {
         e.stopPropagation();
@@ -1092,7 +1097,7 @@ function bindPromptHeaderButtons(wrap, node, openHistory, openPreset) {
     }
     presetBtn.classList.add("cap-ui-node-btn-icon");
     presetBtn.innerHTML = iconHtml("preset", 13);
-    presetBtn.title = "预设";
+    presetBtn.title = t("tab_preset");
     presetBtn.onmousedown = (e) => e.stopPropagation();
     presetBtn.onclick = (e) => {
         e.stopPropagation();
@@ -1109,7 +1114,7 @@ function bindPromptHeaderButtons(wrap, node, openHistory, openPreset) {
         saveBtn.classList.add("cap-ui-node-btn-icon");
     }
     saveBtn.innerHTML = iconHtml("save", 13);
-    saveBtn.title = "保存当前提示词到历史记录";
+    saveBtn.title = t("save_current_prompt_to_history_title");
     saveBtn.onmousedown = (e) => e.stopPropagation();
     saveBtn.onclick = (e) => {
         e.stopPropagation();
@@ -1170,7 +1175,7 @@ function savePromptHistoryFromNode(node) {
     const ta = resolvePromptTextarea(widget);
     const text = ta?.value ?? widget?.value ?? "";
     if (!normalizeText(text).trim()) {
-        alert("当前提示词为空");
+        alert(t("current_prompt_empty_alert"));
         return false;
     }
     addPromptHistory(text);

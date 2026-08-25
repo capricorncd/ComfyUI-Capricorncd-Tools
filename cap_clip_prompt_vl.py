@@ -20,6 +20,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from .cap_i18n import get_last_known_lang, t as _t
 from .timecode import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, resolve_media_path
 
 # Worker subprocess must not import ComfyUI CUDA/AIMDO while the parent holds the GPU.
@@ -316,17 +317,17 @@ def save_agent_config(payload: dict) -> dict:
     api_key = str(payload.get("api_key") or "").strip()
     agent_id = str(payload.get("id") or "").strip()
     if provider not in AGENT_PROVIDERS:
-        raise ValueError("服务商必须是 OpenAI 或 Gemini")
+        raise ValueError(_t("provider_must_be_openai_gemini", get_last_known_lang()))
     if not label or len(label) > 80:
-        raise ValueError("Agent 名称不能为空且不能超过 80 个字符")
+        raise ValueError(_t("agent_name_required", get_last_known_lang()))
     if not model or len(model) > 120:
-        raise ValueError("模型名称不能为空且不能超过 120 个字符")
+        raise ValueError(_t("model_name_required", get_last_known_lang()))
     with _AGENT_CONFIG_LOCK:
         configs = _read_agent_configs()
         existing = next((row for row in configs if str(row.get("id")) == agent_id), None)
         if existing is None:
             if not api_key:
-                raise ValueError("新增 Agent 时必须填写 API Key")
+                raise ValueError(_t("api_key_required_new_agent", get_last_known_lang()))
             existing = {"id": uuid.uuid4().hex}
             configs.append(existing)
         elif not api_key:
@@ -365,7 +366,7 @@ def resolve_vl_model_path(model_name: str) -> str:
     import folder_paths
     name = str(model_name or "").strip()
     if not name:
-        raise ValueError("未选择多模态模型")
+        raise ValueError(_t("no_multimodal_model_selected", get_last_known_lang()))
     if os.path.isdir(name) and os.path.isfile(os.path.join(name, "config.json")):
         return os.path.normpath(name)
     root = Path(folder_paths.models_dir)
@@ -373,9 +374,7 @@ def resolve_vl_model_path(model_name: str) -> str:
         candidate = root / sub / name
         if (candidate / "config.json").is_file():
             return str(candidate)
-    raise ValueError(
-        f"找不到模型「{name}」。请放到 ComfyUI/models/prompt_generator/ 或 models/LLM/。"
-    )
+    raise ValueError(_t("model_not_found", get_last_known_lang(), name=name))
 
 
 def _to_pil(image, max_side: int = MAX_IMAGE_SIDE) -> Image.Image:
@@ -512,7 +511,7 @@ class ClipPromptVLEngine:
         try:
             from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
         except ImportError as exc:
-            raise RuntimeError("需要 transformers（建议 >= 4.57）才能运行多模态提示词节点") from exc
+            raise RuntimeError(_t("transformers_required", get_last_known_lang())) from exc
         dtype = torch.float16 if device == "cuda" else torch.float32
         self.model = AutoModelForImageTextToText.from_pretrained(
             path, dtype=dtype, trust_remote_code=True,
@@ -838,7 +837,7 @@ def _generate_from_payload_isolated(payload: dict) -> str:
     stderr = "".join(stderr_chunks).strip()
     if result is None:
         detail = stderr.rsplit("\n", 1)[-1] if stderr else f"exit code {process.returncode}"
-        raise RuntimeError(f"Qwen3-VL 独立进程失败: {detail}")
+        raise RuntimeError(_t("qwen_subprocess_failed", get_last_known_lang(), detail=detail))
     if result.get("error"):
         raise RuntimeError(result["error"])
     logging.info("[CAP] Qwen3-VL worker finished pid=%s", process.pid)
@@ -1007,11 +1006,11 @@ def _agent_config(agent_id: str) -> dict:
     with _AGENT_CONFIG_LOCK:
         config = next((row for row in _read_agent_configs() if str(row.get("id")) == agent_id), None)
     if config is None:
-        raise ValueError("找不到所选 Agent，请在时间轴设置中重新配置")
+        raise ValueError(_t("agent_not_found_reconfigure", get_last_known_lang()))
     if config.get("enabled") is False:
-        raise ValueError("所选 Agent 已停用")
+        raise ValueError(_t("agent_disabled", get_last_known_lang()))
     if not str(config.get("api_key") or "").strip():
-        raise ValueError("所选 Agent 尚未配置 API Key")
+        raise ValueError(_t("agent_missing_api_key", get_last_known_lang()))
     return config
 
 
@@ -1050,9 +1049,9 @@ def _post_agent_json(url: str, api_key: str, payload: dict, provider: str) -> di
             detail = str(body.get("error", {}).get("message") or body.get("error") or detail)
         except (json.JSONDecodeError, AttributeError):
             pass
-        raise RuntimeError(f"{provider} API 请求失败 ({exc.code}): {detail}") from exc
+        raise RuntimeError(_t("provider_api_request_failed", get_last_known_lang(), provider=provider, code=exc.code, detail=detail)) from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"{provider} API 连接失败: {exc.reason}") from exc
+        raise RuntimeError(_t("provider_api_connection_failed", get_last_known_lang(), provider=provider, reason=exc.reason)) from exc
 
 
 def _generate_with_agent(payload: dict, agent_id: str) -> str:
@@ -1115,15 +1114,15 @@ def _generate_with_agent(payload: dict, agent_id: str) -> str:
         response_parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
         text = "\n".join(str(part.get("text") or "") for part in response_parts).strip()
     else:
-        raise ValueError("不支持的 Agent 服务商")
+        raise ValueError(_t("unsupported_agent_provider", get_last_known_lang()))
     if not text:
-        raise RuntimeError(f"{provider} API 没有返回文本")
+        raise RuntimeError(_t("provider_api_no_text", get_last_known_lang(), provider=provider))
     return text
 
 
 def generate_from_payload(payload: dict) -> str:
     if not isinstance(payload, dict):
-        raise ValueError("Invalid payload")
+        raise ValueError(_t("invalid_payload", get_last_known_lang()))
     agent_id = str(payload.get("agent_id") or "").strip()
     if agent_id:
         return _generate_with_agent(payload, agent_id)
@@ -1133,7 +1132,7 @@ def generate_from_payload(payload: dict) -> str:
     if not model_name:
         models = list_vl_models()
         if not models:
-            raise ValueError("未找到本地 Qwen3-VL 模型，请放到 ComfyUI/models/prompt_generator/")
+            raise ValueError(_t("local_qwen_model_not_found", get_last_known_lang()))
         model_name = models[0]
     system_prompt = str(payload.get("system_prompt") or "").strip()
     if not system_prompt:

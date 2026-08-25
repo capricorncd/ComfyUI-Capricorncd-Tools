@@ -56,7 +56,7 @@ class CAP_ShowAnything(io.ComfyNode):
             is_input_list=True,
             is_output_node=True,
             inputs=[
-                io.AnyType.Input("anything", optional=True, tooltip="任意类型输入；可空"),
+                io.AnyType.Input("anything", optional=True, tooltip="Any type of input; may be left unconnected"),
                 io.Boolean.Input(
                     "format_json",
                     default=True,

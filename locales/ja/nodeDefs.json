@@ -1,0 +1,331 @@
+{
+  "CAP_RichPromptInput": {
+    "display_name": "リッチプロンプト入力",
+    "inputs": {
+      "prompt": { "name": "プロンプト" },
+      "add_blank_line_start": { "name": "先頭の空行" },
+      "add_blank_line_end": { "name": "末尾の空行" }
+    },
+    "outputs": {
+      "prompt": { "name": "プロンプト" }
+    }
+  },
+
+  "CAP_AudioTimeline": {
+    "display_name": "オーディオタイムライン",
+    "inputs": {
+      "audio":          { "name": "オーディオ" },
+      "start_time":     { "name": "開始時間" },
+      "end_time":       { "name": "終了時間" },
+      "fps":            { "name": "FPS" },
+      "width":          { "name": "幅" },
+      "height":         { "name": "高さ" },
+      "assets_dir":     { "name": "アセットディレクトリ" },
+      "one_shot":       { "name": "ワンショット" },
+      "global_prompt":  { "name": "グローバルプロンプト" },
+      "clips_json":     { "name": "クリップ JSON" },
+      "trim_offset":    { "name": "トリムオフセット（秒）" }
+    },
+    "outputs": {
+      "trimmed_audio":     { "name": "トリム済みオーディオ" },
+      "fps":               { "name": "FPS" },
+      "one_shot":          { "name": "ワンショット" },
+      "width":             { "name": "幅" },
+      "height":            { "name": "高さ" },
+      "global_prompt":     { "name": "グローバルプロンプト" },
+      "data_json":         { "name": "データ JSON" },
+      "clips_length":      { "name": "クリップ数" },
+      "total_frame_count": { "name": "総フレーム数" },
+      "clips_audio":       { "name": "クリップオーディオ" }
+    }
+  },
+
+  "CAP_TimelineEditor": {
+    "display_name": "タイムラインエディター",
+    "inputs": {
+      "fps":            { "name": "FPS" },
+      "width":          { "name": "幅" },
+      "height":         { "name": "高さ" },
+      "swap_wh":        { "name": "幅と高さを入れ替え" },
+      "project_version":{ "name": "プロジェクトバージョン" },
+      "project_json":   { "name": "プロジェクト JSON" },
+      "trim_offset":    { "name": "トリムオフセット（秒）" }
+    },
+    "outputs": {
+      "fps":               { "name": "FPS" },
+      "width":             { "name": "幅" },
+      "height":            { "name": "高さ" },
+      "global_prompt":     { "name": "グローバルプロンプト" },
+      "data_json":         { "name": "データ JSON" },
+      "clips_length":      { "name": "クリップ数" },
+      "total_frame_count": { "name": "総フレーム数" },
+      "clips_audio":       { "name": "クリップオーディオ" },
+      "frame_seq_dir":     { "name": "フレーム連番ディレクトリ" }
+    }
+  },
+
+  "CAP_DataJsonClipParser": {
+    "display_name": "データ JSON クリップパーサー",
+    "inputs": {
+      "data_json":    { "name": "データ JSON" },
+      "index":        { "name": "インデックス" },
+      "trim_offset":  { "name": "トリムオフセット（秒）" },
+      "seq_name_mode": { "name": "連番命名モード" }
+    },
+    "outputs": {
+      "audio":       { "name": "オーディオ" },
+      "frame_count": { "name": "フレーム数" },
+      "first_frame": { "name": "最初のフレーム" },
+      "last_frame":  { "name": "最後のフレーム" },
+      "prompt":      { "name": "プロンプト" },
+      "run_timestamp": { "name": "実行タイムスタンプ" },
+      "generate_preview_video": { "name": "プレビュー動画を生成" },
+      "from_start":  { "name": "FROM 開始" },
+      "from_preview_start": { "name": "FROM プレビュー開始" },
+      "seq_filename_prefix": { "name": "連番ファイル名接頭辞" },
+      "images": { "name": "画像" },
+      "clip_role": { "name": "クリップの種類" },
+      "agent": { "name": "エージェント" },
+      "ai_prompt": { "name": "AI プロンプト" },
+      "clip_json": { "name": "クリップ JSON" }
+    }
+  },
+
+  "CAP_ImageBatchCount": {
+    "display_name": "画像バッチ数",
+    "inputs": {
+      "images": { "name": "画像" }
+    },
+    "outputs": {
+      "count": { "name": "数量" }
+    }
+  },
+
+  "CAP_ImageFromBatchIndex": {
+    "display_name": "インデックスから画像取得",
+    "inputs": {
+      "images": { "name": "画像" },
+      "index":  { "name": "インデックス" }
+    },
+    "outputs": {
+      "image":    { "name": "画像" },
+      "index":    { "name": "インデックス" },
+      "filename": { "name": "ファイル名" }
+    }
+  },
+
+  "CAP_SaveImages": {
+    "display_name": "画像を保存",
+    "inputs": {
+      "images":          { "name": "画像" },
+      "filename_prefix": { "name": "ファイル名接頭辞" },
+      "filename":        { "name": "ファイル名" },
+      "quality":         { "name": "品質" },
+      "dpi":             { "name": "DPI" },
+      "save_as_zip":     { "name": "ZIP にまとめる" },
+      "save_sidecar":    { "name": "JSON を保存" },
+      "metadata":        { "name": "メタデータ" }
+    },
+    "outputs": {
+      "image_dir":   { "name": "画像ディレクトリ" },
+      "image_paths": { "name": "画像パス" }
+    }
+  },
+
+  "CAP_LoadImagesFromDir": {
+    "display_name": "ディレクトリから画像を読み込み",
+    "inputs": {
+      "directory":   { "name": "ディレクトリ" },
+      "deep":          { "name": "サブディレクトリを含む" },
+      "start_index":   { "name": "開始インデックス" },
+      "max_count":     { "name": "最大枚数" }
+    },
+    "outputs": {
+      "images":      { "name": "画像" },
+      "directory":   { "name": "ディレクトリ" },
+      "total_count": { "name": "合計枚数" },
+      "count":       { "name": "出力枚数" }
+    }
+  },
+
+  "CAP_SeqToVideo": {
+    "display_name": "連番画像を動画に変換",
+    "inputs": {
+      "frames_dir":        { "name": "連番ディレクトリ" },
+      "fps":               { "name": "FPS" },
+      "filename_prefix":   { "name": "ファイル名接頭辞" },
+      "images":            { "name": "画像" },
+      "audio":             { "name": "オーディオ" },
+      "image_paths":       { "name": "画像ファイルリスト" },
+      "metadata":          { "name": "メタデータ" },
+      "save_sidecar":      { "name": "JSON を保存" }
+    },
+    "outputs": {
+      "filename": { "name": "ファイル名" }
+    }
+  },
+
+  "CAP_ComposeClipVideos": {
+    "display_name": "複数動画を合成",
+    "inputs": {
+      "data_json":         { "name": "データ JSON" },
+      "clips_dir":         { "name": "クリップディレクトリ" },
+      "name_mode":         { "name": "命名モード" },
+      "filename_prefix":   { "name": "出力ファイル名接頭辞" },
+      "trim_extends":      { "name": "拡張部分をトリム" },
+      "save_sidecar":      { "name": "JSON を保存" }
+    },
+    "outputs": {
+      "filename": { "name": "ファイル名" }
+    }
+  },
+
+  "CAP_JoinStrings": {
+    "display_name": "文字列を結合",
+    "inputs": {
+      "join_mode":      { "name": "結合方法" },
+      "custom_sep":     { "name": "カスタム区切り文字" },
+      "leading_blank":  { "name": "先頭に空行" },
+      "trailing_blank": { "name": "末尾に空行" },
+      "prefix":         { "name": "接頭辞" },
+      "suffix":         { "name": "接尾辞" },
+      "texts":          { "name": "テキスト" }
+    },
+    "outputs": {
+      "STRING": { "name": "文字列" }
+    }
+  },
+
+  "CAP_ShowAnything": {
+    "display_name": "何でも表示",
+    "inputs": {
+      "anything": { "name": "任意の値" },
+      "format_json": { "name": "JSON を整形" }
+    },
+    "outputs": {
+      "output": { "name": "出力" }
+    }
+  },
+
+  "CAP_ClearDirectory": {
+    "display_name": "ディレクトリを空にする",
+    "inputs": {
+      "directory":      { "name": "ディレクトリ" },
+      "delete_subdirs": { "name": "サブディレクトリを含む" },
+      "delete_images":  { "name": "画像を削除" },
+      "delete_videos":  { "name": "動画を削除" },
+      "delete_audio":   { "name": "オーディオを削除" },
+      "to_recycle_bin": { "name": "ごみ箱に入れる" }
+    },
+    "outputs": {
+      "directory":     { "name": "ディレクトリ" },
+      "deleted_count": { "name": "削除数" }
+    }
+  },
+
+  "CAP_FormatJson": {
+    "display_name": "JSON を整形",
+    "inputs": {
+      "json_text": { "name": "JSON テキスト" }
+    },
+    "outputs": {
+      "formatted_json": { "name": "整形後の JSON" }
+    }
+  },
+
+  "CAP_SizeSettings": {
+    "display_name": "サイズ設定",
+    "inputs": {
+      "size":          { "name": "サイズ" },
+      "scale":         { "name": "倍率" },
+      "lock_aspect":   { "name": "縦横比を固定" },
+      "orientation":   {
+        "name": "向き",
+        "options": { "纵向": "縦向き", "横向": "横向き" }
+      },
+      "custom_width":  { "name": "幅" },
+      "custom_height": { "name": "高さ" },
+      "fps":           { "name": "FPS" },
+      "count":         { "name": "数量" }
+    },
+    "outputs": {
+      "width":   { "name": "幅" },
+      "height":  { "name": "高さ" },
+      "count":   { "name": "数量" },
+      "fps":     { "name": "FPS" },
+      "fps_int": { "name": "FPS（整数）" }
+    }
+  },
+
+  "CAP_PromptGroup": {
+    "display_name": "プロンプトグループ",
+    "inputs": {
+      "global_prompt":   { "name": "グローバルプロンプト" },
+      "scene_prompt":    { "name": "シーンプロンプト" },
+      "negative_prompt": { "name": "ネガティブプロンプト" },
+      "output_scenes":   { "name": "出力シーン数" }
+    },
+    "outputs": {
+      "global_prompt":     { "name": "グローバルプロンプト" },
+      "negative_prompt":   { "name": "ネガティブプロンプト" },
+      "scene_prompt":      { "name": "シーンプロンプト" },
+      "effective_length":  { "name": "有効プロンプト長" }
+    }
+  },
+
+  "CAP_ClipPromptVL": {
+    "display_name": "Clip Prompt VL",
+    "inputs": {
+      "model": { "name": "モデル" },
+      "output_language": { "name": "出力言語" },
+      "system_prompt": { "name": "エージェントプロンプト" },
+      "skill": { "name": "プロンプトスキル" },
+      "user_prompt": { "name": "ユーザープロンプト" },
+      "keep_model_loaded": { "name": "モデルを保持" },
+      "max_new_tokens": { "name": "最大トークン数" },
+      "images": { "name": "画像" },
+      "video": { "name": "動画フレーム" }
+    },
+    "outputs": {
+      "prompt": { "name": "プロンプト" }
+    }
+  },
+
+  "CAP_MiniMaxH3ReferenceToVideo": {
+    "display_name": "MiniMaxH3",
+    "inputs": {
+      "clip": { "name": "CLIP" },
+      "vae": { "name": "VAE" },
+      "audio_vae": { "name": "オーディオ VAE" },
+      "width": { "name": "幅" },
+      "height": { "name": "高さ" },
+      "ref_image_size": { "name": "参照画像サイズ" },
+      "data_json": { "name": "データ JSON" },
+      "index": { "name": "インデックス" },
+      "clip_json": { "name": "クリップ JSON" }
+    },
+    "outputs": {
+      "positive": { "name": "ポジティブ" },
+      "latent": { "name": "Latent" },
+      "total_frame_count": { "name": "総フレーム数" },
+      "prompt": { "name": "プロンプト" },
+      "images": { "name": "画像" },
+      "videos": { "name": "動画" },
+      "audio": { "name": "オーディオ" }
+    }
+  },
+
+  "CAP_PromptFromBatch": {
+    "display_name": "バッチからプロンプト取得",
+    "inputs": {
+      "global_prompt": { "name": "グローバルプロンプト" },
+      "scene_prompt":  { "name": "シーンプロンプト" },
+      "batch_index":   { "name": "バッチインデックス" },
+      "batch_length":  { "name": "バッチ長" },
+      "merge_global":  { "name": "グローバルを結合" }
+    },
+    "outputs": {
+      "prompt": { "name": "プロンプト" }
+    }
+  }
+}

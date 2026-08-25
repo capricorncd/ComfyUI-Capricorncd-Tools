@@ -1,4 +1,5 @@
 export { ICONS } from "../cap_icons.js";
+import { t as i18nT } from "../i18n/timeline_widget.js";
 
 let _id = 0;
 export const generateId = (p = 'tl') => `${p}_${++_id}_${Date.now().toString(36)}`;
@@ -23,12 +24,28 @@ export const formatTime = (secs, fps = null) => {
   return `${m}:${String(sec).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 };
 
+// `label` intentionally omitted here: it needs to follow ComfyUI's current
+// language at the moment a track is created/listed, not whatever language
+// happened to be active when this module was first imported. Use
+// trackTypeLabel(type) below instead of TRACK_TYPES[type].label.
 export const TRACK_TYPES = {
-  video: { label: 'Video',  color: '#4a9eff', icon: '▶', height: 76 },
-  audio: { label: '音频轨道',  color: '#3dd68c', icon: '♫', height: 60 },
-  image: { label: '图片轨道',  color: '#c86aff', icon: '⬛', height: 76 },
-  text:  { label: 'Text',   color: '#ff9e4a', icon: 'T',  height: 52 },
+  video: { color: '#4a9eff', icon: '▶', height: 76 },
+  audio: { color: '#3dd68c', icon: '♫', height: 60 },
+  image: { color: '#c86aff', icon: '⬛', height: 76 },
+  text:  { color: '#ff9e4a', icon: 'T',  height: 52 },
 };
+
+const TRACK_TYPE_LABEL_KEYS = {
+  video: 'video_track',
+  audio: 'audio_track',
+  image: 'image_track',
+  text: 'text_track',
+};
+
+/** Localized display label for a track type ('video' | 'audio' | 'image' | 'text'). */
+export function trackTypeLabel(type) {
+  return i18nT(TRACK_TYPE_LABEL_KEYS[type] || TRACK_TYPE_LABEL_KEYS.video);
+}
 
 /**
  * Returns major/minor tick intervals (seconds) for the given pixels-per-second.
