@@ -2,9 +2,24 @@
 
 ![ComfyUI-Capricorncd-Tools](./docs/ComfyUI-Capricorncd-Tools.png)
 
-A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) focused on prompt editing, audio/image keyframe timeline editing, image batch utilities, directory cleanup, and video compositing.
+A collection of custom nodes for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) built around **Timeline Editor** — a fullscreen, multi-track visual editor for assembling image/video/audio sequences — plus prompt editing, audio/image keyframe timeline editing, image batch utilities, directory cleanup, and video compositing.
 
 ![/ComfyUI-Capricorncd-Tools/timeline-editor](./docs/timeline-editor.jpg)
+
+---
+
+## ✨ Timeline Editor
+
+The flagship node: a fullscreen, multi-track timeline for building image/video/audio sequences directly inside ComfyUI.
+
+- **Media library** — drag-and-drop image/video/audio assets, star ratings and filters, batch select, relink missing files
+- **Multi-track canvas** — per-track lock/visibility/mute, drag/resize/split clips, undo/redo, zoom and pan
+- **Per-clip prompts** — global + per-clip prompt fields, and an **AI Optimize** modal (Agent or local VL model, output-language selection, Prompt Skill library with GitHub sync)
+- **Generated videos** — attach ComfyUI `output/` MP4s to a clip, enable/mute/preview, then **Export → Compose Video** mixes them with unmuted audio tracks into one MP4 (watermark, filename prefix, ignore-audio-tracks options)
+- **Import / Export** — full project + assets as a directory or ZIP
+- **Fully localized UI** — every panel, dialog, and menu follows ComfyUI's own **Settings → Comfy → Locale** setting (English / 简体中文 / 日本語), with English as the fallback; see [Internationalization](#internationalization-i18n) below
+
+[Read the full guide →](docs/timeline-editor.md) · [中文文档](docs/zh/timeline-editor.md)
 
 ---
 
@@ -110,18 +125,28 @@ Node API fields are defined in code (`DESCRIPTION`, input `tooltip`, `OUTPUT_TOO
 
 ## Internationalization (i18n)
 
-Node display names and input/output labels are localized via ComfyUI's built-in i18n system. Locale files live in `locales/`:
+The whole extension — not just node graph metadata — follows ComfyUI's own **Settings → Comfy → Locale** setting automatically, falling back to English wherever a language isn't available:
+
+- **Node graph metadata** (titles, widget names, tooltips, boolean on/off labels) via ComfyUI's built-in i18n system, plus a small patch for the two newer-schema nodes ComfyUI's own locale loader doesn't reach yet
+- **Every custom UI panel** — Timeline Editor (media library, clip settings, AI Optimize modal, Prompt Skill picker, import/export, compose video, etc.), Audio Timeline, and the Prompt Library (history/presets) — all dialogs, buttons, menus, and status/error messages
+- **Backend error and status text** returned to the frontend
+
+Locale files live in `locales/`:
 
 ```
 locales/
 ├── en/nodeDefs.json
-└── zh/nodeDefs.json
+├── zh/nodeDefs.json, commands.json
+└── ja/nodeDefs.json, commands.json
 ```
 
 | Language | Code |
 |----------|------|
 | English  | `en` |
 | 简体中文  | `zh` |
+| 日本語   | `ja` |
+
+A language change takes effect for newly-registered node defs and for panels opened after the change; an already-open panel picks it up on the next page refresh.
 
 ---
 

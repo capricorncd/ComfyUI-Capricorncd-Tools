@@ -2,9 +2,24 @@
 
 ![ComfyUI-Capricorncd-Tools](./docs/ComfyUI-Capricorncd-Tools.png)
 
-一套面向 [ComfyUI](https://github.com/comfyanonymous/ComfyUI) 的自定义节点集合，专注于提示词编辑、音频/图像关键帧时间轴编辑、图像批处理、目录清理与视频合成。
+一套面向 [ComfyUI](https://github.com/comfyanonymous/ComfyUI) 的自定义节点集合，核心是 **Timeline Editor（时间轴编辑器）**——一个全屏、多轨道的可视化编辑器，用于搭建图像/视频/音频序列；此外还包含提示词编辑、音频/图像关键帧时间轴编辑、图像批处理、目录清理与视频合成等工具。
 
 ![Audio Timeline/ComfyUI-Capricorncd-Tools](docs/audio-timeline-00.jpg)
+
+---
+
+## ✨ Timeline Editor（时间轴编辑器）
+
+本项目的核心节点：一个全屏、多轨道的时间轴编辑器，可直接在 ComfyUI 中搭建图像/视频/音频序列。
+
+- **素材库** —— 拖拽导入图片/视频/音频素材，支持星级评分与筛选、批量选择、缺失文件重新关联
+- **多轨画布** —— 每条轨道可锁定/显隐/禁音，拖拽/缩放/分割片段，撤销/重做，缩放与平移
+- **逐片段提示词** —— 全局与逐片段提示词输入，以及 **AI 优化** 弹窗（可选 Agent 或本地 VL 模型、输出语言、支持从 GitHub 同步的 Prompt Skill 库）
+- **生成视频** —— 为片段绑定 ComfyUI `output/` 下的 MP4，支持启用/禁音/预览，再通过 **导出 → 合成视频** 将其与未禁音的音频轨混合为一条 MP4（可选水印、文件名前缀、忽略音频轨道等）
+- **导入 / 导出** —— 整个工程与素材可导出为目录或 ZIP
+- **界面全面本地化** —— 所有面板、弹窗、菜单均自动跟随 ComfyUI 的 **Settings → Comfy → Locale** 语言设置（English / 简体中文 / 日本語），未覆盖的语言回退到英文；详见下方[国际化](#国际化i18n)
+
+[查看完整文档 →](docs/zh/timeline-editor.md) · [English](docs/timeline-editor.md)
 
 ---
 
@@ -81,18 +96,28 @@ python scripts/gen_node_docs.py
 
 ## 国际化（i18n）
 
-节点显示名称和输入/输出标签通过 ComfyUI 内置 i18n 系统本地化，语言文件位于 `locales/`：
+不只是节点图元数据，整个插件都会自动跟随 ComfyUI 的 **Settings → Comfy → Locale** 语言设置，未覆盖的语言回退到英文：
+
+- **节点图元数据**（标题、输入/输出名称、提示语、布尔开关的开/关文案）通过 ComfyUI 内置 i18n 系统本地化，另外为两个使用新版 Schema、ComfyUI 自身语言加载器暂时还覆盖不到的节点做了补丁
+- **每个自定义 UI 面板** —— Timeline Editor（素材库、片段设置、AI 优化弹窗、Prompt Skill 选择器、导入导出、合成视频等）、Audio Timeline、Prompt Library（历史记录/预设）—— 所有弹窗、按钮、菜单及状态/错误提示
+- **后端返回给前端的错误与状态文案**
+
+语言文件位于 `locales/`：
 
 ```
 locales/
 ├── en/nodeDefs.json
-└── zh/nodeDefs.json
+├── zh/nodeDefs.json, commands.json
+└── ja/nodeDefs.json, commands.json
 ```
 
 | 语言 | 代码 |
 |------|------|
 | English | `en` |
 | 简体中文 | `zh` |
+| 日本語 | `ja` |
+
+切换语言后，新注册的节点定义会立即生效；已打开的面板需要刷新页面后才会应用新语言，与 ComfyUI 自身的本地化行为一致。
 
 ---
 
