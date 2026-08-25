@@ -56,14 +56,14 @@ class CAP_SaveImages:
                 }),
                 "save_as_zip": ("BOOLEAN", {
                     "default": False,
-                    "label_on": "打包 zip",
-                    "label_off": "仅图片",
+                    "label_on": "Zip",
+                    "label_off": "Images only",
                     "tooltip": "Also pack saved images into a zip next to the folder",
                 }),
                 "save_sidecar": ("BOOLEAN", {
                     "default": True,
-                    "label_on": "保存 JSON",
-                    "label_off": "不保存",
+                    "label_on": "Save JSON",
+                    "label_off": "Skip",
                     "tooltip": "Write a JSON next to the sequence (named after the file prefix) with prompts, models, and sampler settings",
                 }),
             },

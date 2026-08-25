@@ -6,6 +6,7 @@ import sys
 
 from aiohttp import web
 
+from .cap_i18n import resolve_lang, t
 from .prompt_input_rich import CAP_RichPromptInput
 from .cap_audio_timeline import (
     NODE_CLASS_MAPPINGS as _CAT_CLASS,
@@ -159,19 +160,20 @@ def _register_routes():
 
     @routes.get("/audio_keyframe_timeline/keyframe_image")
     async def api_keyframe_image(request: web.Request) -> web.Response:
+        lang = resolve_lang(request)
         directory = request.rel_url.query.get("dir", "")
         name = request.rel_url.query.get("name", "")
         resolved = resolve_assets_dir(directory)
         if not resolved or not name:
-            return web.Response(status=400, text="Missing dir or name")
+            return web.Response(status=400, text=t("missing_dir_or_name", lang))
         path = _safe_join(resolved, name)
         if not path:
-            return web.Response(status=400, text="Invalid filename")
+            return web.Response(status=400, text=t("invalid_filename", lang))
         _, ext = os.path.splitext(path)
         if ext.lower() not in IMAGE_EXTENSIONS:
-            return web.Response(status=400, text="Unsupported file type")
+            return web.Response(status=400, text=t("unsupported_file_type", lang))
         if not os.path.isfile(path):
-            return web.Response(status=404, text="Not found")
+            return web.Response(status=404, text=t("not_found", lang))
         return web.FileResponse(path)
 
     @routes.get("/audio_keyframe_timeline/videos")
@@ -183,19 +185,20 @@ def _register_routes():
 
     @routes.get("/audio_keyframe_timeline/keyframe_video")
     async def api_keyframe_video(request: web.Request) -> web.Response:
+        lang = resolve_lang(request)
         directory = request.rel_url.query.get("dir", "")
         name = request.rel_url.query.get("name", "")
         resolved = resolve_assets_dir(directory)
         if not resolved or not name:
-            return web.Response(status=400, text="Missing dir or name")
+            return web.Response(status=400, text=t("missing_dir_or_name", lang))
         path = _safe_join(resolved, name)
         if not path:
-            return web.Response(status=400, text="Invalid filename")
+            return web.Response(status=400, text=t("invalid_filename", lang))
         _, ext = os.path.splitext(path)
         if ext.lower() not in VIDEO_EXTENSIONS:
-            return web.Response(status=400, text="Unsupported file type")
+            return web.Response(status=400, text=t("unsupported_file_type", lang))
         if not os.path.isfile(path):
-            return web.Response(status=404, text="Not found")
+            return web.Response(status=404, text=t("not_found", lang))
         return web.FileResponse(path)
 
     @routes.get("/audio_keyframe_timeline/audios")
@@ -207,19 +210,20 @@ def _register_routes():
 
     @routes.get("/audio_keyframe_timeline/keyframe_audio")
     async def api_keyframe_audio(request: web.Request) -> web.Response:
+        lang = resolve_lang(request)
         directory = request.rel_url.query.get("dir", "")
         name = request.rel_url.query.get("name", "")
         resolved = resolve_assets_dir(directory)
         if not resolved or not name:
-            return web.Response(status=400, text="Missing dir or name")
+            return web.Response(status=400, text=t("missing_dir_or_name", lang))
         path = _safe_join(resolved, name)
         if not path:
-            return web.Response(status=400, text="Invalid filename")
+            return web.Response(status=400, text=t("invalid_filename", lang))
         _, ext = os.path.splitext(path)
         if ext.lower() not in AUDIO_EXTENSIONS:
-            return web.Response(status=400, text="Unsupported file type")
+            return web.Response(status=400, text=t("unsupported_file_type", lang))
         if not os.path.isfile(path):
-            return web.Response(status=404, text="Not found")
+            return web.Response(status=404, text=t("not_found", lang))
         return web.FileResponse(path)
 
     def _asset_kind(kind: str):
@@ -244,12 +248,13 @@ def _register_routes():
     @routes.get("/audio_keyframe_timeline/asset_status")
     async def api_asset_status(request: web.Request) -> web.Response:
         import folder_paths as _fp
+        lang = resolve_lang(request)
         directory = request.rel_url.query.get("dir", "")
         name = request.rel_url.query.get("name", "")
         kind = request.rel_url.query.get("kind", "")
         spec = _asset_kind(kind)
         if not name or not spec or os.path.splitext(name)[1].lower() not in spec[1]:
-            return web.json_response({"error": "Invalid asset"}, status=400)
+            return web.json_response({"error": t("invalid_asset", lang)}, status=400)
         assets_path = _safe_join(resolve_assets_dir(directory), name) if directory else None
         input_path = _safe_join(_fp.get_input_directory(), name)
         return web.json_response({
@@ -260,22 +265,24 @@ def _register_routes():
     @routes.get("/audio_keyframe_timeline/asset_file")
     async def api_asset_file(request: web.Request) -> web.Response:
         import folder_paths as _fp
+        lang = resolve_lang(request)
         directory = request.rel_url.query.get("dir", "")
         name = request.rel_url.query.get("name", "")
         kind = request.rel_url.query.get("kind", "")
         location = request.rel_url.query.get("location", "assets")
         spec = _asset_kind(kind)
         if not name or not spec or os.path.splitext(name)[1].lower() not in spec[1]:
-            return web.Response(status=400, text="Invalid asset")
+            return web.Response(status=400, text=t("invalid_asset", lang))
         base = _fp.get_input_directory() if location == "input" else resolve_assets_dir(directory)
         path = _safe_join(base, name) if base else None
         if not path or not os.path.isfile(path):
-            return web.Response(status=404, text="Not found")
+            return web.Response(status=404, text=t("not_found", lang))
         return web.FileResponse(path)
 
     @routes.post("/audio_keyframe_timeline/import_asset")
     async def api_import_asset(request: web.Request) -> web.Response:
         import folder_paths as _fp
+        lang = resolve_lang(request)
         try:
             reader = await request.multipart()
             values = {}
@@ -289,12 +296,12 @@ def _register_routes():
             spec = _asset_kind(kind)
             filename = os.path.basename(upload.filename or "") if upload else ""
             if not upload or not spec or os.path.splitext(filename)[1].lower() not in spec[1]:
-                return web.json_response({"error": "Unsupported or missing file"}, status=400)
+                return web.json_response({"error": t("unsupported_or_missing_file", lang)}, status=400)
             to_assets = values.get("to_assets") == "true"
             if to_assets:
                 root = resolve_assets_dir(values.get("dir", ""))
                 if not root:
-                    return web.json_response({"error": "Assets directory is not configured"}, status=400)
+                    return web.json_response({"error": t("assets_dir_not_configured", lang)}, status=400)
                 subdir = spec[0]
                 destination = _unique_destination(os.path.join(root, subdir), filename)
                 location = "assets"
@@ -316,16 +323,17 @@ def _register_routes():
     @routes.post("/audio_keyframe_timeline/delete_asset")
     async def api_delete_asset(request: web.Request) -> web.Response:
         import folder_paths as _fp
+        lang = resolve_lang(request)
         try:
             data = await request.json()
             name = str(data.get("name", "")).strip().replace("\\", "/")
             kind = str(data.get("kind", ""))
             spec = _asset_kind(kind)
             if not name or not spec or os.path.splitext(name)[1].lower() not in spec[1]:
-                return web.json_response({"error": "Invalid asset"}, status=400)
+                return web.json_response({"error": t("invalid_asset", lang)}, status=400)
             # Only allow deleting Timeline Editor uploads under input/capricorncd-timeline/
             if not name.startswith("capricorncd-timeline/"):
-                return web.json_response({"error": "Only timeline uploads can be deleted"}, status=400)
+                return web.json_response({"error": t("only_timeline_uploads_deletable", lang)}, status=400)
             path = _safe_join(_fp.get_input_directory(), name)
             if not path or not os.path.isfile(path):
                 return web.json_response({"ok": True, "deleted": False, "missing": True})
@@ -338,6 +346,7 @@ def _register_routes():
     @routes.post("/audio_keyframe_timeline/move_asset")
     async def api_move_asset(request: web.Request) -> web.Response:
         import folder_paths as _fp
+        lang = resolve_lang(request)
         try:
             data = await request.json()
             name, kind = str(data.get("name", "")), str(data.get("kind", ""))
@@ -345,7 +354,7 @@ def _register_routes():
             root = resolve_assets_dir(str(data.get("dir", "")))
             source = _safe_join(_fp.get_input_directory(), name)
             if not spec or not root or not source or not os.path.isfile(source):
-                return web.json_response({"error": "Input asset not found"}, status=404)
+                return web.json_response({"error": t("input_asset_not_found", lang)}, status=404)
             destination = _unique_destination(os.path.join(root, spec[0]), os.path.basename(name))
             shutil.move(source, destination)
             result_name = os.path.relpath(destination, root).replace(os.sep, "/")
@@ -357,10 +366,11 @@ def _register_routes():
     @routes.post("/audio_keyframe_timeline/export_prepare")
     async def api_export_prepare(request: web.Request) -> web.Response:
         from .cap_timeline_project_io import build_export_entries
+        lang = resolve_lang(request)
         try:
             project = await request.json()
             if not isinstance(project, dict):
-                return web.json_response({"error": "Invalid project"}, status=400)
+                return web.json_response({"error": t("invalid_project", lang)}, status=400)
             exported, entries, missing = build_export_entries(project)
             return web.json_response({
                 "project": exported,
@@ -377,10 +387,11 @@ def _register_routes():
     @routes.post("/audio_keyframe_timeline/export_zip")
     async def api_export_zip(request: web.Request) -> web.Response:
         from .cap_timeline_project_io import build_export_zip_bytes
+        lang = resolve_lang(request)
         try:
             project = await request.json()
             if not isinstance(project, dict):
-                return web.json_response({"error": "Invalid project"}, status=400)
+                return web.json_response({"error": t("invalid_project", lang)}, status=400)
             data, filename, missing = build_export_zip_bytes(project)
             headers = {
                 "Content-Disposition": 'attachment; filename="timeline-project.zip"',
@@ -399,17 +410,18 @@ def _register_routes():
             build_compose_filename,
             compose_to_output,
         )
+        lang = resolve_lang(request)
         try:
             payload = await request.json()
             if not isinstance(payload, dict):
-                return web.json_response({"error": "Invalid payload"}, status=400)
+                return web.json_response({"error": t("invalid_payload", lang)}, status=400)
             project = payload.get("project")
             if not isinstance(project, dict):
-                return web.json_response({"error": "Invalid project"}, status=400)
+                return web.json_response({"error": t("invalid_project", lang)}, status=400)
             filename_prefix = str(payload.get("filename_prefix") or DEFAULT_COMPOSE_PREFIX).strip()
             filename = str(payload.get("filename") or "").strip()
             if not filename:
-                filename = build_compose_filename(project.get("name") or "未命名项目")
+                filename = build_compose_filename(project.get("name") or t("untitled_project", lang))
             ignore_audio_tracks = bool(payload.get("ignore_audio_tracks"))
             watermark = payload.get("watermark")
             meta = compose_to_output(
@@ -441,16 +453,17 @@ def _register_routes():
     @routes.post("/audio_keyframe_timeline/reveal_output")
     async def api_reveal_output(request: web.Request) -> web.Response:
         import folder_paths as _fp
+        lang = resolve_lang(request)
         try:
             data = await request.json()
             filename = str(data.get("filename", "")).strip()
             subfolder = str(data.get("subfolder", "")).strip().strip("/")
             if not filename:
-                return web.json_response({"error": "Missing filename"}, status=400)
+                return web.json_response({"error": t("missing_filename", lang)}, status=400)
             rel = f"{subfolder}/{filename}" if subfolder else filename
             path = _safe_join(_fp.get_output_directory(), rel)
             if not path or not os.path.isfile(path):
-                return web.json_response({"error": "文件不存在"}, status=404)
+                return web.json_response({"error": t("file_not_found", lang)}, status=404)
             # Local desktop use only: reveals the file on the machine running
             # this ComfyUI backend, which is the same machine as the browser
             # for the standard local install this extension targets.
@@ -468,6 +481,7 @@ def _register_routes():
     @routes.post("/audio_keyframe_timeline/import_project_zip")
     async def api_import_project_zip(request: web.Request) -> web.Response:
         from .cap_timeline_project_io import import_project_from_zip_bytes
+        lang = resolve_lang(request)
         try:
             reader = await request.multipart()
             upload = None
@@ -476,10 +490,10 @@ def _register_routes():
                     upload = field
                     break
             if not upload:
-                return web.json_response({"error": "Missing file"}, status=400)
+                return web.json_response({"error": t("missing_file", lang)}, status=400)
             data = await upload.read()
             if not data:
-                return web.json_response({"error": "Empty ZIP"}, status=400)
+                return web.json_response({"error": t("empty_zip", lang)}, status=400)
             project, warnings = import_project_from_zip_bytes(data)
             return web.json_response({"project": project, "warnings": warnings})
         except ValueError as exc:
@@ -535,7 +549,7 @@ def _register_routes():
         try:
             payload = await request.json()
             if not isinstance(payload, dict):
-                return web.json_response({"error": "Invalid payload"}, status=400)
+                return web.json_response({"error": t("invalid_payload", resolve_lang(request))}, status=400)
             return web.json_response({"agent": save_agent_config(payload)})
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
@@ -544,7 +558,7 @@ def _register_routes():
     async def api_delete_timeline_agent(request: web.Request) -> web.Response:
         from .cap_clip_prompt_vl import delete_agent_config
         if not delete_agent_config(request.match_info.get("agent_id", "")):
-            return web.json_response({"error": "Agent 不存在"}, status=404)
+            return web.json_response({"error": t("agent_not_found", resolve_lang(request))}, status=404)
         return web.json_response({"ok": True})
 
     @routes.get("/audio_keyframe_timeline/clip_prompt_agent")
@@ -569,7 +583,7 @@ def _register_routes():
         try:
             payload = await request.json()
             if not isinstance(payload, dict):
-                return web.json_response({"error": "Invalid payload"}, status=400)
+                return web.json_response({"error": t("invalid_payload", resolve_lang(request))}, status=400)
 
             job = begin_clip_prompt_job()
 
@@ -615,31 +629,34 @@ def _register_routes():
     @routes.get("/audio_keyframe_timeline/h3_skill")
     async def api_h3_skill(request: web.Request) -> web.Response:
         from .cap_h3_skills import load_skill_text
+        lang = resolve_lang(request)
         skill_id = request.rel_url.query.get("id", "")
         try:
             text = load_skill_text(skill_id)
         except ValueError:
-            return web.json_response({"error": "Invalid skill"}, status=400)
+            return web.json_response({"error": t("invalid_skill", lang)}, status=400)
         except FileNotFoundError:
-            return web.json_response({"error": "Skill not found"}, status=404)
+            return web.json_response({"error": t("skill_not_found", lang)}, status=404)
         return web.json_response({"id": skill_id, "text": text})
 
     @routes.get("/audio_keyframe_timeline/h3_skill_preview")
     async def api_h3_skill_preview(request: web.Request) -> web.Response:
         from .cap_h3_skills import resolve_skill_preview
+        lang = resolve_lang(request)
         skill_id = request.rel_url.query.get("id", "")
         try:
             path = resolve_skill_preview(skill_id)
         except ValueError:
-            return web.Response(status=400, text="Invalid skill")
+            return web.Response(status=400, text=t("invalid_skill", lang))
         if not path:
-            return web.Response(status=404, text="Not found")
+            return web.Response(status=404, text=t("not_found", lang))
         return web.FileResponse(path)
 
     @routes.post("/audio_keyframe_timeline/h3_skills_sync")
     async def api_h3_skills_sync(_request: web.Request) -> web.Response:
         import asyncio
         from .cap_h3_skills import sync_skill_repo
+        resolve_lang(_request)  # keeps get_last_known_lang() fresh for errors raised inside sync_skill_repo()
         try:
             data = await asyncio.to_thread(sync_skill_repo)
             return web.json_response(data)
@@ -680,7 +697,7 @@ def _register_routes():
             reader = await request.multipart()
             field = await reader.next()
             if field is None or field.name != "image":
-                return web.json_response({"error": "Missing image field"}, status=400)
+                return web.json_response({"error": t("missing_image_field", resolve_lang(request))}, status=400)
             filename = os.path.basename(field.filename or "upload.png")
             input_dir = _fp.get_input_directory()
             dest = os.path.join(input_dir, filename)

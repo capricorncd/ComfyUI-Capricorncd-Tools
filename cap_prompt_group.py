@@ -179,8 +179,8 @@ class CAP_PromptFromBatch:
                 }),
                 "merge_global": ("BOOLEAN", {
                     "default": True,
-                    "label_on": "合并",
-                    "label_off": "不合并",
+                    "label_on": "Merge",
+                    "label_off": "No merge",
                     "tooltip": "When true, prepend global_prompt to the selected scene lines",
                 }),
             },

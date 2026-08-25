@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { ComfyWidgets } from "../../scripts/widgets.js";
 import { loadExtensionCss } from "./cap_ui.js";
+import { t } from "./i18n/format_json.js";
 
 const NODE_CLASS = "CAP_FormatJson";
 const MIN_PREVIEW_H = 100;
@@ -120,7 +121,7 @@ app.registerExtension({
             widget.inputEl.readOnly = true;
             widget.inputEl.spellcheck = false;
             widget.inputEl.classList.add("cap-format-json-preview");
-            widget.inputEl.placeholder = "运行后在此显示格式化 JSON…";
+            widget.inputEl.placeholder = t("preview_placeholder");
             // Serializable: persist last preview in workflow widgets_values.
             hidePreviewLabel(widget);
 

@@ -450,6 +450,15 @@
       }
     }
   },
+  "CAP_FormatJson": {
+    "display_name": "格式化 JSON",
+    "inputs": {
+      "json_text": { "name": "JSON 文本" }
+    },
+    "outputs": {
+      "formatted_json": { "name": "格式化后的 JSON" }
+    }
+  },
   "CAP_SizeSettings": {
     "display_name": "尺寸设置",
     "inputs": {
@@ -463,7 +472,8 @@
         "name": "锁定比例"
       },
       "orientation": {
-        "name": "方向"
+        "name": "方向",
+        "options": { "纵向": "纵向", "横向": "横向" }
       },
       "custom_width": {
         "name": "宽度"

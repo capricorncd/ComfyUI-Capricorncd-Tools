@@ -1,5 +1,5 @@
 import { EventEmitter } from './EventEmitter.js';
-import { generateId, TRACK_TYPES, ICONS } from './utils.js';
+import { generateId, TRACK_TYPES, trackTypeLabel, ICONS } from './utils.js';
 import { Clip } from './Clip.js';
 
 export class Track extends EventEmitter {
@@ -9,7 +9,7 @@ export class Track extends EventEmitter {
     this.timeline = timeline;
     this.type = data.type || 'video';
     const meta = TRACK_TYPES[this.type] || TRACK_TYPES.video;
-    this.name = data.name || meta.label;
+    this.name = data.name || trackTypeLabel(this.type);
     this.height = data.height || meta.height;
     this.color = data.color || meta.color;
     this.isMain = data.isMain ?? false;

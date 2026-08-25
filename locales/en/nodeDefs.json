@@ -223,13 +223,26 @@
     }
   },
 
+  "CAP_FormatJson": {
+    "display_name": "Format JSON",
+    "inputs": {
+      "json_text": { "name": "JSON Text" }
+    },
+    "outputs": {
+      "formatted_json": { "name": "Formatted JSON" }
+    }
+  },
+
   "CAP_SizeSettings": {
     "display_name": "Size Settings",
     "inputs": {
       "size":          { "name": "Size" },
       "scale":         { "name": "Scale" },
       "lock_aspect":   { "name": "Lock Aspect" },
-      "orientation":   { "name": "Orientation" },
+      "orientation":   {
+        "name": "Orientation",
+        "options": { "纵向": "Portrait", "横向": "Landscape" }
+      },
       "custom_width":  { "name": "Width" },
       "custom_height": { "name": "Height" },
       "fps":           { "name": "FPS" },

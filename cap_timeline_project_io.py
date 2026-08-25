@@ -9,6 +9,7 @@ import os
 import re
 import zipfile
 
+from .cap_i18n import get_last_known_lang, t as _t
 from .timecode import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, resolve_media_path
 
 PACKAGE_PROJECT_NAME = "project.json"
@@ -109,7 +110,7 @@ def migrate_project(project: dict) -> dict:
     if not isinstance(project, dict):
         return {
             "schema_version": SCHEMA_VERSION,
-            "name": "未命名项目",
+            "name": "Untitled Project",
             "media": [],
             "settings": {},
             "tracks": [],
@@ -361,7 +362,7 @@ def _ensure_clip_media_ids(project: dict) -> None:
     project.pop("resources", None)
 
 
-def _safe_name(name: str, fallback: str = "未命名项目") -> str:
+def _safe_name(name: str, fallback: str = "Untitled Project") -> str:
     text = str(name or "").strip() or fallback
     text = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", text)
     text = re.sub(r"[. ]+$", "", text).strip() or fallback
@@ -556,10 +557,10 @@ def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
             None,
         )
         if not project_name:
-            raise ValueError("ZIP 中缺少 project.json")
+            raise ValueError(_t("zip_missing_project_json", get_last_known_lang()))
         project = json.loads(zf.read(project_name).decode("utf-8"))
         if not isinstance(project, dict):
-            raise ValueError("project.json 格式无效")
+            raise ValueError(_t("invalid_project_json_format", get_last_known_lang()))
 
         mapping: dict[tuple[str, str], str] = {}
         for info in zf.infolist():
@@ -587,6 +588,6 @@ def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
             if (kind, base) in mapping:
                 mapping[(kind, file)] = mapping[(kind, base)]
             else:
-                warnings.append(f"缺少素材：{file}")
+                warnings.append(_t("missing_asset", get_last_known_lang(), file=file))
 
         return _remap_project_files(project, mapping), warnings

@@ -11,6 +11,7 @@ from typing import Any
 
 import folder_paths
 
+from .cap_i18n import get_last_known_lang, t as _t
 from .cap_compose_clip_videos import _probe_has_audio, _run_ffmpeg
 from .cap_seq_to_video import _ffmpeg_path
 from .cap_timeline_project_io import _safe_name
@@ -42,7 +43,7 @@ def _resolve_output_video(rel: str) -> str:
     root = os.path.abspath(folder_paths.get_output_directory())
     path = os.path.abspath(os.path.join(root, *rel.split("/")))
     if path != root and not path.startswith(root + os.sep):
-        raise ValueError(f"生成视频路径非法: {rel}")
+        raise ValueError(_t("invalid_generated_video_path", get_last_known_lang(), path=rel))
     return path if os.path.isfile(path) else ""
 
 
@@ -119,7 +120,7 @@ def _collect_plan(project: dict, ignore_audio_tracks: bool = False) -> dict:
                     continue
                 path = _resolve_output_video(gen["file"])
                 if not path:
-                    raise ValueError(f"找不到生成视频: {gen['file']}")
+                    raise ValueError(_t("generated_video_not_found", get_last_known_lang(), file=gen['file']))
                 start = _ms(clip.get("start_ms"))
                 duration = max(1, _ms(clip.get("duration_ms"), 1))
                 end = start + duration
@@ -150,7 +151,7 @@ def _collect_plan(project: dict, ignore_audio_tracks: bool = False) -> dict:
                 continue
             path = resolve_media_path(file, location="input")
             if not path or not os.path.isfile(path):
-                raise ValueError(f"找不到音频文件: {file}")
+                raise ValueError(_t("audio_file_not_found", get_last_known_lang(), file=file))
             start = _ms(clip.get("start_ms"))
             duration = max(1, _ms(clip.get("duration_ms"), 1))
             source = _as_dict(clip.get("source"))
@@ -165,7 +166,7 @@ def _collect_plan(project: dict, ignore_audio_tracks: bool = False) -> dict:
             })
 
     if not video_segs:
-        raise ValueError("没有可合成的生成视频（请先为 clip 添加并启用生成视频）")
+        raise ValueError(_t("no_generated_videos_to_compose", get_last_known_lang()))
 
     return {
         "width": width,
@@ -335,7 +336,7 @@ def _build_watermark_filters(
         file = str(_as_dict(watermark.get("image")).get("file") or "").strip()
         path = resolve_media_path(file, location="input")
         if not path or not os.path.isfile(path):
-            raise ValueError(f"找不到水印图片: {file}")
+            raise ValueError(_t("watermark_image_not_found", get_last_known_lang(), file=file))
         pre_scale = f"scale=iw*{scale_pct:.6f}:ih*{scale_pct:.6f},"
     else:
         path = _render_text_watermark_png(_as_dict(watermark.get("text")), scale_pct)
@@ -364,9 +365,9 @@ def compose_timeline_project(
     watermark: dict | None = None,
 ) -> dict:
     if not shutil.which("ffmpeg"):
-        raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
+        raise RuntimeError(_t("ffmpeg_not_found", get_last_known_lang()))
     if not isinstance(project, dict):
-        raise ValueError("无效的项目数据")
+        raise ValueError(_t("invalid_project", get_last_known_lang()))
 
     plan = _collect_plan(project, ignore_audio_tracks=bool(ignore_audio_tracks))
     width = plan["width"]
@@ -497,7 +498,7 @@ def compose_timeline_project(
 
 def build_compose_filename(project_name: str, stamp: str | None = None) -> str:
     import datetime
-    safe = _safe_name(project_name, "未命名项目")
+    safe = _safe_name(project_name, "Untitled Project")
     safe = re.sub(r"\s+", "_", safe)
     if not stamp:
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -550,7 +551,7 @@ def compose_to_output(
     ignore_audio_tracks: bool = False,
     watermark: dict | None = None,
 ) -> dict:
-    project_name = _as_dict(project).get("name") or "未命名项目"
+    project_name = _as_dict(project).get("name") or "Untitled Project"
     leaf, subfolder, output_path = resolve_compose_output_path(
         filename_prefix or DEFAULT_COMPOSE_PREFIX,
         project_name,

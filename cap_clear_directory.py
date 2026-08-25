@@ -4,6 +4,7 @@ import ctypes
 import logging
 import os
 import sys
+from .cap_i18n import get_last_known_lang, t
 from .timecode import (
     AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
@@ -28,12 +29,12 @@ def _resolve_directory(directory: str) -> str | None:
     """Return absolute directory path, or None when the path does not exist."""
     resolved = resolve_assets_dir(directory)
     if not resolved:
-        raise ValueError("目录路径为空")
+        raise ValueError(t("empty_directory_path", get_last_known_lang()))
     real = os.path.realpath(resolved)
     if not os.path.isdir(real):
         return None
     if _is_filesystem_root(real):
-        raise ValueError(f"禁止清空根目录: {real}")
+        raise ValueError(t("refuse_clear_root", get_last_known_lang(), path=real))
     return real
 
 
@@ -74,9 +75,9 @@ def _win_send_to_recycle_bin(path: str) -> None:
     op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
     rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
     if rc != 0:
-        raise OSError(f"无法移入回收站 (code {rc}): {path}")
+        raise OSError(t("recycle_bin_failed", get_last_known_lang(), code=rc, path=path))
     if op.fAnyOperationsAborted:
-        raise OSError(f"移入回收站已取消: {path}")
+        raise OSError(t("recycle_bin_cancelled", get_last_known_lang(), path=path))
 
 
 def _delete_file(path: str, *, to_recycle_bin: bool) -> None:

@@ -12,6 +12,7 @@ import wave
 
 import folder_paths
 
+from .cap_i18n import get_last_known_lang, t as _t
 from .cap_save_sidecar import build_sidecar_payload, sidecar_path, write_sidecar
 
 log = logging.getLogger(__name__)
@@ -53,10 +54,10 @@ def _resolve_image_list(image_paths: str) -> list[str]:
     valid: list[str] = []
     for path in files:
         if not os.path.isfile(path):
-            raise ValueError(f"图片文件不存在: {path}")
+            raise ValueError(_t("image_file_not_found", get_last_known_lang(), path=path))
         ext = os.path.splitext(path)[1].lstrip(".").lower()
         if ext not in _IMAGE_EXTS:
-            raise ValueError(f"不支持的图片格式: {path}")
+            raise ValueError(_t("unsupported_image_format", get_last_known_lang(), path=path))
         valid.append(path)
     return valid
 
@@ -118,7 +119,7 @@ def _write_images_tmp(images) -> tuple[list[str], str]:
         raise
     if not paths:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise ValueError("images 批次为空")
+        raise ValueError(_t("empty_images_batch", get_last_known_lang()))
     return paths, tmp_dir
 
 
@@ -183,18 +184,18 @@ class CAP_SeqToVideo:
                 "image_paths": ("STRING", {
                     "default": "",
                     "multiline": True,
-                    "tooltip": "逗号分隔的图片路径列表；优先级低于 images，高于序列帧目录。",
+                    "tooltip": "Comma-separated list of image paths; lower priority than images, higher priority than the frame sequence directory.",
                 }),
                 "metadata": ("STRING", {
                     "default": "",
                     "multiline": True,
-                    "tooltip": "写入同名 JSON 的 note 字段；可接入片段提示词。",
+                    "tooltip": "Written to the sidecar JSON's note field; can be wired to a clip's prompt.",
                 }),
                 "save_sidecar": ("BOOLEAN", {
                     "default": True,
-                    "label_on": "保存 JSON",
-                    "label_off": "不保存",
-                    "tooltip": "在视频旁写入同名 JSON，记录提示词、模型、采样参数等。",
+                    "label_on": "Save JSON",
+                    "label_off": "Skip",
+                    "tooltip": "Write a same-named JSON next to the video recording prompt, model, sampler settings, etc.",
                 }),
             },
             "hidden": {
@@ -267,7 +268,7 @@ class CAP_SeqToVideo:
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         result = subprocess.run(cmd, **kwargs)
         if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg 执行失败:\n{result.stderr[-2000:]}")
+            raise RuntimeError(_t("ffmpeg_failed", get_last_known_lang(), detail=result.stderr[-2000:]))
 
     def execute(
         self,
@@ -321,11 +322,11 @@ class CAP_SeqToVideo:
         else:
             frames_dir = str(frames_dir).strip()
             if not frames_dir or not os.path.isdir(frames_dir):
-                raise ValueError(f"frames_dir 不是有效目录: {frames_dir!r}")
+                raise ValueError(_t("invalid_frames_dir", get_last_known_lang(), path=repr(frames_dir)))
 
             pattern, _, start_num = _detect_pattern(frames_dir)
             if not pattern:
-                raise ValueError(f"在目录中未找到图片序列: {frames_dir}")
+                raise ValueError(_t("no_image_sequence_found", get_last_known_lang(), path=frames_dir))
 
             frame_count = len(_list_frame_files(frames_dir))
             video_duration = frame_count / fps

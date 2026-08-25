@@ -14,15 +14,15 @@ class CAP_RichPromptInput:
                     "default": "",
                     "multiline": True,
                     "dynamicPrompts": False,
-                    "tooltip": "富文本提示词输入：Ctrl+/ 注释切换，粘贴时仅保留纯文本。输出会过滤注释行。",
+                    "tooltip": "Rich prompt input: Ctrl+/ toggles a # comment, paste keeps plain text only. Commented lines are filtered from the output.",
                 }),
                 "add_blank_line_start": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "在输出字符串开头插入一个空行。",
+                    "tooltip": "Insert a blank line at the start of the output string.",
                 }),
                 "add_blank_line_end": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "在输出字符串末尾插入一个空行。",
+                    "tooltip": "Insert a blank line at the end of the output string.",
                 }),
             }
         }

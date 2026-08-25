@@ -5,6 +5,7 @@ import { attachRichPromptHandler, detachRichPromptHandler, setRichPromptValue } 
 import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
 import { loadExtensionCss } from "./cap_ui.js";
 import { iconHtml } from "./cap_icons.js";
+import { t } from "./i18n/audio_timeline_ui.js";
 
 function loadCss() {
     loadExtensionCss("cap_audio_timeline.css", "cat-styles");
@@ -99,12 +100,12 @@ _buildDom() {
     root.innerHTML = `
       <div class="cat-wave-section">
         <div class="cat-time-row">
-          <label>起<input class="cat-s-in" type="text" placeholder="00:00.00"/></label>
-          <label>止<input class="cat-e-in" type="text" placeholder="00:00.00"/></label>
-          <span class="cat-wave-hint">未选择音频</span>
+          <label>${t("start_label")}<input class="cat-s-in" type="text" placeholder="00:00.00"/></label>
+          <label>${t("end_label")}<input class="cat-e-in" type="text" placeholder="00:00.00"/></label>
+          <span class="cat-wave-hint">${t("no_audio_selected")}</span>
         </div>
         <div class="cat-wave-wrap">
-          <div class="cat-loading">选择音频文件以加载波形…</div>
+          <div class="cat-loading">${t("select_audio_hint")}</div>
           <div class="cat-wave"></div>
           <div class="cat-overlay">
             <div class="cat-shade cat-sl"></div>
@@ -125,7 +126,7 @@ _buildDom() {
           <button class="cat-tplay" disabled>▶</button>
           <span class="cat-ttime">00:00.00</span>
           <span class="cat-tdur"></span>
-          <button class="cat-clear" title="清空时间轴素材">Clear</button>
+          <button class="cat-clear" title="${t("clear_timeline_title")}">Clear</button>
           <button class="cat-import" title="Import timeline config from JSON">Import</button>
           <button class="cat-export" title="Export timeline config as JSON">Export</button>
           <button class="cat-addclip" disabled>＋ Add Image</button>
@@ -160,9 +161,9 @@ _buildDom() {
 
       <div class="cat-picker" style="display:none">
         <div class="cat-picker-hd">
-          <span class="cat-picker-title">Select Image</span>
+          <span class="cat-picker-title">${t("select_image_title")}</span>
           <button class="cat-picker-refresh" title="Refresh image list">↻</button>
-          <button class="cat-picker-x" title="关闭">${iconHtml("close", 14)}</button>
+          <button class="cat-picker-x" title="${t("close")}">${iconHtml("close", 14)}</button>
         </div>
         <div class="cat-picker-grid"></div>
       </div>
@@ -387,7 +388,7 @@ _bindEvents() {
         if (e.target.closest(".cat-clip")) return;
         const ms = this._tlPxToMs(e.clientX);
         if (this._subOverlaps(ms, ms + 1, null)) {
-            alert("副轨道该位置已有素材，无法插入");
+            alert(t("overlay_occupied_insert"));
             return;
         }
         this._openAddPicker(ms, 1);
@@ -537,9 +538,9 @@ _updWaveCtrl() {
 }
 
 _updateWaveHint() {
-    if (!this._w("audio")?.value) { this.waveHint.textContent = "未选择音频"; return; }
-    if (this._loadingAudio)       { this.waveHint.textContent = "加载中…"; return; }
-    if (!this._waveReady)         { this.waveHint.textContent = "音频不可用"; return; }
+    if (!this._w("audio")?.value) { this.waveHint.textContent = t("no_audio_selected"); return; }
+    if (this._loadingAudio)       { this.waveHint.textContent = t("loading_ellipsis"); return; }
+    if (!this._waveReady)         { this.waveHint.textContent = t("audio_unavailable"); return; }
     const { startMs, endMs } = this._getTrimMs();
     const fps = this.getFps();
     this.waveHint.textContent = `${formatTimecode(startMs, fps)} — ${formatTimecode(endMs, fps)}`;
@@ -737,14 +738,14 @@ _createClipElement(clip) {
 
     const lbl = document.createElement("div");
     lbl.className = "cat-clip-lbl";
-    const fname = clip.startImage?.split(/[\\/]/).pop() ?? "（未选图片）";
+    const fname = clip.startImage?.split(/[\\/]/).pop() ?? t("no_image_selected");
     lbl.textContent = fname;
     lbl.title = fname;
 
     if (clip.startImage || clip.endImage) {
         const fb = document.createElement("div");
         fb.className = "cat-frame-badge";
-        fb.textContent = clip.endImage ? "[首尾]" : "[首]";
+        fb.textContent = clip.endImage ? t("badge_first_last") : t("badge_first");
         fb.addEventListener("mouseenter", () => this._showFramePreview(clip, fb));
         fb.addEventListener("mouseleave", () => this._hideFramePreview());
         el.appendChild(fb);
@@ -825,7 +826,7 @@ _layoutClips({ animate = false, dragId = null } = {}) {
 
         const lbl = el.querySelector(".cat-clip-lbl");
         if (lbl) {
-            const fname = clip.startImage?.split(/[\\/]/).pop() ?? "（未选图片）";
+            const fname = clip.startImage?.split(/[\\/]/).pop() ?? t("no_image_selected");
             lbl.textContent = fname;
             lbl.title = fname;
         }
@@ -897,7 +898,7 @@ _addClip(startMs, startImage = null, track = 0) {
         const wanted = Math.min(2000, Math.round(dur / 4)) || this._frameMs();
         const endMs = Math.min(startMs + wanted, hi, dur);
         if (endMs - startMs < this._frameMs()) {
-            alert("副轨道该位置空间不足，无法插入");
+            alert(t("overlay_insufficient_space_insert"));
             return;
         }
         const clip = { id: uid(), startMs, endMs, startImage, endImage: null, prompt: "", useGlobalPrompt: true, disabled: false, track: 1 };
@@ -943,7 +944,7 @@ _confirmAction(message) {
 
 _confirmDeleteClip(id) {
     if (!id || !this.clips.some(c => c.id === id)) return;
-    if (!this._confirmAction("确定要删除该素材吗？")) return;
+    if (!this._confirmAction(t("confirm_delete_clip"))) return;
     this._deleteClip(id);
 }
 
@@ -959,7 +960,7 @@ _deleteClip(id) {
 
 _clearTimeline() {
     if (!this.clips.length) return;
-    if (!this._confirmAction("确定要清空时间轴上的所有素材吗？")) return;
+    if (!this._confirmAction(t("confirm_clear_timeline"))) return;
     this.clips = [];
     this.selClipId = null;
     this.selClipIds.clear();
@@ -1004,7 +1005,7 @@ _moveClipToTrack(id, track) {
     if (!c || (c.track ?? 0) === track) return;
     if (track === 1) {
         if (this._subOverlaps(c.startMs, c.endMs, id)) {
-            alert("副轨道该位置已有素材，无法移动");
+            alert(t("overlay_occupied_move"));
             return;
         }
         c.track = 1;
@@ -1037,7 +1038,7 @@ _pasteClip() {
         let e = s + durMs;
         if (e > tlDur) { e = tlDur; s = Math.max(0, tlDur - durMs); }
         if (e - s < this._frameMs() || this._subOverlaps(s, e, null)) {
-            alert("副轨道空间不足，无法粘贴");
+            alert(t("overlay_insufficient_space_paste"));
             return;
         }
         const clip = { ...this._clipboard, id: uid(), startMs: s, endMs: e, track: 1 };
@@ -1267,8 +1268,8 @@ _showContextMenu(clipId, e) {
         const allDisabled = selectedIds.every(id => this.clips.find(c => c.id === id)?.disabled);
         const canMerge = this._areContiguous(selectedIds);
         const items = [
-            ...(canMerge ? [{ label: "合并", fn: () => this._mergeSelected() }] : []),
-            { label: allDisabled ? "启用选中项" : "禁用选中项", shortcut: "Ctrl+B", fn: () => this._toggleDisableSelected() },
+            ...(canMerge ? [{ label: t("menu_merge"), fn: () => this._mergeSelected() }] : []),
+            { label: allDisabled ? t("menu_enable_selected") : t("menu_disable_selected"), shortcut: "Ctrl+B", fn: () => this._toggleDisableSelected() },
         ];
         this._buildMenu(items, e);
         return;
@@ -1279,23 +1280,23 @@ _showContextMenu(clipId, e) {
     const clip = this.clips.find(c => c.id === clipId);
     if (!clip) return;
 
-    const disableLabel = clip.disabled ? "Enable" : "Disable";
+    const disableLabel = clip.disabled ? t("menu_enable") : t("menu_disable");
     const others = this.clips.filter(c => c.id !== clipId);
     const othersAllDisabled = others.length > 0 && others.every(c => c.disabled);
-    const othersLabel = othersAllDisabled ? "Enable Others" : "Disable Others";
+    const othersLabel = othersAllDisabled ? t("menu_enable_others") : t("menu_disable_others");
     const canSplit = this.playheadMs > clip.startMs && this.playheadMs < clip.endMs;
     const isOverlay = (clip.track ?? 0) === 1;
     const items = [
-        { label: "替换素材",     fn: () => this._openPicker(clipId, "startImage", "替换素材") },
-        { label: "选择尾帧图片", fn: () => this._openPicker(clipId, "endImage", "选择尾帧图片") },
-        ...(clip.startImage && clip.endImage ? [{ label: "首尾帧交换", fn: () => this._swapKeyframes(clipId) }] : []),
-        ...(canSplit ? [{ label: "分割素材", fn: () => this._splitClip(clipId) }] : []),
-        { label: isOverlay ? "移到主轨道" : "移到副轨道", fn: () => this._moveClipToTrack(clipId, isOverlay ? 0 : 1) },
+        { label: t("menu_replace_asset"),     fn: () => this._openPicker(clipId, "startImage", t("menu_replace_asset")) },
+        { label: t("menu_select_end_frame"), fn: () => this._openPicker(clipId, "endImage", t("menu_select_end_frame")) },
+        ...(clip.startImage && clip.endImage ? [{ label: t("menu_swap_keyframes"), fn: () => this._swapKeyframes(clipId) }] : []),
+        ...(canSplit ? [{ label: t("menu_split_clip"), fn: () => this._splitClip(clipId) }] : []),
+        { label: isOverlay ? t("menu_move_to_main") : t("menu_move_to_overlay"), fn: () => this._moveClipToTrack(clipId, isOverlay ? 0 : 1) },
         { label: disableLabel,   shortcut: "Ctrl+B", fn: () => this._toggleDisable(clipId) },
         { label: othersLabel,    shortcut: "Ctrl+G", fn: () => this._disableOthers(clipId) },
-        { label: "复制",         fn: () => this._copyClip(clipId) },
-        { label: "删除",         shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
-        ...(clip.endImage ? [{ label: "清除尾帧图片", fn: () => this._updateClip(clipId, { endImage: null }) }] : []),
+        { label: t("menu_copy"),         fn: () => this._copyClip(clipId) },
+        { label: t("menu_delete"),         shortcut: "Delete", fn: () => this._confirmDeleteClip(clipId) },
+        ...(clip.endImage ? [{ label: t("menu_clear_end_frame"), fn: () => this._updateClip(clipId, { endImage: null }) }] : []),
     ];
     this._buildMenu(items, e);
 }
@@ -1321,8 +1322,8 @@ _showFramePreview(clip, badgeEl) {
         return wrap;
     };
 
-    if (clip.startImage) fp.appendChild(makeItem(clip.startImage, "首"));
-    if (clip.endImage) fp.appendChild(makeItem(clip.endImage, "尾"));
+    if (clip.startImage) fp.appendChild(makeItem(clip.startImage, t("frame_preview_first")));
+    if (clip.endImage) fp.appendChild(makeItem(clip.endImage, t("frame_preview_last")));
 
     fp.style.display = "flex";
 
@@ -1375,7 +1376,7 @@ _getKeyframeDir() {
 
 // ── image picker ──────────────────────────────────────────────────────────
 
-_openPicker(clipId, field, title = "选择图片") {
+_openPicker(clipId, field, title = t("select_image_title")) {
     this._pickerCtx = { mode: "replace", clipId, field };
     this.pickerTitle.textContent = title;
     this._renderPickerGrid();
@@ -1399,7 +1400,7 @@ _renderPickerGrid() {
     if (!this._imgFiles.length) {
         const msg = document.createElement("div");
         msg.className = "cat-picker-empty";
-        msg.textContent = this._dir() ? "目录中无图片" : "请先设置 assets_dir";
+        msg.textContent = this._dir() ? t("no_images_in_dir") : t("set_assets_dir_first");
         this.pickerGrid.appendChild(msg);
         return;
     }
@@ -1441,7 +1442,7 @@ _renderPickerGrid() {
 _showAddClipPicker(atMs = this.playheadMs) {
     const track = this._pickInsertTrack(atMs);
     if (track === null) {
-        alert("主轨道与副轨道在该位置都有素材，无法插入");
+        alert(t("both_tracks_occupied_insert"));
         return;
     }
     this._openAddPicker(atMs, track);
@@ -1459,7 +1460,7 @@ _pickInsertTrack(atMs) {
 
 _openAddPicker(atMs, track = 0) {
     this._pickerCtx = { mode: "add", atMs, track };
-    this.pickerTitle.textContent = track === 1 ? "Add Image · 副轨道" : "Add Image";
+    this.pickerTitle.textContent = track === 1 ? t("add_image_overlay_title") : "Add Image";
     this._renderPickerGrid();
     this.pickerEl.style.display = "flex";
 }
@@ -1795,7 +1796,7 @@ _audioBufferToPeaks(buf, max = 8000) {
 
 async _fetchPeaks(url) {
     const r = await fetch(url, { credentials: "same-origin" });
-    if (!r.ok) throw new Error(`无法加载音频 (${r.status})`);
+    if (!r.ok) throw new Error(t("audio_load_failed", { status: r.status }));
     const ab = await r.arrayBuffer();
     const ctx = new AudioContext();
     try {
@@ -1822,7 +1823,7 @@ async _loadAudio() {
     this._loadingAudio = true;
     this.isReady = false;
     this.loadEl.style.display = "flex";
-    this.loadEl.textContent = "加载波形…";
+    this.loadEl.textContent = t("loading_waveform");
 
     try {
         this.wavesurfer?.destroy();
@@ -1875,7 +1876,7 @@ async _loadAudio() {
 
         this.wavesurfer.on("error", err => {
             console.error("[CAP_AudioTimeline]", err);
-            this.loadEl.textContent = "波形加载失败";
+            this.loadEl.textContent = t("waveform_load_failed");
             this.isReady = false;
         });
 
@@ -1895,7 +1896,7 @@ async _loadAudio() {
     } catch (err) {
         console.error("[CAP_AudioTimeline]", err);
         this.loadEl.style.display = "flex";
-        this.loadEl.textContent = err instanceof Error ? err.message : "无法加载波形";
+        this.loadEl.textContent = err instanceof Error ? err.message : t("cannot_load_waveform");
         this.isReady = false;
     } finally {
         this._loadingAudio = false;

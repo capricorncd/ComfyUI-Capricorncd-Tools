@@ -12,6 +12,7 @@ import tempfile
 
 import folder_paths
 
+from .cap_i18n import get_last_known_lang, t as _t
 from .cap_data_json_parser import CAP_DataJsonClipParser
 from .cap_save_sidecar import build_sidecar_payload, clip_prompts_from_data_json, sidecar_path, write_sidecar
 from .cap_seq_to_video import _ffmpeg_path
@@ -63,7 +64,7 @@ def _run_ffmpeg(cmd: list) -> None:
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     result = subprocess.run(cmd, **kwargs)
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg 执行失败:\n{_extract_ffmpeg_error(result.stderr)}")
+        raise RuntimeError(_t("ffmpeg_failed", get_last_known_lang(), detail=_extract_ffmpeg_error(result.stderr)))
 
 
 def _probe_duration_sec(path: str) -> float | None:
@@ -111,7 +112,7 @@ def _safe_under(base: str, candidate: str) -> str:
     base_real = os.path.realpath(base)
     cand_real = os.path.realpath(candidate)
     if cand_real != base_real and not cand_real.startswith(base_real + os.sep):
-        raise ValueError(f"路径不允许跳出目录: {candidate}")
+        raise ValueError(_t("path_escapes_dir", get_last_known_lang(), path=candidate))
     return cand_real
 
 
@@ -126,35 +127,35 @@ class CAP_ComposeClipVideos:
                 "clips_dir": ("STRING", {
                     "default": "",
                     "tooltip": (
-                        "片段视频目录。留空=ComfyUI output/{run_timestamp}；"
-                        "相对路径相对 output；也可直接填 run_timestamp。"
+                        "Clip video directory. Leave blank for ComfyUI output/{run_timestamp}; "
+                        "a relative path is relative to output; you can also just enter run_timestamp."
                     ),
                 }),
                 "name_mode": (
                     ["from_start", "index"],
                     {
                         "default": "from_start",
-                        "tooltip": "按 from_start 标签或四位索引匹配片段视频文件名",
+                        "tooltip": "Match clip video filenames by the from_start label or a 4-digit index",
                     },
                 ),
                 "filename_prefix": ("STRING", {
                     "default": "composed",
-                    "tooltip": "合成后视频的文件名前缀（可含子目录，相对 output）",
+                    "tooltip": "Filename prefix for the composed video (may include subfolders, relative to output)",
                 }),
                 "trim_extends": ("BOOLEAN", {
                     "default": True,
-                    "label_on": "裁剪首尾扩展",
-                    "label_off": "不裁剪",
+                    "label_on": "Trim extends",
+                    "label_off": "No trim",
                     "tooltip": (
-                        "当 clip 设置了首/尾扩展且视频为扩展时长时，"
-                        "合成前裁掉扩展，只保留预览时长区间。"
+                        "When a clip has a start/end extend and the video is the extended duration, "
+                        "trim the extend before composing, keeping only the preview-duration range."
                     ),
                 }),
                 "save_sidecar": ("BOOLEAN", {
                     "default": True,
-                    "label_on": "保存 JSON",
-                    "label_off": "不保存",
-                    "tooltip": "在合成视频旁写入同名 JSON，记录各片段提示词、模型等。",
+                    "label_on": "Save JSON",
+                    "label_off": "Skip",
+                    "tooltip": "Write a same-named JSON next to the composed video recording each clip's prompt, model, etc.",
                 }),
             },
             "hidden": {
@@ -192,23 +193,23 @@ class CAP_ComposeClipVideos:
 
         if not raw:
             if not prefix:
-                raise ValueError("clips_dir 为空且 data_json 中没有 run_timestamp")
+                raise ValueError(_t("clips_dir_empty_no_run_timestamp", get_last_known_lang()))
             path = os.path.join(output_dir, *prefix.split("/"))
             path = _safe_under(output_dir, path)
             if not os.path.isdir(path):
-                raise ValueError(f"片段目录不存在: {path}")
+                raise ValueError(_t("clip_dir_not_found", get_last_known_lang(), path=path))
             return path
 
         if os.path.isabs(raw):
             path = os.path.abspath(raw)
             if not os.path.isdir(path):
-                raise ValueError(f"片段目录不存在: {path}")
+                raise ValueError(_t("clip_dir_not_found", get_last_known_lang(), path=path))
             return path
 
         path = os.path.join(output_dir, *raw.strip("/").split("/"))
         path = _safe_under(output_dir, path)
         if not os.path.isdir(path):
-            raise ValueError(f"片段目录不存在: {path}")
+            raise ValueError(_t("clip_dir_not_found", get_last_known_lang(), path=path))
         return path
 
     def _clip_stem(self, clip: dict, index: int, fps: float, name_mode: str, parser: CAP_DataJsonClipParser) -> str:
@@ -341,12 +342,12 @@ class CAP_ComposeClipVideos:
         extra_pnginfo=None,
     ):
         if not shutil.which("ffmpeg"):
-            raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
+            raise RuntimeError(_t("ffmpeg_not_found", get_last_known_lang()))
 
         data = self._parse_data(data_json)
         clips = data.get("clips", [])
         if not isinstance(clips, list) or not clips:
-            raise ValueError("data_json 中没有可用 clips")
+            raise ValueError(_t("no_clips_in_data_json", get_last_known_lang()))
 
         fps = max(1.0, float(data.get("fps", 24.0) or 24.0))
         run_timestamp = str(data.get("run_timestamp") or data.get("run_prefix") or "").strip()
@@ -360,11 +361,11 @@ class CAP_ComposeClipVideos:
             stem = self._clip_stem(clip, index, fps, name_mode, parser)
             path = self._find_clip_video(resolved_dir, stem)
             if not path:
-                raise ValueError(f"未找到第 {index} 段视频（stem={stem!r}）于 {resolved_dir}")
+                raise ValueError(_t("clip_video_not_found", get_last_known_lang(), index=index, stem=repr(stem), dir=resolved_dir))
             sources.append((clip, index, path))
 
         if not sources:
-            raise ValueError("没有可合成的片段视频")
+            raise ValueError(_t("no_clips_to_compose", get_last_known_lang()))
 
         keep_audio = all(_probe_has_audio(path) for _, _, path in sources)
 

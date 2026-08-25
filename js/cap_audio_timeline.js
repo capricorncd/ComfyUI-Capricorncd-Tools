@@ -108,12 +108,12 @@ app.registerExtension({
     commands: [
         {
             id: "Capricorncd.AudioTimeline.tlLeft",
-            label: "音频时间轴：播放头左移1帧",
+            label: "Audio Timeline: Move Playhead Left 1 Frame",
             function: () => { getActiveCatNode()?._catUI?._onKeyDown({ key: "ArrowLeft", preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} }); },
         },
         {
             id: "Capricorncd.AudioTimeline.tlRight",
-            label: "音频时间轴：播放头右移1帧",
+            label: "Audio Timeline: Move Playhead Right 1 Frame",
             function: () => { getActiveCatNode()?._catUI?._onKeyDown({ key: "ArrowRight", preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} }); },
         },
     ],
