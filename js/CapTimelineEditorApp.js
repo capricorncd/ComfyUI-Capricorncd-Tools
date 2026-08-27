@@ -3742,6 +3742,7 @@ export class CapTimelineEditorApp {
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         if (this._genVideoState?.clipId === clip.id) this._showGenVideoAt(this._genVideoState.index || 0);
         this._saveToWidgets();
+        this._updateAllGeneratedPreviewButton();
         return true;
     }
 
@@ -3756,6 +3757,7 @@ export class CapTimelineEditorApp {
             this._decorateClip(clip);
             this._syncClipPrimaryAppearance(clip);
             this._scheduleProgramPreview();
+            this._updateAllGeneratedPreviewButton();
             return;
         }
         m.previewMode = this._clipUsesGeneratedPreview(m) ? "media" : "generated";
@@ -3765,6 +3767,59 @@ export class CapTimelineEditorApp {
         this._scheduleProgramPreview();
         if (this._timeline?._playing) this._startAudioPlayback();
         this._saveToWidgets();
+        this._updateAllGeneratedPreviewButton();
+    }
+
+    /** Visual clips that have at least one enabled generated video. */
+    _clipsWithEnabledGeneratedVideo() {
+        const out = [];
+        for (const track of this._timeline?.tracks ?? []) {
+            if (track.type === "audio") continue;
+            for (const clip of track.clips) {
+                const meta = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (!this._firstEnabledGeneratedVideo(meta)) continue;
+                out.push({ clip, meta });
+            }
+        }
+        return out;
+    }
+
+    _allGeneratedPreviewActive() {
+        const rows = this._clipsWithEnabledGeneratedVideo();
+        return rows.length > 0 && rows.every(({ meta }) => this._clipUsesGeneratedPreview(meta));
+    }
+
+    /** Toggle every clip that has generated video between gen / asset preview. */
+    _toggleAllGeneratedPreview() {
+        const rows = this._clipsWithEnabledGeneratedVideo();
+        if (!rows.length) return;
+        this._recordUndo();
+        const next = this._allGeneratedPreviewActive() ? "media" : "generated";
+        for (const { clip, meta } of rows) {
+            meta.previewMode = next;
+            this._meta.set(clip.id, meta);
+            this._decorateClip(clip);
+            this._syncClipPrimaryAppearance(clip);
+        }
+        this._updateAllGeneratedPreviewButton();
+        this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
+        this._saveToWidgets();
+    }
+
+    _updateAllGeneratedPreviewButton() {
+        const btn = this.allGenPreviewBtn;
+        if (!btn) return;
+        const rows = this._clipsWithEnabledGeneratedVideo();
+        const active = this._allGeneratedPreviewActive();
+        btn.disabled = !rows.length;
+        btn.classList.toggle("is-active", active);
+        btn.innerHTML = `${iconHtml(active ? "camera" : "video", 14)}<span>${
+            active ? T("toggle_all_asset_preview_btn") : T("toggle_all_generated_preview_btn")
+        }</span>`;
+        btn.title = active
+            ? T("toggle_all_asset_preview_title")
+            : T("toggle_all_generated_preview_title");
     }
 
     _renderClipGeneratedVideosList(clip, meta, isAudio) {
@@ -3846,6 +3901,7 @@ export class CapTimelineEditorApp {
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         if (this._genVideoState?.clipId === clip.id) this._showGenVideoAt(this._genVideoState.index || 0);
         this._saveToWidgets();
+        this._updateAllGeneratedPreviewButton();
     }
 
     _setGeneratedVideoMuted(clip, videoId, muted) {
@@ -3888,6 +3944,7 @@ export class CapTimelineEditorApp {
         this._scheduleProgramPreview();
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         this._saveToWidgets();
+        this._updateAllGeneratedPreviewButton();
         if (this._genVideoState?.clipId === clip.id) {
             if (!m.generatedVideos.length) this._closeGenVideoModal();
             else this._showGenVideoAt(Math.min(this._genVideoState.index || 0, m.generatedVideos.length - 1));
@@ -6150,6 +6207,7 @@ export class CapTimelineEditorApp {
         for (const track of this._timeline?.tracks ?? []) {
             for (const clip of track.clips) this._decorateClip(clip);
         }
+        this._updateAllGeneratedPreviewButton();
     }
 
     _findClipById(id) {
@@ -8262,6 +8320,13 @@ export class CapTimelineEditorApp {
         packageBtn.textContent = T("insert_clip_btn");
         packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
         tl.toolbarEl.appendChild(packageBtn);
+
+        this.allGenPreviewBtn = document.createElement("button");
+        this.allGenPreviewBtn.type = "button";
+        this.allGenPreviewBtn.className = "tl-btn tl-btn-all-gen-preview";
+        this.allGenPreviewBtn.addEventListener("click", () => this._toggleAllGeneratedPreview());
+        tl.toolbarEl.appendChild(this.allGenPreviewBtn);
+        this._updateAllGeneratedPreviewButton();
 
         // Undo/redo is buttons-only, not a keyboard shortcut — Ctrl+Z can't
         // be reliably intercepted here (ComfyUI's own graph-undo shortcut

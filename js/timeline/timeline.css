@@ -176,6 +176,32 @@
   color: #f5d9a8;
 }
 
+.tl-btn-all-gen-preview {
+  background: rgba(61, 214, 140, 0.12);
+  border-color: rgba(61, 214, 140, 0.35);
+  color: #7eebb5;
+}
+.tl-btn-all-gen-preview:hover {
+  background: rgba(61, 214, 140, 0.22);
+  color: #a6f0cb;
+}
+.tl-btn-all-gen-preview.is-active {
+  background: rgba(74, 158, 255, 0.18);
+  border-color: rgba(74, 158, 255, 0.45);
+  color: #9ec5ff;
+}
+.tl-btn-all-gen-preview:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+  border-color: var(--tl-border);
+}
+.tl-btn-all-gen-preview:disabled:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+}
+
 .tl-btn-history:disabled {
   opacity: 0.35;
   cursor: default;

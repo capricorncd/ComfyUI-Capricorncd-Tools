@@ -42,6 +42,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 - Drag / resize clips; multi-select with `Ctrl+Click`
 - Audio-track clips: drag the small corner handles to set linear **fade-in / fade-out** (diagonal overlay); stored as `fade_in_ms` / `fade_out_ms` and applied in playback, `clips_audio` mix, and Compose Video
 - Package clips and material insert at the playhead
+- **Gen Preview / Asset Preview** toolbar toggle (next to Insert Clip): one-click switch all clips that have generated videos between generated-video preview and asset preview
 - Undo / Redo toolbar buttons (editor-local history)
 - Zoom: `Ctrl+Wheel`; pan: `Alt+Wheel`
 
