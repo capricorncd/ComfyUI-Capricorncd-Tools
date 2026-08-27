@@ -340,9 +340,8 @@ export class CapTimelineEditorApp {
         this._previewVideos = new Map();
         this._programPreviewRaf = 0;
         this._programStageObserver = null;
-        this._pendingGeneratedClipId = null;
-        this._pendingGeneratedFiles = [];
-        this._deferredGenerated = null;
+        this._pendingGeneratedJobs = [];
+        this._deferredGeneratedJobs = [];
         this._genVideoState = null;
         this._outputVideosClipId = null;
         this._outputVideosCache = [];
@@ -3617,11 +3616,8 @@ export class CapTimelineEditorApp {
         if (this._execWatchBound || !api?.addEventListener) return;
         this._execWatchBound = true;
         this._onExecuted = (e) => this._onPromptExecuted(e);
-        this._onExecSuccess = () => this._flushPendingGeneratedVideos();
-        this._onExecAbort = () => {
-            this._pendingGeneratedClipId = null;
-            this._pendingGeneratedFiles = [];
-        };
+        this._onExecSuccess = (e) => this._flushPendingGeneratedVideos(e);
+        this._onExecAbort = (e) => this._abortPendingGeneratedJob(e);
         api.addEventListener("executed", this._onExecuted);
         api.addEventListener("execution_success", this._onExecSuccess);
         api.addEventListener("execution_error", this._onExecAbort);
@@ -3638,6 +3634,57 @@ export class CapTimelineEditorApp {
         this._onExecuted = null;
         this._onExecSuccess = null;
         this._onExecAbort = null;
+    }
+
+    _promptIdFromQueueResult(result) {
+        if (!result || typeof result !== "object") return null;
+        const id = result.prompt_id ?? result.promptId;
+        const s = String(id || "").trim();
+        return s || null;
+    }
+
+    _promptIdFromEvent(e) {
+        const detail = e?.detail;
+        if (!detail || typeof detail !== "object") return null;
+        const id = detail.prompt_id ?? detail.promptId;
+        const s = String(id || "").trim();
+        return s || null;
+    }
+
+    _findPendingGeneratedJob(promptId) {
+        const jobs = this._pendingGeneratedJobs;
+        if (!jobs?.length) return null;
+        if (promptId) {
+            const hit = jobs.find((j) => j.promptId === promptId);
+            if (hit) return hit;
+        }
+        // FIFO fallback when prompt_id is missing from the frontend/event.
+        return jobs.find((j) => !j.promptId) || jobs[0] || null;
+    }
+
+    _takePendingGeneratedJob(promptId) {
+        const jobs = this._pendingGeneratedJobs;
+        if (!jobs?.length) return null;
+        let idx = -1;
+        if (promptId) idx = jobs.findIndex((j) => j.promptId === promptId);
+        if (idx < 0) {
+            idx = jobs.findIndex((j) => !j.promptId);
+            if (idx < 0) idx = 0;
+        }
+        return jobs.splice(idx, 1)[0] || null;
+    }
+
+    _abortPendingGeneratedJob(e) {
+        const promptId = this._promptIdFromEvent(e);
+        if (promptId) {
+            this._pendingGeneratedJobs = this._pendingGeneratedJobs.filter(
+                (j) => j.promptId !== promptId,
+            );
+            return;
+        }
+        // Interrupt / error without id: drop the oldest unmatched job only.
+        const idx = this._pendingGeneratedJobs.findIndex((j) => !j.promptId);
+        if (idx >= 0) this._pendingGeneratedJobs.splice(idx, 1);
     }
 
     _collectExecutedOutputVideos(detail) {
@@ -3678,31 +3725,33 @@ export class CapTimelineEditorApp {
     _onPromptExecuted(e) {
         const files = this._collectExecutedOutputVideos(e?.detail);
         if (!files.length) return;
-        this._pendingGeneratedFiles.push(...files);
+        const job = this._findPendingGeneratedJob(this._promptIdFromEvent(e));
+        if (!job) return;
+        job.files.push(...files);
     }
 
-    _flushPendingGeneratedVideos() {
-        const files = [...new Set(this._pendingGeneratedFiles)];
-        const clipId = this._pendingGeneratedClipId;
-        this._pendingGeneratedFiles = [];
-        this._pendingGeneratedClipId = null;
+    _flushPendingGeneratedVideos(e) {
+        const job = this._takePendingGeneratedJob(this._promptIdFromEvent(e));
+        if (!job) return;
+        const files = [...new Set(job.files || [])];
         if (!files.length) return;
         if (!this._timeline) {
-            const prev = this._deferredGenerated;
-            this._deferredGenerated = {
-                clipId: clipId || prev?.clipId || null,
-                files: [...new Set([...(prev?.files || []), ...files])],
-            };
+            this._deferredGeneratedJobs.push({
+                clipId: job.clipId || null,
+                files,
+            });
             return;
         }
-        this._attachGeneratedVideos(clipId, files);
+        this._attachGeneratedVideos(job.clipId, files);
     }
 
     _applyDeferredGeneratedVideos() {
-        const deferred = this._deferredGenerated;
-        this._deferredGenerated = null;
-        if (!deferred?.files?.length || !this._timeline) return;
-        this._attachGeneratedVideos(deferred.clipId, deferred.files);
+        const jobs = this._deferredGeneratedJobs || [];
+        this._deferredGeneratedJobs = [];
+        if (!this._timeline || !jobs.length) return;
+        for (const job of jobs) {
+            if (job?.files?.length) this._attachGeneratedVideos(job.clipId, job.files);
+        }
     }
 
     _attachGeneratedVideos(clipId, files) {
@@ -7650,12 +7699,15 @@ export class CapTimelineEditorApp {
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
 
-            this._pendingGeneratedClipId = clip.id;
-            this._pendingGeneratedFiles = [];
-            await app.queuePrompt(0);
+            // Register after queuePrompt so each run keeps its own prompt_id →
+            // clip mapping (multi-clip queue no longer overwrites one global id).
+            const result = await app.queuePrompt(0);
+            this._pendingGeneratedJobs.push({
+                clipId: clip.id,
+                promptId: this._promptIdFromQueueResult(result),
+                files: [],
+            });
         } catch (error) {
-            this._pendingGeneratedClipId = null;
-            this._pendingGeneratedFiles = [];
             alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
             for (const row of snapshot) {
