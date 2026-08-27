@@ -979,7 +979,10 @@ export class CapTimelineEditorApp {
                 new Blob([JSON.stringify(data.project, null, 2)], { type: "application/json;charset=utf-8" }),
             );
             for (const entry of data.files || []) {
-                const url = this._assetFileUrl(entry.file, entry.kind, "input");
+                const location = entry.location === "output" ? "output" : "input";
+                const url = location === "output"
+                    ? this._outputVideoUrl(entry.file)
+                    : this._assetFileUrl(entry.file, entry.kind, "input");
                 const fileRes = await fetch(url);
                 if (!fileRes.ok) {
                     missing.push(entry.file);

@@ -14,6 +14,7 @@ from .timecode import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, reso
 
 PACKAGE_PROJECT_NAME = "project.json"
 PACKAGE_MEDIA_ROOT = "media"
+PACKAGE_GENERATED_SUBDIR = "generated"
 KIND_SUBDIR = {"image": "images", "video": "videos", "audio": "audios"}
 # Integer document shape. Independent of the Python package version.
 SCHEMA_VERSION = 2
@@ -40,6 +41,30 @@ def _norm_kind(kind) -> str:
 
 def _norm_file(file) -> str:
     return str(file or "").strip().replace("\\", "/")
+
+
+def _norm_generated_file(file) -> str:
+    """Normalize a generated-video path to output-relative form."""
+    s = _norm_file(file).lstrip("/")
+    marker = "/output/"
+    idx = s.lower().rfind(marker)
+    if idx >= 0:
+        s = s[idx + len(marker):]
+    return s.lstrip("/")
+
+
+def _resolve_output_file(rel: str) -> str:
+    """Resolve an output-relative path under ComfyUI output/. Returns '' if missing."""
+    import folder_paths
+
+    rel = _norm_generated_file(rel)
+    if not rel:
+        return ""
+    root = os.path.abspath(folder_paths.get_output_directory())
+    path = os.path.abspath(os.path.join(root, *rel.split("/")))
+    if path != root and not path.startswith(root + os.sep):
+        return ""
+    return path if os.path.isfile(path) else ""
 
 
 def _catalog_map(project: dict) -> dict[str, dict]:
@@ -417,6 +442,55 @@ def iter_project_media(project: dict) -> list[dict]:
     return rows
 
 
+def iter_project_generated_videos(project: dict) -> list[str]:
+    """Unique generated-video paths (output-relative) linked on visual clips."""
+    if not isinstance(project, dict):
+        return []
+    project = migrate_project(project)
+    seen: set[str] = set()
+    out: list[str] = []
+    for track in project.get("tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        if str(track.get("type") or "").lower() == "audio":
+            continue
+        for clip in track.get("clips") or []:
+            if not isinstance(clip, dict):
+                continue
+            rows = clip.get("generated_videos")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                file = _norm_generated_file(row.get("file"))
+                if not file or file in seen:
+                    continue
+                if not _ext_ok("video", file):
+                    continue
+                seen.add(file)
+                out.append(file)
+    return out
+
+
+def _unique_generated_arcname(used: set[str], file: str) -> str:
+    """Package path under media/generated/, preserving relative folders when possible."""
+    rel = _norm_generated_file(file)
+    base = rel if "/" in rel else (os.path.basename(rel) or "video.mp4")
+    candidate = f"{PACKAGE_MEDIA_ROOT}/{PACKAGE_GENERATED_SUBDIR}/{base}"
+    if candidate not in used:
+        used.add(candidate)
+        return candidate
+    stem, ext = os.path.splitext(base)
+    n = 1
+    while True:
+        candidate = f"{PACKAGE_MEDIA_ROOT}/{PACKAGE_GENERATED_SUBDIR}/{stem}_{n}{ext}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        n += 1
+
+
 def _unique_arcname(used: set[str], kind: str, src_name: str) -> str:
     sub = KIND_SUBDIR[kind]
     base = os.path.basename(str(src_name).replace("\\", "/")) or f"file{os.path.splitext(src_name)[1]}"
@@ -434,9 +508,22 @@ def _unique_arcname(used: set[str], kind: str, src_name: str) -> str:
         n += 1
 
 
-def _remap_project_files(project: dict, mapping: dict[tuple[str, str], str]) -> dict:
-    """Rewrite media paths using mapping[(kind, old_file)] -> new_rel_path."""
+def _remap_project_files(
+    project: dict,
+    mapping: dict[tuple[str, str], str],
+    generated_mapping: dict[str, str] | None = None,
+) -> dict:
+    """Rewrite media + generated-video paths.
+
+    mapping[(kind, old_file)] -> new_rel_path for catalog media.
+    generated_mapping[old_file] -> new_rel_path for clip.generated_videos[].file.
+    """
     out = migrate_project(project)
+    generated_mapping = {
+        _norm_file(k): v
+        for k, v in (generated_mapping or {}).items()
+        if _norm_file(k) and v
+    }
 
     def map_file(kind: str, file: str) -> str:
         file = _norm_file(file)
@@ -477,6 +564,17 @@ def _remap_project_files(project: dict, mapping: dict[tuple[str, str], str]) -> 
             clip.pop("end_image", None)
             clip.pop("start_image", None)
             clip.pop("audio_file", None)
+            gens = clip.get("generated_videos")
+            if isinstance(gens, list) and generated_mapping:
+                for row in gens:
+                    if not isinstance(row, dict):
+                        continue
+                    old = _norm_file(row.get("file"))
+                    if not old:
+                        continue
+                    new = generated_mapping.get(old) or generated_mapping.get(_norm_generated_file(old))
+                    if new:
+                        row["file"] = new
     return out
 
 
@@ -484,12 +582,14 @@ def build_export_entries(project: dict) -> tuple[dict, list[dict], list[str]]:
     """Build remapped project + copy entries for packaging.
 
     Returns (exported_project, entries, missing_files).
-    each entry: {kind, file, arcname, src_path}
-      file = original path (for asset_file fetch)
+    each entry: {kind, file, arcname, src_path, location}
+      file = original path (for asset_file / view fetch)
       arcname = package-relative path written into the export
+      location = "input" for library media, "output" for linked generated videos
     """
     used: set[str] = set()
     mapping: dict[tuple[str, str], str] = {}
+    generated_mapping: dict[str, str] = {}
     entries: list[dict] = []
     missing: list[str] = []
 
@@ -506,9 +606,30 @@ def build_export_entries(project: dict) -> tuple[dict, list[dict], list[str]]:
             continue
         arcname = _unique_arcname(used, kind, file)
         mapping[(kind, file)] = arcname
-        entries.append({"kind": kind, "file": file, "arcname": arcname, "src_path": src})
+        entries.append({
+            "kind": kind,
+            "file": file,
+            "arcname": arcname,
+            "src_path": src,
+            "location": "input",
+        })
 
-    exported = _remap_project_files(project, mapping)
+    for file in iter_project_generated_videos(project):
+        src = _resolve_output_file(file)
+        if not src:
+            missing.append(file)
+            continue
+        arcname = _unique_generated_arcname(used, file)
+        generated_mapping[file] = arcname
+        entries.append({
+            "kind": "video",
+            "file": file,
+            "arcname": arcname,
+            "src_path": src,
+            "location": "output",
+        })
+
+    exported = _remap_project_files(project, mapping, generated_mapping)
     return exported, entries, missing
 
 
@@ -547,6 +668,31 @@ def _import_media_bytes(kind: str, filename: str, data: bytes) -> str:
     return os.path.relpath(destination, root).replace(os.sep, "/")
 
 
+def _import_generated_bytes(rel_path: str, data: bytes) -> str:
+    """Write a generated video into ComfyUI output/. Returns output-relative path."""
+    import folder_paths
+
+    rel_path = _norm_generated_file(rel_path)
+    if not rel_path:
+        rel_path = "imported.mp4"
+    parts = [p for p in rel_path.split("/") if p and p not in (".", "..")]
+    if not parts:
+        parts = ["imported.mp4"]
+    root = os.path.abspath(folder_paths.get_output_directory())
+    dest_dir = os.path.join(root, *parts[:-1]) if len(parts) > 1 else root
+    os.makedirs(dest_dir, exist_ok=True)
+    filename = parts[-1]
+    destination = os.path.join(dest_dir, filename)
+    base, ext = os.path.splitext(filename)
+    counter = 1
+    while os.path.exists(destination):
+        destination = os.path.join(dest_dir, f"{base}_{counter}{ext}")
+        counter += 1
+    with open(destination, "wb") as dst:
+        dst.write(data)
+    return os.path.relpath(destination, root).replace(os.sep, "/")
+
+
 def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
     """Extract ZIP package into input uploads and return remapped project + warnings."""
     warnings: list[str] = []
@@ -563,6 +709,8 @@ def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
             raise ValueError(_t("invalid_project_json_format", get_last_known_lang()))
 
         mapping: dict[tuple[str, str], str] = {}
+        generated_mapping: dict[str, str] = {}
+        gen_prefix = f"{PACKAGE_MEDIA_ROOT}/{PACKAGE_GENERATED_SUBDIR}/"
         for info in zf.infolist():
             name = info.filename.replace("\\", "/")
             if info.is_dir() or name.rstrip("/").endswith(PACKAGE_PROJECT_NAME):
@@ -573,6 +721,15 @@ def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
             if len(parts) < 3:
                 continue
             sub = parts[1]
+            if sub == PACKAGE_GENERATED_SUBDIR:
+                if not _ext_ok("video", name):
+                    continue
+                under = name[len(gen_prefix):] if name.startswith(gen_prefix) else os.path.basename(name)
+                new_rel = _import_generated_bytes(under, zf.read(info))
+                generated_mapping[name] = new_rel
+                generated_mapping[under] = new_rel
+                generated_mapping[os.path.basename(name)] = new_rel
+                continue
             kind = next((k for k, v in KIND_SUBDIR.items() if v == sub), None)
             if not kind or not _ext_ok(kind, name):
                 continue
@@ -590,4 +747,16 @@ def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
             else:
                 warnings.append(_t("missing_asset", get_last_known_lang(), file=file))
 
-        return _remap_project_files(project, mapping), warnings
+        for file in iter_project_generated_videos(project):
+            key = _norm_file(file)
+            if key in generated_mapping or _norm_generated_file(file) in generated_mapping:
+                if key not in generated_mapping and _norm_generated_file(file) in generated_mapping:
+                    generated_mapping[key] = generated_mapping[_norm_generated_file(file)]
+                continue
+            base = os.path.basename(file)
+            if base in generated_mapping:
+                generated_mapping[key] = generated_mapping[base]
+            else:
+                warnings.append(_t("missing_asset", get_last_known_lang(), file=file))
+
+        return _remap_project_files(project, mapping, generated_mapping), warnings

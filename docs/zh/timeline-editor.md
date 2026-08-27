@@ -55,7 +55,7 @@
 
 - 可编辑项目名称
 - **导入** / **导出**：
-  - 目录包与 ZIP（含全部素材 + `project.json`）
+  - 目录包与 ZIP（含全部素材 + Clip 关联的生成视频写入 `media/generated/` + `project.json`）
   - **合成视频**：弹窗设置 `filename_prefix`（默认 `cap_timeline_compose/`）、文件名 `项目名称_yyyyMMdd_hhmmss.mp4`，以及 **忽略音频轨道**（默认关）。开启后不合并音频轨上的 clip；未禁音的生成视频音轨仍会混入。ffmpeg 写入 ComfyUI `output/`。需要本机 **ffmpeg**。
 - 标题栏显示 `时间轴编辑器 | 项目名称`；点击项目名称可聚焦右侧栏名称输入（并取消 clip 选中）。节点宽高与帧率显示在右侧（标题栏右侧 + 项目面板）。
 - 全局提示词仅在编辑器右侧栏维护，节点上不再提供该控件。

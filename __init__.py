@@ -375,7 +375,12 @@ def _register_routes():
             return web.json_response({
                 "project": exported,
                 "files": [
-                    {"kind": e["kind"], "file": e["file"], "arcname": e["arcname"]}
+                    {
+                        "kind": e["kind"],
+                        "file": e["file"],
+                        "arcname": e["arcname"],
+                        "location": e.get("location") or "input",
+                    }
                     for e in entries
                 ],
                 "missing": missing,
