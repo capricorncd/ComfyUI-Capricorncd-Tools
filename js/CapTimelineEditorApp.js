@@ -3813,7 +3813,10 @@ export class CapTimelineEditorApp {
         if (!job) return;
         const files = [...new Set(job.files || [])];
         if (!files.length) return;
-        if (!this._timeline) {
+        // Always write into project_json immediately so close/reopen keeps
+        // auto-linked videos even if the timeline UI is closed or mid-rebuild.
+        this._persistGeneratedVideosToProjectJson(job.clipId || null, files);
+        if (!this._timeline || !this._timelineReady) {
             this._deferredGeneratedJobs.push({
                 clipId: job.clipId || null,
                 files,
@@ -3848,7 +3851,13 @@ export class CapTimelineEditorApp {
             }
             if (enabled.length === 1) clip = enabled[0];
         }
-        if (!clip) return;
+        if (!clip) {
+            this._deferredGeneratedJobs.push({
+                clipId: clipId || null,
+                files: [...(files || [])],
+            });
+            return;
+        }
         this._addGeneratedVideosToClip(clip, files);
     }
 
@@ -3871,7 +3880,14 @@ export class CapTimelineEditorApp {
         this._decorateClip(clip);
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         if (this._genVideoState?.clipId === clip.id) this._showGenVideoAt(this._genVideoState.index || 0);
-        this._saveToWidgets();
+        if (this._timeline && this._timelineReady) {
+            this._saveToWidgets();
+            if (this._historyReady) {
+                this._openedProjectJson = JSON.stringify(this._buildProject());
+            }
+        } else {
+            this._persistGeneratedVideosToProjectJson(clip.id, added.map((row) => row.file));
+        }
         this._updateAllGeneratedPreviewButton();
         return true;
     }
@@ -5989,8 +6005,7 @@ export class CapTimelineEditorApp {
         project.settings.height = Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height);
         project.settings.global_prompt = this._readGlobalPrompt();
         delete project.settings.ignore_occluded;
-        projectW.value = JSON.stringify(project);
-        this.node.setDirtyCanvas(true, true);
+        this._writeProjectJson(JSON.stringify(project));
         this._syncProjectScalarDisplay();
     }
 
@@ -9726,13 +9741,110 @@ export class CapTimelineEditorApp {
     }
 
     _saveToWidgets() {
-        if (this._destroyed || !this._timeline || !this._timelineReady) return;
-        const projectW = this._w("project_json");
-        if (projectW) projectW.value = JSON.stringify(this._buildProject());
+        if (this._destroyed) return;
+        if (!this._timeline || !this._timelineReady) return;
+        this._writeProjectJson(JSON.stringify(this._buildProject()));
         try { this._persistViewToLocalCache(); } catch { /* ignore */ }
         try { this._persistPanelLayout(); } catch { /* ignore */ }
+    }
 
-        this.node.setDirtyCanvas(true, true);
+    /** Write project_json to the widget and keep workflow restore mirrors in sync. */
+    _writeProjectJson(json) {
+        const projectW = this._w("project_json");
+        if (projectW) projectW.value = json;
+
+        const node = this.node;
+        if (node && Array.isArray(node.widgets)) {
+            const values = [];
+            for (const w of node.widgets) {
+                if (w.serialize === false) continue;
+                values.push(w.name === "project_json" ? json : w.value);
+            }
+            node.widgets_values = values;
+
+            if (!node.properties) node.properties = {};
+            const named = { ...(node.properties.cat_named || {}) };
+            for (const w of node.widgets) {
+                if (!w?.name || w.serialize === false) continue;
+                named[w.name] = w.name === "project_json" ? json : w.value;
+            }
+            node.properties.cat_named = named;
+        }
+
+        this.node?.setDirtyCanvas?.(true, true);
+    }
+
+    /**
+     * Persist generated-video links into project_json even when the fullscreen
+     * timeline is closed / not ready (auto-associate after queue must survive
+     * close → reopen).
+     */
+    _persistGeneratedVideosToProjectJson(clipId, files) {
+        if (this._destroyed) return false;
+        const normalized = [];
+        const seen = new Set();
+        for (const file of files || []) {
+            const n = normalizeOutputVideoPath(file);
+            if (!n || seen.has(n)) continue;
+            seen.add(n);
+            normalized.push(n);
+        }
+        if (!normalized.length) return false;
+
+        const parsed = this._parseProjectWidgetValue();
+        const project = parsed.project && typeof parsed.project === "object"
+            ? parsed.project
+            : null;
+        if (!project || !Array.isArray(project.tracks)) return false;
+
+        let target = null;
+        if (clipId) {
+            for (const track of project.tracks) {
+                for (const clip of track.clips || []) {
+                    if (clip && String(clip.id) === String(clipId)) {
+                        target = clip;
+                        break;
+                    }
+                }
+                if (target) break;
+            }
+        }
+        if (!target) {
+            const enabled = [];
+            for (const track of project.tracks) {
+                if (String(track?.type || "").toLowerCase() === "audio") continue;
+                if (track?.enabled === false) continue;
+                for (const clip of track.clips || []) {
+                    if (!clip || clip.enabled === false) continue;
+                    if (String(clip.type || "").toLowerCase() === "audio") continue;
+                    enabled.push(clip);
+                }
+            }
+            if (enabled.length === 1) target = enabled[0];
+        }
+        if (!target) return false;
+
+        const existing = Array.isArray(target.generated_videos)
+            ? target.generated_videos.map(normalizeGeneratedVideo).filter(Boolean)
+            : [];
+        const have = new Set(existing.map((row) => row.file));
+        const added = [];
+        for (const file of normalized) {
+            if (have.has(file)) continue;
+            have.add(file);
+            added.push({ id: genVideoUid(), file, enabled: true, muted: false, note: "" });
+        }
+        if (!added.length) return false;
+
+        target.generated_videos = [...added, ...existing].map((v) => ({
+            id: v.id,
+            file: v.file,
+            enabled: v.enabled !== false,
+            muted: v.muted === true,
+            note: v.note || "",
+        }));
+        this._writeProjectJson(JSON.stringify(project));
+        return true;
     }
 
     // ─── Undo / redo ─────────────────────────────────────────────────────
