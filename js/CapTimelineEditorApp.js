@@ -789,6 +789,69 @@ export class CapTimelineEditorApp {
         ], r.left, r.bottom + 4);
     }
 
+    _showRunMenu(e) {
+        const r = e.currentTarget.getBoundingClientRect();
+        this._buildCtxMenu([
+            { label: T("run_all_clips_menu"), fn: () => void this._runAllActiveClipsDownstream() },
+            { label: T("run_workflow_menu"), fn: () => void this._runWorkflow() },
+        ], r.left, r.bottom + 4);
+    }
+
+    /** Visual clips that are not disabled (and whose track is enabled). */
+    _listActiveVisualClips() {
+        const out = [];
+        for (const track of this._allImageTracks()) {
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                const meta = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (meta.disabled || meta.clipType === "audio") continue;
+                out.push(clip);
+            }
+        }
+        out.sort((a, b) => {
+            const dt = (a.startTime || 0) - (b.startTime || 0);
+            if (dt !== 0) return dt;
+            return String(a.id).localeCompare(String(b.id));
+        });
+        return out;
+    }
+
+    async _runWorkflow() {
+        if (typeof app?.queuePrompt !== "function") {
+            alert(T("queue_prompt_not_found"));
+            return;
+        }
+        try {
+            this._saveToWidgets();
+            await app.queuePrompt(0);
+        } catch (error) {
+            alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
+        }
+    }
+
+    async _runAllActiveClipsDownstream() {
+        const clips = this._listActiveVisualClips();
+        if (!clips.length) {
+            alert(T("no_active_clips_to_run"));
+            return;
+        }
+        if (typeof app?.queuePrompt !== "function") {
+            alert(T("queue_prompt_not_found"));
+            return;
+        }
+        if (this._runAllClipsBusy) return;
+        this._runAllClipsBusy = true;
+        try {
+            for (const clip of clips) {
+                if (this._destroyed || !this._timeline) break;
+                await this._runClipDownstream(clip);
+            }
+        } finally {
+            this._runAllClipsBusy = false;
+        }
+    }
+
     _safeProjectFilename(fallback = T("untitled_project")) {
         const projectName = String(this.projectNameInput?.value || fallback).trim() || fallback;
         return projectName
@@ -8473,6 +8536,14 @@ export class CapTimelineEditorApp {
         this.allGenPreviewBtn.addEventListener("click", () => this._toggleAllGeneratedPreview());
         tl.toolbarEl.appendChild(this.allGenPreviewBtn);
         this._updateAllGeneratedPreviewButton();
+
+        this.runMenuBtn = document.createElement("button");
+        this.runMenuBtn.type = "button";
+        this.runMenuBtn.className = "tl-btn tl-btn-run-menu";
+        this.runMenuBtn.textContent = T("run_btn_caret");
+        this.runMenuBtn.title = T("run_menu_title");
+        this.runMenuBtn.addEventListener("click", (e) => this._showRunMenu(e));
+        tl.toolbarEl.appendChild(this.runMenuBtn);
 
         // Undo/redo is buttons-only, not a keyboard shortcut — Ctrl+Z can't
         // be reliably intercepted here (ComfyUI's own graph-undo shortcut
