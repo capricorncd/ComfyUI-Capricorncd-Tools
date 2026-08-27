@@ -158,11 +158,20 @@ def _collect_plan(project: dict, ignore_audio_tracks: bool = False) -> dict:
             source_in = _ms(source.get("in_ms"))
             end = start + duration
             end_ms = max(end_ms, end)
+            dur_sec = duration / 1000.0
+            fade_in_sec = max(0.0, _ms(clip.get("fade_in_ms")) / 1000.0)
+            fade_out_sec = max(0.0, _ms(clip.get("fade_out_ms")) / 1000.0)
+            if fade_in_sec + fade_out_sec > dur_sec and (fade_in_sec + fade_out_sec) > 0:
+                scale = dur_sec / (fade_in_sec + fade_out_sec)
+                fade_in_sec *= scale
+                fade_out_sec = max(0.0, dur_sec - fade_in_sec)
             audio_segs.append({
                 "path": path,
                 "start_sec": start / 1000.0,
-                "duration_sec": duration / 1000.0,
+                "duration_sec": dur_sec,
                 "source_in_sec": source_in / 1000.0,
+                "fade_in_sec": fade_in_sec,
+                "fade_out_sec": fade_out_sec,
             })
 
     if not video_segs:
@@ -443,10 +452,19 @@ def compose_timeline_project(
         idx = audio_input_offset + j
         delay_ms = max(0, int(round(seg["start_sec"] * 1000)))
         label = f"aa{j}"
-        filters.append(
+        chain = (
             f"[{idx}:a]atrim=start={seg['source_in_sec']:.6f}:duration={seg['duration_sec']:.6f},"
-            f"asetpts=PTS-STARTPTS,adelay={delay_ms}|{delay_ms}[{label}]"
+            f"asetpts=PTS-STARTPTS"
         )
+        fade_in = float(seg.get("fade_in_sec") or 0.0)
+        fade_out = float(seg.get("fade_out_sec") or 0.0)
+        if fade_in > 0:
+            chain += f",afade=t=in:st=0:d={fade_in:.6f}"
+        if fade_out > 0:
+            out_st = max(0.0, float(seg["duration_sec"]) - fade_out)
+            chain += f",afade=t=out:st={out_st:.6f}:d={fade_out:.6f}"
+        chain += f",adelay={delay_ms}|{delay_ms}[{label}]"
+        filters.append(chain)
         amix_labels.append(label)
 
     map_args: list[str] = ["-map", f"[{video_out_label}]"]

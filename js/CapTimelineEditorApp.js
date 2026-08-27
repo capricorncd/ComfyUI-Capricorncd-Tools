@@ -223,6 +223,8 @@ function defaultAudioMeta(trackIndex = 2) {
         visible: true,
         sourceDuration: 0,
         trimIn: 0,
+        fadeInMs: 0,
+        fadeOutMs: 0,
         trackIndex,
     };
 }
@@ -5582,6 +5584,40 @@ export class CapTimelineEditorApp {
         return out;
     }
 
+    /** Linear fade envelope for Web Audio playback of an audio-track clip. */
+    _scheduleAudioFadeGain(gainNode, when, localStart, playDur, fadeIn, fadeOut, clipDur) {
+        const clamp01 = (v) => Math.max(0, Math.min(1, v));
+        const gAt = (t) => {
+            let g = 1;
+            if (fadeIn > 0 && t < fadeIn) g = Math.min(g, t / fadeIn);
+            if (fadeOut > 0 && t > clipDur - fadeOut) {
+                g = Math.min(g, Math.max(0, (clipDur - t) / fadeOut));
+            }
+            return clamp01(g);
+        };
+        const localEnd = localStart + playDur;
+        const pts = [localStart, localEnd];
+        if (fadeIn > 0 && fadeIn > localStart && fadeIn < localEnd) pts.push(fadeIn);
+        const fadeOutStart = clipDur - fadeOut;
+        if (fadeOut > 0 && fadeOutStart > localStart && fadeOutStart < localEnd) {
+            pts.push(fadeOutStart);
+        }
+        pts.sort((a, b) => a - b);
+        const uniq = [];
+        for (const p of pts) {
+            const r = Math.round(p * 1e6) / 1e6;
+            if (!uniq.length || Math.abs(uniq[uniq.length - 1] - r) > 1e-6) uniq.push(r);
+        }
+        gainNode.gain.cancelScheduledValues(when);
+        for (let i = 0; i < uniq.length; i++) {
+            const localT = uniq[i];
+            const t = when + (localT - localStart);
+            const g = gAt(localT);
+            if (i === 0) gainNode.gain.setValueAtTime(g, Math.max(when, t));
+            else gainNode.gain.linearRampToValueAtTime(g, Math.max(when, t));
+        }
+    }
+
     _startAudioPlayback() {
         this._stopAudioPlayback();
         const tl = this._timeline;
@@ -5596,21 +5632,32 @@ export class CapTimelineEditorApp {
 
             const src = ctx.createBufferSource();
             src.buffer = clip._audioBuffer;
-            src.connect(ctx.destination);
+            const gain = ctx.createGain();
+            src.connect(gain);
+            gain.connect(ctx.destination);
 
-            let when, offset, dur;
+            let when, offset, dur, localStart;
             if (clip.startTime <= startPlayhead) {
                 when = startCtxTime;
-                offset = clip.sourceOffset + (startPlayhead - clip.startTime);
+                localStart = startPlayhead - clip.startTime;
+                offset = clip.sourceOffset + localStart;
                 dur = clip.endTime - startPlayhead;
             } else {
                 when = startCtxTime + (clip.startTime - startPlayhead);
+                localStart = 0;
                 offset = clip.sourceOffset;
                 dur = clip.duration;
             }
+            const fadeIn = clip.track?.type === "audio" ? Math.max(0, clip.fadeIn || 0) : 0;
+            const fadeOut = clip.track?.type === "audio" ? Math.max(0, clip.fadeOut || 0) : 0;
+            if (fadeIn > 0 || fadeOut > 0) {
+                this._scheduleAudioFadeGain(gain, when, localStart, dur, fadeIn, fadeOut, clip.duration);
+            } else {
+                gain.gain.setValueAtTime(1, when);
+            }
             try {
                 src.start(when, Math.max(0, offset), Math.max(0.001, dur));
-                sources.push(src);
+                sources.push({ src, gain });
             } catch { /* clip's buffer/offset out of range — skip it */ }
         }
         this._activeAudioSources = sources;
@@ -5621,9 +5668,14 @@ export class CapTimelineEditorApp {
             cancelAnimationFrame(this._seekAudioRaf);
             this._seekAudioRaf = null;
         }
-        for (const src of this._activeAudioSources) {
+        for (const row of this._activeAudioSources) {
+            const src = row?.src ?? row;
+            const gain = row?.gain;
             try { src.stop(); } catch { /* already stopped */ }
             try { src.disconnect(); } catch { /* already disconnected */ }
+            if (gain) {
+                try { gain.disconnect(); } catch { /* already disconnected */ }
+            }
         }
         this._activeAudioSources = [];
     }
@@ -5901,12 +5953,20 @@ export class CapTimelineEditorApp {
                 color: track.color,
             });
             clip._audioBuffer = buffer;
+            const fadeInMs = Math.max(0, Number(c.fade_in_ms) || 0);
+            const fadeOutMs = Math.max(0, Number(c.fade_out_ms) || 0);
+            clip.fadeIn = fadeInMs / 1000;
+            clip.fadeOut = fadeOutMs / 1000;
+            clip._clampFades?.();
+            clip._updateFadeUI?.();
             this._meta.set(clip.id, {
                 ...defaultAudioMeta(trackIdx),
                 muted: !!c.muted,
                 visible: c.visible !== false,
                 sourceDuration: sourceDur,
                 trimIn,
+                fadeInMs,
+                fadeOutMs,
                 mediaId: audioMedia?.id || "",
             });
             this._decorateClip(clip);
@@ -7324,6 +7384,8 @@ export class CapTimelineEditorApp {
             color: clip.color,
             sourceDuration: clip.sourceDuration,
             sourceOffset: clip.sourceOffset || 0,
+            fadeIn: isAudio ? Math.max(0, clip.fadeIn || 0) : 0,
+            fadeOut: isAudio ? Math.max(0, clip.fadeOut || 0) : 0,
             hasAudio: !!clip.hasAudio,
             waveformPeaks: clip._waveform?.length ? clip._waveform.slice() : null,
             audioBuffer: clip._audioBuffer ?? null,
@@ -7451,6 +7513,8 @@ export class CapTimelineEditorApp {
                 color: snap.color ?? track.color,
                 sourceDuration: snap.sourceDuration,
                 sourceOffset: snap.sourceOffset || 0,
+                fadeIn: track.type === "audio" ? Math.max(0, snap.fadeIn || 0) : 0,
+                fadeOut: track.type === "audio" ? Math.max(0, snap.fadeOut || 0) : 0,
                 hasAudio: !!snap.hasAudio,
                 waveformPeaks: snap.waveformPeaks || undefined,
             });
@@ -7458,6 +7522,10 @@ export class CapTimelineEditorApp {
             clip._audioBuffer = snap.audioBuffer ?? null;
             const meta = this._cloneClipMeta(snap.meta);
             meta.trackIndex = this._trackIndex(track);
+            if (track.type === "audio") {
+                meta.fadeInMs = Math.round((clip.fadeIn || 0) * 1000);
+                meta.fadeOutMs = Math.round((clip.fadeOut || 0) * 1000);
+            }
             this._meta.set(clip.id, meta);
             this._decorateClip(clip);
             created.push(clip);
@@ -7811,6 +7879,8 @@ export class CapTimelineEditorApp {
         const clipId = clip.id;
         const clipStart = clip.startTime;
         const sourceOffset = clip.sourceOffset || 0;
+        const fadeIn = isAudio ? Math.max(0, clip.fadeIn || 0) : 0;
+        const fadeOut = isAudio ? Math.max(0, clip.fadeOut || 0) : 0;
         const shared = {
             name: clip.name,
             src: clip.src,
@@ -7830,9 +7900,18 @@ export class CapTimelineEditorApp {
             startTime: clipStart,
             duration: leftDur,
             sourceOffset,
+            fadeIn: Math.min(fadeIn, leftDur),
+            fadeOut: 0,
         });
         left._audioBuffer = audioBuffer;
-        this._meta.set(left.id, cloneMeta());
+        {
+            const lm = cloneMeta();
+            if (isAudio) {
+                lm.fadeInMs = Math.round((left.fadeIn || 0) * 1000);
+                lm.fadeOutMs = 0;
+            }
+            this._meta.set(left.id, lm);
+        }
 
         const right = tl.addClip(track.id, {
             ...shared,
@@ -7840,9 +7919,18 @@ export class CapTimelineEditorApp {
             duration: rightDur,
             // Keep media in sync: right half continues from the split point.
             sourceOffset: sourceOffset + leftDur,
+            fadeIn: 0,
+            fadeOut: Math.min(fadeOut, rightDur),
         });
         right._audioBuffer = audioBuffer;
-        this._meta.set(right.id, cloneMeta());
+        {
+            const rm = cloneMeta();
+            if (isAudio) {
+                rm.fadeInMs = 0;
+                rm.fadeOutMs = Math.round((right.fadeOut || 0) * 1000);
+            }
+            this._meta.set(right.id, rm);
+        }
 
         this._decorateClip(left);
         this._decorateClip(right);
@@ -8299,7 +8387,19 @@ export class CapTimelineEditorApp {
         tl.on("clip:movestart", () => this._beginPendingUndo());
         tl.on("clip:moveend", ({ moved }) => this._commitPendingUndo(moved));
         tl.on("clip:resizestart", () => this._beginPendingUndo());
-        tl.on("clip:resizeend", ({ moved }) => this._commitPendingUndo(moved));
+        tl.on("clip:resizeend", ({ clip, moved }) => {
+            this._syncAudioFadeMeta(clip);
+            this._commitPendingUndo(moved);
+        });
+        tl.on("clip:fadestart", () => this._beginPendingUndo());
+        tl.on("clip:fadeend", ({ clip, moved }) => {
+            this._syncAudioFadeMeta(clip);
+            this._commitPendingUndo(moved);
+        });
+        tl.on("clip:fade", ({ clip }) => {
+            if (this._selClip?.id === clip.id) this._updateClipInfoView(clip);
+            if (this._timeline?._playing) this._startAudioPlayback();
+        });
         tl.on("track:add", ({ track }) => {
             if (!this._trackInfo.has(track.id)) {
                 this._trackInfo.set(track.id, { trackIndex: this._nextTrackIndex() });
@@ -9192,6 +9292,16 @@ export class CapTimelineEditorApp {
         this._meta.set(this._selClip.id, m);
     }
 
+    /** Persist audio fade seconds from the Clip onto clip meta (ms). */
+    _syncAudioFadeMeta(clip) {
+        if (!clip || clip.track?.type !== "audio") return;
+        clip._clampFades?.();
+        const m = this._meta.get(clip.id) ?? defaultAudioMeta(this._trackIndex(clip.track));
+        m.fadeInMs = Math.round((clip.fadeIn || 0) * 1000);
+        m.fadeOutMs = Math.round((clip.fadeOut || 0) * 1000);
+        this._meta.set(clip.id, m);
+    }
+
     /** Build the complete, editable and lossless project document. */
     _buildProject() {
         const fps = this.getFps();
@@ -9242,6 +9352,12 @@ export class CapTimelineEditorApp {
                 if (Object.keys(source).length) row.source = source;
                 if (track.type === "audio") {
                     row.muted = !!m.muted;
+                    const fadeInMs = Math.max(0, Math.round((clip.fadeIn || 0) * 1000));
+                    const fadeOutMs = Math.max(0, Math.round((clip.fadeOut || 0) * 1000));
+                    if (fadeInMs > 0) row.fade_in_ms = fadeInMs;
+                    if (fadeOutMs > 0) row.fade_out_ms = fadeOutMs;
+                    m.fadeInMs = fadeInMs;
+                    m.fadeOutMs = fadeOutMs;
                 } else {
                     row.name = clip.name || DEFAULT_CLIP_NAME;
                     row.prompt = m.prompt ?? "";

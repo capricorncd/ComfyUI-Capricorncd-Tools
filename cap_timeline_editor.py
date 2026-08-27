@@ -280,6 +280,36 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             return waveform[:, :2]
         return waveform
 
+
+    def _apply_fade_envelope(
+        self,
+        seg,
+        sample_rate: int,
+        fade_in_ms: int,
+        fade_out_ms: int,
+        host_duration_ms: int,
+        host_local_start_ms: int,
+    ):
+        """Apply linear fade-in/out relative to the host audio clip timeline."""
+        if seg is None or seg.shape[-1] <= 0:
+            return seg
+        fade_in_ms = max(0, int(fade_in_ms or 0))
+        fade_out_ms = max(0, int(fade_out_ms or 0))
+        host_duration_ms = max(1, int(host_duration_ms or 1))
+        if fade_in_ms <= 0 and fade_out_ms <= 0:
+            return seg
+        n = int(seg.shape[-1])
+        t = torch.arange(n, dtype=torch.float32) * (1000.0 / float(sample_rate)) + float(host_local_start_ms)
+        gain = torch.ones(n, dtype=torch.float32)
+        if fade_in_ms > 0:
+            gain = torch.minimum(gain, (t / float(fade_in_ms)).clamp(0.0, 1.0))
+        if fade_out_ms > 0:
+            gain = torch.minimum(
+                gain,
+                ((float(host_duration_ms) - t) / float(fade_out_ms)).clamp(0.0, 1.0),
+            )
+        return seg * gain.view(1, 1, -1)
+
     def _mix_audio_rows(
         self,
         rows: list[dict],
@@ -353,6 +383,14 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             if seg.shape[1] != mixed.shape[1]:
                 seg = seg.repeat(1, mixed.shape[1], 1) if seg.shape[1] == 1 else seg[:, :mixed.shape[1]]
 
+            seg = self._apply_fade_envelope(
+                seg,
+                sample_rate,
+                int(row.get("fade_in_ms", 0) or 0),
+                int(row.get("fade_out_ms", 0) or 0),
+                int(row.get("host_duration_ms", 0) or 0),
+                int(row.get("host_local_start_ms", 0) or 0),
+            )
             pos = max(0, int(round(timeline_ms / 1000 * sample_rate)))
             seg_len = min(seg.shape[-1], n - pos)
             if seg_len <= 0:
@@ -507,6 +545,13 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             mid = _add_material(materials, seen, media, resolve_media)
             if not mid:
                 continue
+            host_duration_ms = max(1, audio_end - audio_start)
+            fade_in_ms = max(0, int(audio.get("fade_in_ms", 0) or 0))
+            fade_out_ms = max(0, int(audio.get("fade_out_ms", 0) or 0))
+            if fade_in_ms + fade_out_ms > host_duration_ms:
+                scale = host_duration_ms / float(fade_in_ms + fade_out_ms)
+                fade_in_ms = int(fade_in_ms * scale)
+                fade_out_ms = max(0, host_duration_ms - fade_in_ms)
             result.append({
                 "source_clip_id": str(audio.get("id", "")),
                 "source_kind": str(source.get("kind") or "audio"),
@@ -514,6 +559,10 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "source_start_ms": source_in + overlap_start - audio_start,
                 "source_end_ms": source_in + overlap_end - audio_start,
                 "clip_offset_ms": overlap_start - start_ms,
+                "fade_in_ms": fade_in_ms,
+                "fade_out_ms": fade_out_ms,
+                "host_duration_ms": host_duration_ms,
+                "host_local_start_ms": overlap_start - audio_start,
             })
         return result
 

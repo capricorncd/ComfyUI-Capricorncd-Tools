@@ -21,6 +21,9 @@ export class Clip extends EventEmitter {
     this.thumbnail = data.thumbnail || null;
     this.color = data.color || null;
     this.selected = false;
+    // Audio-track fade envelopes (seconds). Visual clips ignore these.
+    this.fadeIn = Math.max(0, Number(data.fadeIn) || 0);
+    this.fadeOut = Math.max(0, Number(data.fadeOut) || 0);
     // Only image/video clips with an embedded audio track show the
     // waveform row; plain images never do.
     this.hasAudio = !!data.hasAudio;
@@ -77,9 +80,159 @@ export class Clip extends EventEmitter {
     el.appendChild(lh);
     el.appendChild(body);
     el.appendChild(rh);
+    // Fade overlays sit on the clip root (above trim handles) so bottom
+    // corner hits don't steal into left/right duration resize.
+    if (this.track.type === 'audio') {
+      el.classList.add('tl-clip-audio');
+      this._buildFadeOverlays(el);
+    }
 
     this._setupDrag(el, body, lh, rh);
     return el;
+  }
+
+  /** CapCut-style fade-in / fade-out overlays + drag handles (audio only). */
+  _buildFadeOverlays(host) {
+    const mk = (side) => {
+      const wrap = document.createElement('div');
+      wrap.className = `tl-clip-fade tl-clip-fade-${side}`;
+      const diag = document.createElement('div');
+      diag.className = 'tl-clip-fade-diag';
+      const handle = document.createElement('div');
+      handle.className = 'tl-clip-fade-handle';
+      handle.title = side === 'in' ? 'Fade in' : 'Fade out';
+      wrap.appendChild(diag);
+      wrap.appendChild(handle);
+      handle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.track.locked) return;
+        this._dragFade(e, side);
+      });
+      return wrap;
+    };
+    this._fadeInEl = mk('in');
+    this._fadeOutEl = mk('out');
+    host.appendChild(this._fadeInEl);
+    host.appendChild(this._fadeOutEl);
+    this._clampFades();
+    this._updateFadeUI();
+  }
+
+  _clampFades() {
+    if (this.track.type !== 'audio') {
+      this.fadeIn = 0;
+      this.fadeOut = 0;
+      return;
+    }
+    const d = Math.max(0, this.duration);
+    let fi = Math.max(0, this.fadeIn || 0);
+    let fo = Math.max(0, this.fadeOut || 0);
+    if (fi + fo > d) {
+      if (d <= 0) {
+        fi = 0;
+        fo = 0;
+      } else {
+        const s = d / (fi + fo);
+        fi *= s;
+        fo *= s;
+      }
+    }
+    this.fadeIn = fi;
+    this.fadeOut = fo;
+  }
+
+  _updateFadeUI() {
+    if (!this._fadeInEl || !this._fadeOutEl) return;
+    const pps = this.track.timeline.pixelsPerSecond;
+    const fiPx = Math.max(0, (this.fadeIn || 0) * pps);
+    const foPx = Math.max(0, (this.fadeOut || 0) * pps);
+    const inActive = fiPx > 0.5;
+    const outActive = foPx > 0.5;
+    // When fade is 0, park a small hit strip inset past the trim handles
+    // (9px) so duration resize and fade don't fight over the same corner.
+    const parkW = 14;
+    this._fadeInEl.style.width = `${inActive ? Math.max(fiPx, 1) : parkW}px`;
+    this._fadeOutEl.style.width = `${outActive ? Math.max(foPx, 1) : parkW}px`;
+    this._fadeInEl.classList.toggle('active', inActive);
+    this._fadeOutEl.classList.toggle('active', outActive);
+    this._fadeInEl.classList.toggle('parked', !inActive);
+    this._fadeOutEl.classList.toggle('parked', !outActive);
+    const inHandle = this._fadeInEl.querySelector('.tl-clip-fade-handle');
+    const outHandle = this._fadeOutEl.querySelector('.tl-clip-fade-handle');
+    if (inHandle) {
+      if (inActive) {
+        inHandle.style.left = 'auto';
+        inHandle.style.right = '0';
+      } else {
+        // Inset past left trim handle.
+        inHandle.style.left = '2px';
+        inHandle.style.right = 'auto';
+      }
+    }
+    if (outHandle) {
+      if (outActive) {
+        outHandle.style.left = '0';
+        outHandle.style.right = 'auto';
+      } else {
+        outHandle.style.left = 'auto';
+        outHandle.style.right = '2px';
+      }
+    }
+  }
+
+  _dragFade(e, side) {
+    const tl = this.track.timeline;
+    const pps = tl.pixelsPerSecond;
+    const startX = e.clientX;
+    const origIn = this.fadeIn || 0;
+    const origOut = this.fadeOut || 0;
+    const dur = this.duration;
+    let lastEvent = e;
+    let raf = 0;
+    const MOVE_THRESHOLD_PX = 2;
+    let dragging = false;
+
+    const apply = () => {
+      raf = 0;
+      if (!dragging) return;
+      const dx = (lastEvent.clientX - startX) / pps;
+      if (side === 'in') {
+        const maxIn = Math.max(0, dur - origOut);
+        this.fadeIn = this._snap(clamp(origIn + dx, 0, maxIn));
+      } else {
+        const maxOut = Math.max(0, dur - origIn);
+        this.fadeOut = this._snap(clamp(origOut - dx, 0, maxOut));
+      }
+      this._clampFades();
+      this._updateFadeUI();
+      tl.emit('clip:fade', { clip: this, track: this.track, side });
+    };
+
+    const onMove = (ev) => {
+      lastEvent = ev;
+      if (!dragging) {
+        if (Math.abs(ev.clientX - startX) < MOVE_THRESHOLD_PX) return;
+        dragging = true;
+        this.el.classList.add('fading', 'no-transition');
+        tl.emit('clip:fadestart', { clip: this, track: this.track, side });
+      }
+      if (!raf) raf = requestAnimationFrame(apply);
+    };
+
+    const onUp = () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (!dragging) return;
+      apply();
+      this.el.classList.remove('fading', 'no-transition');
+      const moved = side === 'in'
+        ? this.fadeIn !== origIn
+        : this.fadeOut !== origOut;
+      tl.emit('clip:fadeend', { clip: this, track: this.track, side, moved });
+    };
+
+    bindDragSession(e, { onMove, onEnd: onUp });
   }
 
   /**
@@ -336,6 +489,7 @@ export class Clip extends EventEmitter {
         newEnd = clamp(newEnd, minEnd, maxEnd);
         this.duration = newEnd - origStart;
       }
+      this._clampFades();
       this._applyPosition();
       const edge = side === 'left' ? this.startTime : this.endTime;
       const guide = tl._alignedClipEdge(this, edge);
@@ -376,6 +530,8 @@ export class Clip extends EventEmitter {
     const color = this.color || this.track.color;
     this.el.style.cssText = `left:${this.startTime * pps}px;width:${this.duration * pps}px;--clip-color:${color}`;
     if (this._durEl) this._durEl.textContent = this.track.timeline.formatTime(this.duration);
+    this._clampFades();
+    this._updateFadeUI();
   }
 
   setSelected(sel) {

@@ -40,6 +40,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 - Multiple tracks (visual and audio); add tracks from the toolbar menu
 - Per-track: lock, visibility, mute (audio)
 - Drag / resize clips; multi-select with `Ctrl+Click`
+- Audio-track clips: drag the small corner handles to set linear **fade-in / fade-out** (diagonal overlay); stored as `fade_in_ms` / `fade_out_ms` and applied in playback, `clips_audio` mix, and Compose Video
 - Package clips and material insert at the playhead
 - Undo / Redo toolbar buttons (editor-local history)
 - Zoom: `Ctrl+Wheel`; pan: `Alt+Wheel`
