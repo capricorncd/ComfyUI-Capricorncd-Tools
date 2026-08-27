@@ -671,6 +671,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "head_extend_sec": head_sec,
                 "tail_extend_sec": tail_sec,
                 "generate_preview_video": bool(clip.get("generate_preview_video", False)),
+                "second_sample": bool(clip.get("second_sample", False)),
                 "images": _clip_image_refs(entries),
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
                 "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),

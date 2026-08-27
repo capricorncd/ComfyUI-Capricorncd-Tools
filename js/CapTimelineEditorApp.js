@@ -161,6 +161,7 @@ function defaultImageMeta(trackIndex = 0) {
         headExtendSec: 0,
         tailExtendSec: 0,
         generatePreviewVideo: false,
+        secondSample: false,
         trackIndex,
         clipRole: "multi_ref",
         clipRoleCustom: "",
@@ -1769,6 +1770,10 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-gen-preview-video" type="checkbox" disabled />
                   <span>${T("gen_preview_video_label")}</span>
                 </label>
+                <label class="cat-te-clip-setting-check">
+                  <input class="cat-te-second-sample" type="checkbox" disabled />
+                  <span>${T("second_sample_label")}</span>
+                </label>
                 <label class="cat-te-clip-setting-check cat-te-use-global">
                   <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
                   <span>Use Global</span>
@@ -1896,10 +1901,10 @@ export class CapTimelineEditorApp {
               </div>
             </div>
           </div>
-          <div class="cat-te-modal-backdrop cat-te-output-videos-modal" hidden>
+          <div class="cat-te-floating-panel cat-te-output-videos-modal" hidden>
             <div class="cat-te-modal cat-te-output-videos-dialog">
-              <div class="cat-te-modal-header">
-                <span>${T("linked_generated_videos_title")}</span>
+              <div class="cat-te-modal-header cat-te-output-videos-drag">
+                <span class="cat-te-output-videos-title">${T("linked_generated_videos_title")}</span>
                 <button type="button" class="cat-te-modal-close cat-te-output-videos-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-output-videos-toolbar">
@@ -2209,6 +2214,7 @@ export class CapTimelineEditorApp {
         this.headExtendInput = el.querySelector(".cat-te-head-extend");
         this.tailExtendInput = el.querySelector(".cat-te-tail-extend");
         this.genPreviewVideoCb = el.querySelector(".cat-te-gen-preview-video");
+        this.secondSampleCb = el.querySelector(".cat-te-second-sample");
         this.clipRoleSelect = el.querySelector(".cat-te-clip-role");
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
@@ -2273,6 +2279,8 @@ export class CapTimelineEditorApp {
         this.outputVideosBody = el.querySelector(".cat-te-output-videos-body");
         this.outputVideosFilter = el.querySelector(".cat-te-output-videos-filter");
         this.outputVideosTimeButtons = el.querySelectorAll(".cat-te-output-videos-time-btn");
+        this.outputVideosTitle = el.querySelector(".cat-te-output-videos-title");
+        this.outputVideosDragHandle = el.querySelector(".cat-te-output-videos-drag");
         this.composeModal = el.querySelector(".cat-te-compose-modal");
         this.composePrefixInput = el.querySelector(".cat-te-compose-prefix");
         this.composeFilenameInput = el.querySelector(".cat-te-compose-filename");
@@ -2437,6 +2445,7 @@ export class CapTimelineEditorApp {
             this.headExtendInput.addEventListener("change", () => this._onHeadExtendChange());
             this.tailExtendInput?.addEventListener("change", () => this._onTailExtendChange());
             this.genPreviewVideoCb?.addEventListener("change", () => this._onGenPreviewVideoChange());
+            this.secondSampleCb?.addEventListener("change", () => this._onSecondSampleChange());
         }
         this.clipRoleSelect?.addEventListener("change", () => this._onClipRoleChange());
         this.clipRoleCustomInput?.addEventListener("change", () => this._onClipRoleCustomChange());
@@ -2491,6 +2500,7 @@ export class CapTimelineEditorApp {
                 this._renderOutputVideosPicker();
             });
         });
+        this._bindOutputVideosPanelDrag();
         el.querySelector(".cat-te-compose-close")?.addEventListener("click", () => this._closeComposeModal());
         el.querySelector(".cat-te-compose-cancel")?.addEventListener("click", () => this._closeComposeModal());
         this.composeRunBtn?.addEventListener("click", () => {
@@ -2555,6 +2565,11 @@ export class CapTimelineEditorApp {
                 return;
             }
             if (e.key === "Escape") {
+                if (this.outputVideosModal && !this.outputVideosModal.hidden) {
+                    this._closeOutputVideosPicker();
+                    e.stopPropagation();
+                    return;
+                }
                 if (this._modalsBlockFileDrop()) { e.stopPropagation(); return; }
                 if (this._removeCtxMenu()) { e.stopPropagation(); return; }
                 if (this._closeMediaFilterPanel()) { e.stopPropagation(); return; }
@@ -4112,20 +4127,88 @@ export class CapTimelineEditorApp {
 
     async _openOutputVideosPicker(clip) {
         if (!this.outputVideosModal || !clip || clip.track?.type === "audio") return;
+        const alreadyOpen = !this.outputVideosModal.hidden;
         this._outputVideosClipId = clip.id;
-        this.outputVideosModal.hidden = false;
-        if (this.outputVideosFilter) this.outputVideosFilter.value = "";
-        this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
-        this.outputVideosTimeButtons?.forEach((b) => b.classList.toggle("is-active", b.dataset.range === this._outputVideosTimeRange));
-        if (this.outputVideosBody) this.outputVideosBody.textContent = T("loading_ellipsis");
-        try {
-            const response = await fetch(api.apiURL("/audio_keyframe_timeline/output_videos"));
-            const data = await response.json();
-            this._outputVideosCache = Array.isArray(data.files) ? data.files : [];
-        } catch {
-            this._outputVideosCache = [];
+        this._syncOutputVideosPickerTitle(clip);
+        if (!alreadyOpen) {
+            this._ensureOutputVideosPanelPos();
+            this.outputVideosModal.hidden = false;
+            if (this.outputVideosFilter) this.outputVideosFilter.value = "";
+            this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
+            this.outputVideosTimeButtons?.forEach((b) => b.classList.toggle("is-active", b.dataset.range === this._outputVideosTimeRange));
+            if (this.outputVideosBody) this.outputVideosBody.textContent = T("loading_ellipsis");
+            try {
+                const response = await fetch(api.apiURL("/audio_keyframe_timeline/output_videos"));
+                const data = await response.json();
+                this._outputVideosCache = Array.isArray(data.files) ? data.files : [];
+            } catch {
+                this._outputVideosCache = [];
+            }
         }
+        // Drop stale target if the open request finished after a newer selection.
+        if (this._outputVideosClipId !== clip.id) return;
         this._renderOutputVideosPicker();
+    }
+
+    _retargetOutputVideosPickerFromSelection() {
+        if (!this.outputVideosModal || this.outputVideosModal.hidden) return;
+        const clip = this._selClip;
+        if (!clip || clip.track?.type === "audio") return;
+        if (this._outputVideosClipId === clip.id) {
+            this._syncOutputVideosPickerTitle(clip);
+            return;
+        }
+        this._outputVideosClipId = clip.id;
+        this._syncOutputVideosPickerTitle(clip);
+        this._renderOutputVideosPicker();
+    }
+
+    _syncOutputVideosPickerTitle(clip = null) {
+        if (!this.outputVideosTitle) return;
+        const target = clip || this._findClipById(this._outputVideosClipId);
+        const name = String(target?.name || "").trim();
+        this.outputVideosTitle.textContent = name
+            ? `${T("linked_generated_videos_title")} · ${name}`
+            : T("linked_generated_videos_title");
+    }
+
+    _ensureOutputVideosPanelPos() {
+        const panel = this.outputVideosModal;
+        if (!panel || panel.style.left || panel.style.top) return;
+        const width = Math.min(560, Math.max(280, window.innerWidth - 48));
+        const left = Math.max(16, window.innerWidth - width - 24);
+        const top = Math.max(16, Math.min(120, window.innerHeight - 200));
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+    }
+
+    _bindOutputVideosPanelDrag() {
+        const panel = this.outputVideosModal;
+        const handle = this.outputVideosDragHandle;
+        if (!panel || !handle || handle._catTeDragBound) return;
+        handle._catTeDragBound = true;
+        handle.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return;
+            if (e.target.closest?.("button, input, select, textarea, a")) return;
+            e.preventDefault();
+            const rect = panel.getBoundingClientRect();
+            const ox = e.clientX - rect.left;
+            const oy = e.clientY - rect.top;
+            panel.classList.add("is-dragging");
+            const onMove = (ev) => {
+                const left = Math.min(window.innerWidth - 48, Math.max(8, ev.clientX - ox));
+                const top = Math.min(window.innerHeight - 48, Math.max(8, ev.clientY - oy));
+                panel.style.left = `${left}px`;
+                panel.style.top = `${top}px`;
+            };
+            const onUp = () => {
+                panel.classList.remove("is-dragging");
+                window.removeEventListener("mousemove", onMove, true);
+                window.removeEventListener("mouseup", onUp, true);
+            };
+            window.addEventListener("mousemove", onMove, true);
+            window.addEventListener("mouseup", onUp, true);
+        });
     }
 
     _closeOutputVideosPicker() {
@@ -4134,6 +4217,7 @@ export class CapTimelineEditorApp {
         this._outputVideosThumbIo = null;
         if (this.outputVideosModal) this.outputVideosModal.hidden = true;
         this.outputVideosBody?.replaceChildren();
+        this._syncOutputVideosPickerTitle(null);
     }
 
     _renderOutputVideosPicker() {
@@ -4141,6 +4225,7 @@ export class CapTimelineEditorApp {
         this._outputVideosThumbIo?.disconnect();
         this._outputVideosThumbIo = null;
         const clip = this._findClipById(this._outputVideosClipId);
+        this._syncOutputVideosPickerTitle(clip);
         const have = new Set(
             this._clipGeneratedVideos(clip ? this._ensureClipMeta(clip) : null)
                 .map((row) => normalizeOutputVideoPath(row.file) || row.file),
@@ -4198,7 +4283,11 @@ export class CapTimelineEditorApp {
             btn.append(thumb, name, tag);
             if (!added) {
                 btn.addEventListener("click", () => {
-                    if (!this._addGeneratedVideosToClip(clip, [file])) return;
+                    // Resolve target at click time so the floating panel can
+                    // retarget when the user selects another clip underneath.
+                    const target = this._findClipById(this._outputVideosClipId);
+                    if (!target || target.track?.type === "audio") return;
+                    if (!this._addGeneratedVideosToClip(target, [file])) return;
                     // In-place mark — avoid re-rendering hundreds of rows / re-queuing thumbs.
                     btn.disabled = true;
                     btn.classList.add("is-added");
@@ -6130,6 +6219,7 @@ export class CapTimelineEditorApp {
                 headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
                 tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
                 generatePreviewVideo: !!c.generate_preview_video,
+                secondSample: !!c.second_sample,
                 generatedVideos: this._generatedVideosFromJson(c),
                 previewMode: this._previewModeFromJson(c),
             };
@@ -6196,6 +6286,7 @@ export class CapTimelineEditorApp {
                 headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
                 tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
                 generatePreviewVideo: !!c.generate_preview_video,
+                secondSample: !!c.second_sample,
             items: (Array.isArray(c.items) && c.items.length
                 ? c.items.map(normalizeClipItem).filter(Boolean)
                 : clipItemsFromLegacy(vf, c.end_image, "video")
@@ -6240,6 +6331,7 @@ export class CapTimelineEditorApp {
             headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
             tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
             generatePreviewVideo: !!c.generate_preview_video,
+                secondSample: !!c.second_sample,
             items: (Array.isArray(c.items) && c.items.length
                 ? c.items.map(normalizeClipItem).filter(Boolean)
                 : clipItemsFromLegacy(img, c.end_image, "image")
@@ -6924,7 +7016,6 @@ export class CapTimelineEditorApp {
             || (this.mediaPreviewModal && !this.mediaPreviewModal.hidden)
             || (this.clipItemsModal && !this.clipItemsModal.hidden)
             || (this.genVideoModal && !this.genVideoModal.hidden)
-            || (this.outputVideosModal && !this.outputVideosModal.hidden)
             || (this.settingsModal && !this.settingsModal.hidden)
             || (this.aiOptimizeModal && !this.aiOptimizeModal.hidden)
             || (this.skillPickerModal && !this.skillPickerModal.hidden),
@@ -8455,6 +8546,7 @@ export class CapTimelineEditorApp {
             this._selClips = selected ?? tl.getSelectedClips();
             this._syncSelectedClip();
             this._updatePromptPanel();
+            this._retargetOutputVideosPickerFromSelection();
             this._overlay?.focus();
         });
         tl.on("clip:add", ({ clip }) => {
@@ -8705,12 +8797,14 @@ export class CapTimelineEditorApp {
         const head = el.querySelector(".cat-te-head-extend");
         const tail = el.querySelector(".cat-te-tail-extend");
         const gen = el.querySelector(".cat-te-gen-preview-video");
+        const secondSample = el.querySelector(".cat-te-second-sample");
         const role = el.querySelector(".cat-te-clip-role");
         const agent = el.querySelector(".cat-te-clip-agent");
         if (!head) return;
         this.headExtendInput = head;
         this.tailExtendInput = tail;
         this.genPreviewVideoCb = gen;
+        this.secondSampleCb = secondSample;
         this.clipRoleSelect = role;
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
@@ -8722,6 +8816,7 @@ export class CapTimelineEditorApp {
             head.addEventListener("change", () => this._onHeadExtendChange());
             tail?.addEventListener("change", () => this._onTailExtendChange());
             gen?.addEventListener("change", () => this._onGenPreviewVideoChange());
+            secondSample?.addEventListener("change", () => this._onSecondSampleChange());
         }
     }
 
@@ -8742,6 +8837,10 @@ export class CapTimelineEditorApp {
         if (this.genPreviewVideoCb) {
             this.genPreviewVideoCb.disabled = disabled;
             this.genPreviewVideoCb.checked = enabled && !!m?.generatePreviewVideo;
+        }
+        if (this.secondSampleCb) {
+            this.secondSampleCb.disabled = disabled;
+            this.secondSampleCb.checked = enabled && !!m?.secondSample;
         }
         if (this.clipRoleSelect) {
             this.clipRoleSelect.disabled = disabled;
@@ -9412,6 +9511,14 @@ export class CapTimelineEditorApp {
         this._meta.set(this._selClip.id, m);
     }
 
+    _onSecondSampleChange() {
+        if (!this._selClip || this.secondSampleCb?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.secondSample = !!this.secondSampleCb.checked;
+        this._meta.set(this._selClip.id, m);
+    }
+
     /** Persist audio fade seconds from the Clip onto clip meta (ms). */
     _syncAudioFadeMeta(clip) {
         if (!clip || clip.track?.type !== "audio") return;
@@ -9489,6 +9596,7 @@ export class CapTimelineEditorApp {
                     row.head_extend_sec = Math.max(0, Math.round(Number(m.headExtendSec) || 0));
                     row.tail_extend_sec = Math.max(0, Math.round(Number(m.tailExtendSec) || 0));
                     row.generate_preview_video = !!m.generatePreviewVideo;
+                    row.second_sample = !!m.secondSample;
                     row.clip_role = m.clipRole || "multi_ref";
                     row.clip_role_custom = m.clipRole === "other" ? (m.clipRoleCustom || "") : "";
                     row.agent = m.agent || "MiniMaxH3";

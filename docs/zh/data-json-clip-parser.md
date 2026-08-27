@@ -16,6 +16,7 @@
 - 有效提示词（优先使用每片段提示词，无则回退到全局提示词）
 - `run_prefix`（本次运行时间戳前缀）
 - `generate_preview_video`
+- `second_sample`
 - `from_start` / `from_preview_start`（`FROM_MMSS_帧_总帧数`，≥1 小时为 `FROM_HHMMSS_…`）
 
 节点会自动识别上游 JSON 格式：
@@ -106,6 +107,7 @@
 | `prompt` | STRING | 每片段提示词；无则使用 `global_prompt` |
 | `run_prefix` | STRING | 顶层 `run_prefix`（`YYYYMMDD_HHMMSS`），可作统一文件名前缀 |
 | `generate_preview_video` | BOOLEAN | 是否另生成预览时长视频 |
+| `second_sample` | BOOLEAN | 是否启用二次采样 |
 | `from_start` | STRING | 扩展后开始时刻标签，如 `FROM_0010_12_480`；负时间用 `FROM_N…` |
 | `from_preview_start` | STRING | 预览（时间轴原始）开始时刻标签，如 `FROM_0012_12_432` |
 | `seq_filename_prefix` | STRING | Seq To Video 前缀（`run_timestamp/from_start` 或 `…/index`） |

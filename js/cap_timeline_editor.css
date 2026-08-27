@@ -2411,6 +2411,48 @@ body.cat-te-media-dnd-over-tl {
     display: flex;
     flex-direction: column;
 }
+
+/* Floating (no dimming mask): keep timeline/clips clickable underneath. */
+.cat-te-floating-panel.cat-te-output-videos-modal {
+    position: fixed;
+    inset: auto;
+    left: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    z-index: 100010;
+    background: transparent;
+    display: block;
+    pointer-events: none;
+    align-items: unset;
+    justify-content: unset;
+}
+.cat-te-floating-panel.cat-te-output-videos-modal[hidden] {
+    display: none !important;
+}
+.cat-te-floating-panel.cat-te-output-videos-modal .cat-te-output-videos-dialog {
+    pointer-events: auto;
+    width: min(560px, 92vw);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65);
+}
+.cat-te-output-videos-drag {
+    cursor: move;
+    user-select: none;
+    gap: 8px;
+}
+.cat-te-output-videos-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cat-te-floating-panel.cat-te-output-videos-modal.is-dragging {
+    user-select: none;
+}
+.cat-te-floating-panel.cat-te-output-videos-modal.is-dragging .cat-te-output-videos-dialog {
+    opacity: 0.96;
+}
 .cat-te-output-videos-toolbar {
     padding: 8px 12px;
     border-bottom: 1px solid #2a2a48;
