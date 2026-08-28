@@ -438,15 +438,37 @@ export class CapTimelineEditorApp {
     }
 
     /**
-     * Ctrl+C / Ctrl+V / Ctrl+B / Ctrl+G — when the fullscreen editor is open.
+     * Editor shortcuts when fullscreen is open.
+     * Ctrl/Cmd+Z/Y are always swallowed so ComfyUI graph-undo cannot close
+     * the editor; outside text fields they drive the timeline undo/redo stack.
      * @returns {boolean} true if the event was handled
      */
     handleShortcutKey(e) {
         if (!this._overlay?.classList.contains("open")) return false;
         if (e.repeat) return false;
-        if (e.target?.closest?.("input, textarea, select")) return false;
-        if (!e.ctrlKey || e.shiftKey || e.altKey) return false;
+        const mod = e.ctrlKey || e.metaKey;
+        if (!mod || e.altKey) return false;
+
         const key = e.key?.toLowerCase();
+        const inField = !!e.target?.closest?.("input, textarea, select, [contenteditable='true']");
+
+        // Block ComfyUI undo/redo from tearing down the fullscreen shell.
+        if (key === "z" || key === "y") {
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+            if (inField) {
+                // Native text undo/redo — do not preventDefault.
+                return true;
+            }
+            e.preventDefault();
+            if (key === "y" || (key === "z" && e.shiftKey)) void this.redo();
+            else void this.undo();
+            return true;
+        }
+
+        if (inField) return false;
+        if (e.shiftKey) return false;
+
         if (key === "c") {
             if (!this._copySelectedClips()) return false;
             e.preventDefault();
@@ -8560,11 +8582,8 @@ export class CapTimelineEditorApp {
         this.runMenuBtn.addEventListener("click", (e) => this._showRunMenu(e));
         tl.toolbarEl.appendChild(this.runMenuBtn);
 
-        // Undo/redo is buttons-only, not a keyboard shortcut — Ctrl+Z can't
-        // be reliably intercepted here (ComfyUI's own graph-undo shortcut
-        // may be registered ahead of anything this extension attaches, so
-        // stopPropagation can't guarantee it loses the race) and was
-        // closing the fullscreen editor instead of undoing within it.
+        // Timeline undo/redo: Ctrl/Cmd+Z/Y are intercepted in handleShortcutKey
+        // (capture on window) so ComfyUI graph-undo cannot close this editor.
         this.undoBtn = document.createElement("button");
         this.undoBtn.type = "button";
         this.undoBtn.className = "tl-btn tl-btn-history";
