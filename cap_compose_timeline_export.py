@@ -12,7 +12,7 @@ from typing import Any
 import folder_paths
 
 from .cap_i18n import get_last_known_lang, t as _t
-from .cap_compose_clip_videos import _probe_has_audio, _run_ffmpeg
+from .cap_compose_clip_videos import _probe_has_audio, _probe_video_size, _run_ffmpeg
 from .cap_seq_to_video import _ffmpeg_path
 from .cap_timeline_project_io import _safe_name
 from .cap_watermark import resolve_font_path
@@ -85,7 +85,37 @@ def _clip_audio_file(clip: dict, media_map: dict[str, dict]) -> str:
     return file
 
 
-def _collect_plan(project: dict, ignore_audio_tracks: bool = False) -> dict:
+def _even_dim(value: int) -> int:
+    value = max(16, int(value))
+    return value if value % 2 == 0 else value - 1
+
+
+def _size_from_generated_videos(video_segs: list[dict], fallback_w: int, fallback_h: int) -> tuple[int, int]:
+    """Use the largest probed generated-video frame size (keeps 2nd-sample upscales)."""
+    best_w = 0
+    best_h = 0
+    best_area = 0
+    for seg in video_segs:
+        path = str(seg.get("path") or "")
+        if not path:
+            continue
+        size = _probe_video_size(path)
+        if not size:
+            continue
+        width, height = size
+        area = width * height
+        if area > best_area:
+            best_w, best_h, best_area = width, height, area
+    if best_w >= 16 and best_h >= 16:
+        return _even_dim(best_w), _even_dim(best_h)
+    return _even_dim(fallback_w), _even_dim(fallback_h)
+
+
+def _collect_plan(
+    project: dict,
+    ignore_audio_tracks: bool = False,
+    use_generated_video_size: bool = False,
+) -> dict:
     settings = _as_dict(project.get("settings"))
     width = max(16, int(settings.get("width") or 1344))
     height = max(16, int(settings.get("height") or 768))
@@ -176,6 +206,11 @@ def _collect_plan(project: dict, ignore_audio_tracks: bool = False) -> dict:
 
     if not video_segs:
         raise ValueError(_t("no_generated_videos_to_compose", get_last_known_lang()))
+
+    if use_generated_video_size:
+        width, height = _size_from_generated_videos(video_segs, width, height)
+    else:
+        width, height = _even_dim(width), _even_dim(height)
 
     return {
         "width": width,
@@ -372,13 +407,18 @@ def compose_timeline_project(
     output_path: str,
     ignore_audio_tracks: bool = False,
     watermark: dict | None = None,
+    use_generated_video_size: bool = False,
 ) -> dict:
     if not shutil.which("ffmpeg"):
         raise RuntimeError(_t("ffmpeg_not_found", get_last_known_lang()))
     if not isinstance(project, dict):
         raise ValueError(_t("invalid_project", get_last_known_lang()))
 
-    plan = _collect_plan(project, ignore_audio_tracks=bool(ignore_audio_tracks))
+    plan = _collect_plan(
+        project,
+        ignore_audio_tracks=bool(ignore_audio_tracks),
+        use_generated_video_size=bool(use_generated_video_size),
+    )
     width = plan["width"]
     height = plan["height"]
     fps = plan["fps"]
@@ -568,6 +608,7 @@ def compose_to_output(
     filename: str | None = None,
     ignore_audio_tracks: bool = False,
     watermark: dict | None = None,
+    use_generated_video_size: bool = False,
 ) -> dict:
     project_name = _as_dict(project).get("name") or "Untitled Project"
     leaf, subfolder, output_path = resolve_compose_output_path(
@@ -581,6 +622,7 @@ def compose_to_output(
         output_path,
         ignore_audio_tracks=bool(ignore_audio_tracks),
         watermark=watermark,
+        use_generated_video_size=bool(use_generated_video_size),
     )
     meta["filename"] = leaf
     meta["subfolder"] = subfolder

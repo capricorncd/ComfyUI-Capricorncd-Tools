@@ -348,6 +348,11 @@ export class CapTimelineEditorApp {
         this._outputVideosCache = [];
         this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
         this._outputVideosThumbIo = null;
+        this._outputVideoHoverEl = null;
+        this._outputVideoHoverVideo = null;
+        this._outputVideoHoverFile = null;
+        this._outputVideoHoverHideTimer = 0;
+        this._outputVideoHoverAnchor = null;
         this._composeBusy = false;
         this._watermark = this._defaultWatermark();
         this._systemFonts = null;
@@ -1105,6 +1110,7 @@ export class CapTimelineEditorApp {
         }
         if (this.composeFilenameInput) this.composeFilenameInput.value = this._composeDefaultFilename();
         if (this.composeIgnoreAudioCb) this.composeIgnoreAudioCb.checked = false;
+        if (this.composeUseGenSizeCb) this.composeUseGenSizeCb.checked = true;
         if (this.composeStatus) {
             this.composeStatus.hidden = true;
             this.composeStatus.textContent = "";
@@ -1166,6 +1172,9 @@ export class CapTimelineEditorApp {
                     filename_prefix: filenamePrefix,
                     filename,
                     ignore_audio_tracks: !!this.composeIgnoreAudioCb?.checked,
+                    use_generated_video_size: this.composeUseGenSizeCb
+                        ? !!this.composeUseGenSizeCb.checked
+                        : true,
                     watermark: this._watermark,
                 }),
             });
@@ -2034,6 +2043,18 @@ export class CapTimelineEditorApp {
                   </label>
                   <div class="cat-te-compose-check-row">
                     <label class="cat-te-compose-check">
+                      <input class="cat-te-compose-use-gen-size" type="checkbox" checked />
+                      <span>${T("use_generated_video_size_label")}</span>
+                    </label>
+                    <span class="cat-te-info-tip" tabindex="0" aria-label="${T("use_generated_video_size_info_aria")}">
+                      ${iconHtml("info", 12)}
+                      <span class="cat-te-info-tip-pop">
+                        ${T("use_generated_video_size_info_text")}
+                      </span>
+                    </span>
+                  </div>
+                  <div class="cat-te-compose-check-row">
+                    <label class="cat-te-compose-check">
                       <input class="cat-te-compose-ignore-audio" type="checkbox" />
                       <span>${T("ignore_audio_track_label")}</span>
                     </label>
@@ -2370,6 +2391,7 @@ export class CapTimelineEditorApp {
         this.composePrefixInput = el.querySelector(".cat-te-compose-prefix");
         this.composeFilenameInput = el.querySelector(".cat-te-compose-filename");
         this.composeIgnoreAudioCb = el.querySelector(".cat-te-compose-ignore-audio");
+        this.composeUseGenSizeCb = el.querySelector(".cat-te-compose-use-gen-size");
         this.composeStatus = el.querySelector(".cat-te-compose-status");
         this.composeRunBtn = el.querySelector(".cat-te-compose-run");
         this.composePreviewCanvas = el.querySelector(".cat-te-compose-preview-canvas");
@@ -2585,6 +2607,7 @@ export class CapTimelineEditorApp {
                 this._renderOutputVideosPicker();
             });
         });
+        this.outputVideosBody?.addEventListener("scroll", () => this._hideOutputVideoHoverPreview(), { passive: true });
         this._bindOutputVideosPanelDrag();
         el.querySelector(".cat-te-compose-close")?.addEventListener("click", () => this._closeComposeModal());
         el.querySelector(".cat-te-compose-cancel")?.addEventListener("click", () => this._closeComposeModal());
@@ -4313,6 +4336,7 @@ export class CapTimelineEditorApp {
     }
 
     _closeOutputVideosPicker() {
+        this._hideOutputVideoHoverPreview();
         this._outputVideosClipId = null;
         this._outputVideosThumbIo?.disconnect();
         this._outputVideosThumbIo = null;
@@ -4321,8 +4345,129 @@ export class CapTimelineEditorApp {
         this._syncOutputVideosPickerTitle(null);
     }
 
+    _cancelOutputVideoHoverHide() {
+        if (this._outputVideoHoverHideTimer) {
+            clearTimeout(this._outputVideoHoverHideTimer);
+            this._outputVideoHoverHideTimer = 0;
+        }
+    }
+
+    _scheduleOutputVideoHoverHide() {
+        this._cancelOutputVideoHoverHide();
+        this._outputVideoHoverHideTimer = setTimeout(() => {
+            this._outputVideoHoverHideTimer = 0;
+            this._hideOutputVideoHoverPreview();
+        }, 160);
+    }
+
+    _ensureOutputVideoHoverPreview() {
+        if (this._outputVideoHoverEl?.isConnected) return this._outputVideoHoverEl;
+        this._outputVideoHoverEl = null;
+        this._outputVideoHoverVideo = null;
+        const host = this._overlay || document.body;
+        const el = document.createElement("div");
+        el.className = "cat-te-output-video-hover-preview";
+        el.hidden = true;
+        const video = document.createElement("video");
+        video.className = "cat-te-output-video-hover-video";
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        video.muted = false;
+        video.setAttribute("controlsList", "nodownload");
+        el.appendChild(video);
+        el.addEventListener("mouseenter", () => this._cancelOutputVideoHoverHide());
+        el.addEventListener("mouseleave", () => this._scheduleOutputVideoHoverHide());
+        // Keep list-row click from firing when interacting with the popup.
+        el.addEventListener("mousedown", (e) => e.stopPropagation());
+        el.addEventListener("click", (e) => e.stopPropagation());
+        host.appendChild(el);
+        this._outputVideoHoverEl = el;
+        this._outputVideoHoverVideo = video;
+        return el;
+    }
+
+    _positionOutputVideoHoverPreview(anchorEl) {
+        const el = this._outputVideoHoverEl;
+        const video = this._outputVideoHoverVideo;
+        if (!el || el.hidden || !anchorEl?.isConnected) return;
+        const rect = anchorEl.getBoundingClientRect();
+        const vh = 200;
+        const vw = video?.videoWidth && video?.videoHeight
+            ? Math.max(120, Math.round(vh * (video.videoWidth / video.videoHeight)))
+            : Math.round(vh * 16 / 9);
+        const gap = 28;
+        const margin = 8;
+        // Keep the whole preview clear of the floating picker (usually docked right).
+        const panel = this.outputVideosModal?.getBoundingClientRect?.();
+        const preferLeft = (panel && Number.isFinite(panel.left) ? panel.left : rect.left) - vw - gap;
+        const preferRight = (panel && Number.isFinite(panel.right) ? panel.right : rect.right) + gap;
+        let left;
+        if (preferLeft >= margin) left = preferLeft;
+        else if (preferRight + vw <= window.innerWidth - margin) left = preferRight;
+        else left = margin;
+        left = Math.min(left, window.innerWidth - vw - margin);
+        left = Math.max(margin, left);
+        let top = rect.top + (rect.height - vh) / 2;
+        top = Math.min(Math.max(margin, top), window.innerHeight - vh - margin);
+        el.style.left = `${Math.round(left)}px`;
+        el.style.top = `${Math.round(top)}px`;
+        if (video) {
+            video.style.height = `${vh}px`;
+            video.style.width = `${vw}px`;
+        }
+    }
+
+    _hideOutputVideoHoverPreview() {
+        this._cancelOutputVideoHoverHide();
+        this._outputVideoHoverFile = null;
+        this._outputVideoHoverAnchor = null;
+        const video = this._outputVideoHoverVideo;
+        if (video) {
+            try { video.pause(); } catch { /* ignore */ }
+            video.removeAttribute("src");
+            video.load();
+        }
+        if (this._outputVideoHoverEl) this._outputVideoHoverEl.hidden = true;
+    }
+
+    _showOutputVideoHoverPreview(anchorEl, file) {
+        if (!anchorEl || !file) return;
+        this._cancelOutputVideoHoverHide();
+        if (this._outputVideoHoverFile === file && this._outputVideoHoverEl && !this._outputVideoHoverEl.hidden) {
+            this._outputVideoHoverAnchor = anchorEl;
+            this._positionOutputVideoHoverPreview(anchorEl);
+            return;
+        }
+        const el = this._ensureOutputVideoHoverPreview();
+        const video = this._outputVideoHoverVideo;
+        const url = this._outputVideoUrl(file);
+        if (!url || !video) return;
+        this._outputVideoHoverFile = file;
+        this._outputVideoHoverAnchor = anchorEl;
+        try { video.pause(); } catch { /* ignore */ }
+        video.onloadedmetadata = () => {
+            if (this._outputVideoHoverFile !== file) return;
+            this._positionOutputVideoHoverPreview(this._outputVideoHoverAnchor || anchorEl);
+        };
+        video.src = url;
+        video.muted = false;
+        video.volume = 1;
+        video.currentTime = 0;
+        el.hidden = false;
+        this._positionOutputVideoHoverPreview(anchorEl);
+        void video.play().catch(() => {
+            // Some browsers require a muted start; retry muted then unmute.
+            video.muted = true;
+            void video.play().then(() => {
+                video.muted = false;
+            }).catch(() => { /* ignore */ });
+        });
+    }
+
     _renderOutputVideosPicker() {
         if (!this.outputVideosBody) return;
+        this._hideOutputVideoHoverPreview();
         this._outputVideosThumbIo?.disconnect();
         this._outputVideosThumbIo = null;
         const clip = this._findClipById(this._outputVideosClipId);
@@ -4362,40 +4507,47 @@ export class CapTimelineEditorApp {
         for (const row of rows) {
             const file = row.file;
             const key = normalizeOutputVideoPath(file) || file;
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "cat-te-output-video-row";
+            const item = document.createElement("div");
+            item.className = "cat-te-output-video-row";
             const added = have.has(key);
-            if (added) {
-                btn.disabled = true;
-                btn.classList.add("is-added");
-            }
+            if (added) item.classList.add("is-added");
+            const thumbWrap = document.createElement("span");
+            thumbWrap.className = "cat-te-output-video-thumb-wrap";
             const thumb = document.createElement("img");
             thumb.className = "cat-te-output-video-thumb";
             thumb.alt = "";
             thumb.dataset.file = file;
-            const name = document.createElement("span");
+            const playHint = document.createElement("span");
+            playHint.className = "cat-te-output-video-thumb-play";
+            playHint.innerHTML = iconHtml("play", 12);
+            playHint.setAttribute("aria-hidden", "true");
+            thumbWrap.append(thumb, playHint);
+            thumbWrap.title = T("hover_preview_video_title");
+            thumbWrap.addEventListener("mouseenter", () => this._showOutputVideoHoverPreview(thumbWrap, file));
+            thumbWrap.addEventListener("mouseleave", () => this._scheduleOutputVideoHoverHide());
+            const name = document.createElement("button");
+            name.type = "button";
             name.className = "cat-te-output-video-name";
             name.textContent = file;
             name.title = file;
+            name.disabled = added;
             const tag = document.createElement("span");
             tag.className = "cat-te-output-video-tag";
             tag.textContent = added ? T("added_tag") : T("add_btn");
-            btn.append(thumb, name, tag);
+            item.append(thumbWrap, name, tag);
             if (!added) {
-                btn.addEventListener("click", () => {
-                    // Resolve target at click time so the floating panel can
-                    // retarget when the user selects another clip underneath.
+                const add = () => {
                     const target = this._findClipById(this._outputVideosClipId);
                     if (!target || target.track?.type === "audio") return;
                     if (!this._addGeneratedVideosToClip(target, [file])) return;
-                    // In-place mark — avoid re-rendering hundreds of rows / re-queuing thumbs.
-                    btn.disabled = true;
-                    btn.classList.add("is-added");
+                    item.classList.add("is-added");
+                    name.disabled = true;
                     tag.textContent = T("added_tag");
-                });
+                };
+                name.addEventListener("click", add);
+                tag.addEventListener("click", add);
             }
-            this.outputVideosBody.appendChild(btn);
+            this.outputVideosBody.appendChild(item);
             io.observe(thumb);
         }
     }
@@ -6330,7 +6482,8 @@ export class CapTimelineEditorApp {
             this._normalizeVisualMeta(clip, meta, { seedFromClip: false });
             this._meta.set(clip.id, meta);
             this._decorateClip(clip);
-            if (first?.kind === "video") this._syncClipPrimaryAppearance(clip);
+            // Always refresh thumb (incl. generated-video preview mode).
+            this._syncClipPrimaryAppearance(clip);
             return;
         }
 
@@ -6400,6 +6553,7 @@ export class CapTimelineEditorApp {
             });
             this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
             this._decorateClip(clip);
+            this._syncClipPrimaryAppearance(clip);
             return;
         }
 
@@ -6445,6 +6599,7 @@ export class CapTimelineEditorApp {
         });
         this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
         this._decorateClip(clip);
+        this._syncClipPrimaryAppearance(clip);
     }
 
     _decorateAllClips() {

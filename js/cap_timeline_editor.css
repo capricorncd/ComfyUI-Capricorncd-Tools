@@ -2511,38 +2511,97 @@ body.cat-te-media-dnd-over-tl {
     border-radius: 6px;
     background: #121226;
     color: #ddd;
-    cursor: pointer;
     text-align: left;
 }
-.cat-te-output-video-row:hover:not(:disabled) {
+.cat-te-output-video-row:not(.is-added):hover {
     border-color: rgba(91, 78, 255, 0.65);
     background: #1a1a32;
 }
-.cat-te-output-video-row:disabled,
 .cat-te-output-video-row.is-added {
-    opacity: 0.55;
-    cursor: default;
+    opacity: 0.7;
 }
-.cat-te-output-video-thumb {
+.cat-te-output-video-thumb-wrap {
+    position: relative;
+    flex-shrink: 0;
     width: 48px;
     height: 32px;
-    object-fit: cover;
     border-radius: 3px;
+    overflow: hidden;
     background: #0a0a12;
-    flex-shrink: 0;
+    cursor: zoom-in;
+}
+.cat-te-output-video-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    pointer-events: none;
+}
+.cat-te-output-video-thumb-play {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    pointer-events: none;
+}
+.cat-te-output-video-thumb-play svg {
+    display: block;
 }
 .cat-te-output-video-name {
     flex: 1;
     min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
     font-size: 12px;
+    text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
+}
+.cat-te-output-video-name:disabled {
+    cursor: default;
+    color: #aaa;
+}
+.cat-te-output-video-row:not(.is-added) .cat-te-output-video-tag {
+    cursor: pointer;
 }
 .cat-te-output-video-tag {
     flex-shrink: 0;
     font-size: 10px;
     color: #8888b0;
+}
+.cat-te-output-video-hover-preview {
+    position: fixed;
+    z-index: 100030;
+    padding: 0;
+    border: 1px solid #3a3a5c;
+    border-radius: 8px;
+    background: #0a0a14;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    line-height: 0;
+}
+.cat-te-output-video-hover-preview[hidden] {
+    display: none !important;
+}
+.cat-te-output-video-hover-video {
+    display: block;
+    height: 200px;
+    width: auto;
+    max-width: min(560px, calc(100vw - 24px));
+    background: #000;
+    vertical-align: top;
 }
 
 .cat-te-compose-dialog {

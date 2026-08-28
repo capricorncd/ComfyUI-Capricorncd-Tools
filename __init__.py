@@ -428,6 +428,12 @@ def _register_routes():
             if not filename:
                 filename = build_compose_filename(project.get("name") or t("untitled_project", lang))
             ignore_audio_tracks = bool(payload.get("ignore_audio_tracks"))
+            # Default true: keep 2nd-sample / upscaled generated frame size.
+            use_generated_video_size = payload.get("use_generated_video_size")
+            if use_generated_video_size is None:
+                use_generated_video_size = True
+            else:
+                use_generated_video_size = bool(use_generated_video_size)
             watermark = payload.get("watermark")
             meta = compose_to_output(
                 project,
@@ -435,6 +441,7 @@ def _register_routes():
                 filename=filename,
                 ignore_audio_tracks=ignore_audio_tracks,
                 watermark=watermark if isinstance(watermark, dict) else None,
+                use_generated_video_size=use_generated_video_size,
             )
             return web.json_response({
                 "ok": True,
