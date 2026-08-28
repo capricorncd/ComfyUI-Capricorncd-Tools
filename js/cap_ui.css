@@ -414,6 +414,11 @@
     background: #353535;
 }
 
+.cap-ui-icon-btn.is-ok {
+    border-color: #3d8f5a;
+    color: #7dcea0;
+}
+
 .cap-ui-icon-btn-primary {
     border-color: #4a7fd4;
     background: #2d4a7a;

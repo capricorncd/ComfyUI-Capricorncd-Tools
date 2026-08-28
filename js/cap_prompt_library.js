@@ -44,6 +44,30 @@ function uid() {
     return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+async function copyTextToClipboard(text) {
+    const value = String(text ?? "");
+    if (!value) return false;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+    } catch { /* fall through */ }
+    try {
+        const ta = document.createElement("textarea");
+        ta.value = value;
+        ta.setAttribute("readonly", "");
+        ta.style.cssText = "position:fixed;left:-9999px;top:0;";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        ta.remove();
+        return ok;
+    } catch {
+        return false;
+    }
+}
+
 function loadList(key) {
     try {
         const raw = localStorage.getItem(key);
@@ -788,7 +812,21 @@ function renderList(body, kind) {
         });
         btnReplace.dataset.capTitle = btnReplace.title;
 
-        actions.append(btnInsert, btnReplace);
+        const btnCopy = mkUiIconBtn(iconHtml("copy"), {
+            title: t("copy_prompt_title"),
+            onClick: async () => {
+                const ok = await copyTextToClipboard(writeText);
+                const prev = btnCopy.title;
+                btnCopy.title = ok ? t("copied_title") : t("copy_failed_title");
+                btnCopy.classList.toggle("is-ok", ok);
+                setTimeout(() => {
+                    btnCopy.title = prev;
+                    btnCopy.classList.remove("is-ok");
+                }, 1200);
+            },
+        });
+
+        actions.append(btnInsert, btnReplace, btnCopy);
 
         if (kind === "history") {
             const defaultName = item.title || previewText(item.text, 40);
