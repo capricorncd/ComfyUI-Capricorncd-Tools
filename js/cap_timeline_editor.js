@@ -98,9 +98,10 @@ function hookScalarWidgets(node) {
 function onTeGlobalKeyDown(e) {
     const te = CapTimelineEditorApp._open;
     if (!te) return;
+    // Undo/redo first — must beat ComfyUI's capture-phase graph undo.
+    if (te.handleShortcutKey(e)) return;
     if (te.handleMediaPreviewKey(e)) return;
     if (te.handleDeleteKey(e)) return;
-    te.handleShortcutKey(e);
 }
 
 function removeObsoleteWidgets(node) {

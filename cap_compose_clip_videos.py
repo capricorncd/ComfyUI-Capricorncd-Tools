@@ -108,6 +108,38 @@ def _probe_has_audio(path: str) -> bool:
         return False
 
 
+def _probe_video_size(path: str) -> tuple[int, int] | None:
+    kwargs: dict = {"capture_output": True, "text": True, "encoding": "utf-8", "errors": "replace", "timeout": 30}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0:s=x",
+                _ffmpeg_path(path),
+            ],
+            **kwargs,
+        )
+        if result.returncode != 0:
+            return None
+        text = str(result.stdout or "").strip().splitlines()
+        if not text:
+            return None
+        parts = text[0].lower().replace(" ", "").split("x")
+        if len(parts) != 2:
+            return None
+        width = int(float(parts[0]))
+        height = int(float(parts[1]))
+        if width < 2 or height < 2:
+            return None
+        return width, height
+    except Exception:
+        return None
+
+
 def _safe_under(base: str, candidate: str) -> str:
     base_real = os.path.realpath(base)
     cand_real = os.path.realpath(candidate)

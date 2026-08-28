@@ -176,6 +176,32 @@
   color: #f5d9a8;
 }
 
+.tl-btn-all-gen-preview {
+  background: rgba(61, 214, 140, 0.12);
+  border-color: rgba(61, 214, 140, 0.35);
+  color: #7eebb5;
+}
+.tl-btn-all-gen-preview:hover {
+  background: rgba(61, 214, 140, 0.22);
+  color: #a6f0cb;
+}
+.tl-btn-all-gen-preview.is-active {
+  background: rgba(74, 158, 255, 0.18);
+  border-color: rgba(74, 158, 255, 0.45);
+  color: #9ec5ff;
+}
+.tl-btn-all-gen-preview:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+  border-color: var(--tl-border);
+}
+.tl-btn-all-gen-preview:disabled:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+}
+
 .tl-btn-history:disabled {
   opacity: 0.35;
   cursor: default;
@@ -520,6 +546,80 @@
   height: 100%;
   opacity: 0.55;
   pointer-events: none;
+}
+
+/* Audio: trim handles only on the upper half so bottom corners are fade. */
+.tl-track-audio .tl-clip-handle,
+.tl-clip-audio .tl-clip-handle {
+  bottom: auto;
+  height: 55%;
+  top: 0;
+}
+
+/* Audio fade-in / fade-out (CapCut-style diagonal + corner handle) */
+.tl-clip-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 6;
+  pointer-events: none;
+  overflow: visible;
+}
+.tl-clip-fade-in { left: 0; }
+.tl-clip-fade-out { right: 0; }
+.tl-clip-fade.parked {
+  /* Parked hit strip sits inside the clip, past the 9px trim edge. */
+  width: 14px !important;
+}
+.tl-clip-fade-in.parked { left: 10px; }
+.tl-clip-fade-out.parked { right: 10px; }
+.tl-clip-fade-diag {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: transparent;
+}
+.tl-clip-fade-in .tl-clip-fade-diag {
+  /* Fade-in `/`: bottom-left → top-right */
+  background: linear-gradient(
+    to bottom right,
+    transparent calc(50% - 0.7px),
+    rgba(255, 255, 255, 0.9) 50%,
+    transparent calc(50% + 0.7px)
+  );
+}
+.tl-clip-fade-out .tl-clip-fade-diag {
+  /* Fade-out `\`: top-left → bottom-right */
+  background: linear-gradient(
+    to top right,
+    transparent calc(50% - 0.7px),
+    rgba(255, 255, 255, 0.9) 50%,
+    transparent calc(50% + 0.7px)
+  );
+}
+.tl-clip-fade.active .tl-clip-fade-diag { opacity: 1; }
+.tl-clip-fade-handle {
+  pointer-events: auto;
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  bottom: 2px;
+  background: #fff;
+  border-radius: 1px;
+  cursor: ew-resize;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  z-index: 7;
+}
+.tl-clip-fade-handle:hover {
+  background: #f0f0f0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 6px rgba(255, 255, 255, 0.35);
+}
+.tl-clip.fading {
+  z-index: 100;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 /* ── Image/video clip: 3 stacked rows ─────────────────────── */

@@ -31,7 +31,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -48,6 +48,7 @@ class CAP_DataJsonClipParser:
         "agent",
         "ai_prompt",
         "clip_json",
+        "second_sample",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -57,8 +58,8 @@ class CAP_DataJsonClipParser:
         "run_timestamp, generate_preview_video, FROM_ tags, seq_filename_prefix "
         "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
         "images (all clip images in editor order as one IMAGE batch), "
-        "clip_role, agent, ai_prompt, and clip_json (self-contained clip with resolved "
-        "image/video file paths and embedded materials)."
+        "clip_role, agent, ai_prompt, clip_json (self-contained clip with resolved "
+        "image/video file paths and embedded materials), and second_sample."
     )
 
     @classmethod
@@ -513,6 +514,7 @@ class CAP_DataJsonClipParser:
         frame_count = self._frame_count(clip_start_ms, clip_end_ms, fps)
         prompt = self._compose_prompt(clip, global_prompt, materials)
         generate_preview_video = bool(clip.get("generate_preview_video", False))
+        second_sample = bool(clip.get("second_sample", False))
 
         preview_start_ms = clip.get("preview_start_ms", None)
         preview_end_ms = clip.get("preview_end_ms", None)
@@ -567,6 +569,7 @@ class CAP_DataJsonClipParser:
             agent,
             ai_prompt,
             clip_json,
+            second_sample,
         )
 
 
