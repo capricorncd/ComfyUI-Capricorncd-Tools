@@ -107,12 +107,14 @@ function genVideoUid() {
 
 function normalizeGeneratedVideo(row) {
     if (typeof row === "string") {
-        const file = row.trim().replace(/\\/g, "/");
+        const raw = row.trim().replace(/\\/g, "/");
+        const file = normalizeOutputVideoPath(raw) || raw;
         return file ? { id: genVideoUid(), file, enabled: true, muted: false, note: "" } : null;
     }
     if (!row || typeof row !== "object") return null;
-    const file = String(row.file || row.src || "").trim().replace(/\\/g, "/");
-    if (!file) return null;
+    const raw = String(row.file || row.src || "").trim().replace(/\\/g, "/");
+    if (!raw) return null;
+    const file = normalizeOutputVideoPath(raw) || raw;
     return {
         id: String(row.id || "").trim() || genVideoUid(),
         file,
@@ -131,6 +133,9 @@ function normalizeOutputVideoPath(value) {
     const idx = s.toLowerCase().lastIndexOf(marker);
     if (idx >= 0) s = s.slice(idx + marker.length);
     s = s.replace(/^\/+/, "");
+    // Export packages store generated videos under media/generated/; map back to output/.
+    const pkg = "media/generated/";
+    if (s.toLowerCase().startsWith(pkg)) s = s.slice(pkg.length);
     return s || null;
 }
 
@@ -3264,7 +3269,8 @@ export class CapTimelineEditorApp {
     }
 
     _outputVideoUrl(file) {
-        const rel = String(file || "").replace(/\\/g, "/").replace(/^\/+/, "");
+        const rel = normalizeOutputVideoPath(file)
+            || String(file || "").replace(/\\/g, "/").replace(/^\/+/, "");
         if (!rel) return "";
         const slash = rel.lastIndexOf("/");
         const filename = slash >= 0 ? rel.slice(slash + 1) : rel;

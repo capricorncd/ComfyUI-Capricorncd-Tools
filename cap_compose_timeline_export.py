@@ -37,7 +37,9 @@ def _ms(value: Any, default: int = 0) -> int:
 
 
 def _resolve_output_video(rel: str) -> str:
-    rel = str(rel or "").strip().replace("\\", "/").lstrip("/")
+    from .cap_timeline_project_io import _norm_generated_file
+
+    rel = _norm_generated_file(rel)
     if not rel:
         return ""
     root = os.path.abspath(folder_paths.get_output_directory())

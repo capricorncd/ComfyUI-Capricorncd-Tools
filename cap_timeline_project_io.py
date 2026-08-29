@@ -44,12 +44,20 @@ def _norm_file(file) -> str:
 
 
 def _norm_generated_file(file) -> str:
-    """Normalize a generated-video path to output-relative form."""
+    """Normalize a generated-video path to output-relative form.
+
+    Strips absolute/ComfyUI ``.../output/`` prefixes and package paths
+    ``media/generated/`` so export arcnames resolve under output/.
+    """
     s = _norm_file(file).lstrip("/")
     marker = "/output/"
     idx = s.lower().rfind(marker)
     if idx >= 0:
-        s = s[idx + len(marker):]
+        s = s[idx + len(marker) :]
+    s = s.lstrip("/")
+    pkg = f"{PACKAGE_MEDIA_ROOT}/{PACKAGE_GENERATED_SUBDIR}/"
+    if s.lower().startswith(pkg):
+        s = s[len(pkg) :]
     return s.lstrip("/")
 
 
@@ -58,7 +66,7 @@ def _resolve_output_file(rel: str) -> str:
     import folder_paths
 
     rel = _norm_generated_file(rel)
-    if not rel:
+    if not rel or ".." in rel.split("/"):
         return ""
     root = os.path.abspath(folder_paths.get_output_directory())
     path = os.path.abspath(os.path.join(root, *rel.split("/")))
@@ -724,8 +732,12 @@ def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
             if sub == PACKAGE_GENERATED_SUBDIR:
                 if not _ext_ok("video", name):
                     continue
-                under = name[len(gen_prefix):] if name.startswith(gen_prefix) else os.path.basename(name)
-                new_rel = _import_generated_bytes(under, zf.read(info))
+                under = name[len(gen_prefix) :] if name.startswith(gen_prefix) else os.path.basename(name)
+                under = _norm_generated_file(under) or os.path.basename(name)
+                if _resolve_output_file(under):
+                    new_rel = under
+                else:
+                    new_rel = _import_generated_bytes(under, zf.read(info))
                 generated_mapping[name] = new_rel
                 generated_mapping[under] = new_rel
                 generated_mapping[os.path.basename(name)] = new_rel
@@ -747,16 +759,37 @@ def import_project_from_zip_bytes(data: bytes) -> tuple[dict, list[str]]:
             else:
                 warnings.append(_t("missing_asset", get_last_known_lang(), file=file))
 
-        for file in iter_project_generated_videos(project):
-            key = _norm_file(file)
-            if key in generated_mapping or _norm_generated_file(file) in generated_mapping:
-                if key not in generated_mapping and _norm_generated_file(file) in generated_mapping:
-                    generated_mapping[key] = generated_mapping[_norm_generated_file(file)]
+        # Prefer local output/ hits for package paths (media/generated/...) before warning.
+        for track in project.get("tracks") or []:
+            if not isinstance(track, dict) or str(track.get("type") or "").lower() == "audio":
                 continue
-            base = os.path.basename(file)
-            if base in generated_mapping:
-                generated_mapping[key] = generated_mapping[base]
-            else:
-                warnings.append(_t("missing_asset", get_last_known_lang(), file=file))
+            for clip in track.get("clips") or []:
+                if not isinstance(clip, dict):
+                    continue
+                rows = clip.get("generated_videos")
+                if not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    raw = _norm_file(row.get("file"))
+                    if not raw:
+                        continue
+                    norm = _norm_generated_file(raw)
+                    if raw in generated_mapping or norm in generated_mapping:
+                        if raw not in generated_mapping and norm in generated_mapping:
+                            generated_mapping[raw] = generated_mapping[norm]
+                        continue
+                    base = os.path.basename(norm or raw)
+                    if base in generated_mapping:
+                        generated_mapping[raw] = generated_mapping[base]
+                        if norm:
+                            generated_mapping[norm] = generated_mapping[base]
+                        continue
+                    if norm and _resolve_output_file(norm):
+                        generated_mapping[raw] = norm
+                        generated_mapping[norm] = norm
+                        continue
+                    warnings.append(_t("missing_asset", get_last_known_lang(), file=raw))
 
         return _remap_project_files(project, mapping, generated_mapping), warnings
