@@ -341,6 +341,10 @@ export class CapTimelineEditorApp {
         this._previewVideos = new Map();
         this._programPreviewRaf = 0;
         this._programStageObserver = null;
+        this._programHadFrame = false;
+        this._programCanvasKey = "";
+        this._programOffscreen = null;
+        this._onProgramVisChange = null;
         this._pendingGeneratedJobs = [];
         this._deferredGeneratedJobs = [];
         this._genVideoState = null;
@@ -442,10 +446,37 @@ export class CapTimelineEditorApp {
         return this._timeline?._selected ?? this._selClip ?? null;
     }
 
+    _fieldHasTextSelection(el) {
+        if (!el) return false;
+        const tag = el.tagName;
+        if (tag === "TEXTAREA" || (tag === "INPUT" && /^(text|search|url|tel|password|number|email)$/i.test(el.type || "text"))) {
+            try {
+                return el.selectionStart !== el.selectionEnd;
+            } catch {
+                return false;
+            }
+        }
+        if (el.isContentEditable || el.getAttribute?.("contenteditable") === "true") {
+            const sel = window.getSelection?.();
+            return !!(sel && !sel.isCollapsed && el.contains(sel.anchorNode));
+        }
+        return false;
+    }
+
+    _shortcutModKey(e) {
+        const code = e.code || "";
+        if (code.startsWith("Key") && code.length === 4) return code.slice(3).toLowerCase();
+        const key = String(e.key || "").toLowerCase();
+        if (key.length === 1) return key;
+        return key;
+    }
+
     /**
      * Editor shortcuts when fullscreen is open.
      * Ctrl/Cmd+Z/Y are always swallowed so ComfyUI graph-undo cannot close
      * the editor; outside text fields they drive the timeline undo/redo stack.
+     * Ctrl+C/V copy/paste clips when clips are selected (even if focus is in a
+     * prompt field), unless that field has a text selection — then native wins.
      * @returns {boolean} true if the event was handled
      */
     handleShortcutKey(e) {
@@ -454,7 +485,7 @@ export class CapTimelineEditorApp {
         const mod = e.ctrlKey || e.metaKey;
         if (!mod || e.altKey) return false;
 
-        const key = e.key?.toLowerCase();
+        const key = this._shortcutModKey(e);
         const inField = !!e.target?.closest?.("input, textarea, select, [contenteditable='true']");
 
         // Block ComfyUI undo/redo from tearing down the fullscreen shell.
@@ -471,23 +502,31 @@ export class CapTimelineEditorApp {
             return true;
         }
 
-        if (inField) return false;
         if (e.shiftKey) return false;
 
         if (key === "c") {
+            // Let native copy win when the user highlighted text in an input.
+            if (inField && this._fieldHasTextSelection(e.target?.closest?.("input, textarea, select, [contenteditable='true']") || e.target)) {
+                return false;
+            }
             if (!this._copySelectedClips()) return false;
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation?.();
+            this._overlay?.focus?.();
             return true;
         }
         if (key === "v") {
+            // Never hijack paste inside text fields.
+            if (inField) return false;
             if (!this._pasteClips()) return false;
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation?.();
+            this._overlay?.focus?.();
             return true;
         }
+        if (inField) return false;
         if (key !== "b" && key !== "g") return false;
         const clip = this.getSelectedClip();
         if (!clip) return false;
@@ -7851,7 +7890,11 @@ export class CapTimelineEditorApp {
 
     /** @returns {boolean} true if anything was copied */
     _copySelectedClips() {
-        const clips = this._timeline?.getSelectedClips() ?? [];
+        let clips = this._timeline?.getSelectedClips() ?? [];
+        if (!clips.length) {
+            const one = this.getSelectedClip();
+            if (one) clips = [one];
+        }
         if (!clips.length) return false;
         const ordered = [...clips].sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id));
         CapTimelineEditorApp._clipClipboard = ordered.map(c => this._snapshotClip(c));
@@ -7923,11 +7966,11 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!snaps?.length || !tl) return false;
 
-        this._recordUndo();
-
         const minStart = Math.min(...snaps.map(s => s.startTime));
         const tracks = snaps.map(s => this._resolvePasteTrack(s));
         if (tracks.some(t => !t)) return false;
+
+        this._recordUndo();
 
         const seek = typeof tl._snapTime === "function"
             ? tl._snapTime(tl.currentTime)
@@ -7995,6 +8038,7 @@ export class CapTimelineEditorApp {
         this._updatePromptPanel();
         this._refreshTimelineDuration();
         this._scheduleProgramPreview();
+        this._saveToWidgets();
         return true;
     }
 
@@ -8408,6 +8452,79 @@ export class CapTimelineEditorApp {
         if (!this.programStage || this._programStageObserver) return;
         this._programStageObserver = new ResizeObserver(() => this._scheduleProgramPreview());
         this._programStageObserver.observe(this.programStage);
+        this._bindProgramPreviewVisibility();
+    }
+
+    _bindProgramPreviewVisibility() {
+        if (this._onProgramVisChange) return;
+        this._onProgramVisChange = () => {
+            if (document.hidden) return;
+            if (!this._overlay?.classList.contains("open")) return;
+            this._recoverProgramPreviewVideos();
+        };
+        document.addEventListener("visibilitychange", this._onProgramVisChange);
+        window.addEventListener("focus", this._onProgramVisChange);
+        window.addEventListener("pageshow", this._onProgramVisChange);
+    }
+
+    _unbindProgramPreviewVisibility() {
+        if (!this._onProgramVisChange) return;
+        document.removeEventListener("visibilitychange", this._onProgramVisChange);
+        window.removeEventListener("focus", this._onProgramVisChange);
+        window.removeEventListener("pageshow", this._onProgramVisChange);
+        this._onProgramVisChange = null;
+    }
+
+    _clearPreviewSeekWatch(entry) {
+        if (!entry?._seekTimer) return;
+        clearTimeout(entry._seekTimer);
+        entry._seekTimer = 0;
+    }
+
+    /** Unstick seeks that never fire "seeked" (tab switch / decoder busy). */
+    _armPreviewSeekWatch(entry) {
+        this._clearPreviewSeekWatch(entry);
+        if (!entry) return;
+        entry._seekTimer = setTimeout(() => {
+            entry._seekTimer = 0;
+            if (!entry.seeking) return;
+            entry.seeking = false;
+            const v = entry.el;
+            const want = entry.wantTime || 0;
+            if (v && Math.abs((v.currentTime || 0) - want) > 0.08) {
+                try {
+                    entry.seeking = true;
+                    v.currentTime = want;
+                    this._armPreviewSeekWatch(entry);
+                } catch {
+                    entry.seeking = false;
+                }
+            }
+            this._scheduleProgramPreview();
+        }, 450);
+    }
+
+    _recoverProgramPreviewVideos() {
+        for (const entry of this._previewVideos.values()) {
+            const v = entry?.el;
+            if (!v) continue;
+            this._clearPreviewSeekWatch(entry);
+            entry.seeking = false;
+            if (v.readyState >= 2) entry.ready = true;
+            const want = Math.max(0, Number(entry.wantTime) || 0);
+            try {
+                // Nudge the decoder after background/GPU contention drops frames.
+                entry.seeking = true;
+                v.currentTime = want;
+                this._armPreviewSeekWatch(entry);
+            } catch {
+                entry.seeking = false;
+            }
+            if (this._timeline?._playing && v.paused) {
+                void v.play().catch(() => {});
+            }
+        }
+        this._scheduleProgramPreview();
     }
 
     _disposeProgramPreview() {
@@ -8417,7 +8534,9 @@ export class CapTimelineEditorApp {
         }
         this._programStageObserver?.disconnect();
         this._programStageObserver = null;
+        this._unbindProgramPreviewVisibility();
         for (const entry of this._previewVideos.values()) {
+            this._clearPreviewSeekWatch(entry);
             try {
                 entry.el.pause();
                 entry.el.removeAttribute("src");
@@ -8426,6 +8545,9 @@ export class CapTimelineEditorApp {
         }
         this._previewVideos.clear();
         this._previewImages.clear();
+        this._programHadFrame = false;
+        this._programCanvasKey = "";
+        this._programOffscreen = null;
     }
 
     _scheduleProgramPreview() {
@@ -8488,13 +8610,18 @@ export class CapTimelineEditorApp {
         v.muted = true;
         v.playsInline = true;
         v.preload = "auto";
-        entry = { el: v, ready: false, seeking: false, wantTime: 0 };
-        v.addEventListener("loadeddata", () => {
-            entry.ready = true;
+        entry = { el: v, ready: false, seeking: false, wantTime: 0, _seekTimer: 0 };
+        const kick = () => {
+            entry.ready = v.readyState >= 2;
             this._scheduleProgramPreview();
-        });
+        };
+        v.addEventListener("loadeddata", kick);
+        v.addEventListener("canplay", kick);
+        v.addEventListener("playing", () => this._scheduleProgramPreview());
         v.addEventListener("seeked", () => {
+            this._clearPreviewSeekWatch(entry);
             entry.seeking = false;
+            entry.ready = v.readyState >= 2;
             const playing = !!this._timeline?._playing;
             const drift = Math.abs((entry.wantTime || 0) - v.currentTime);
             if (!playing && drift > 0.05) {
@@ -8504,6 +8631,11 @@ export class CapTimelineEditorApp {
             }
         });
         v.addEventListener("error", () => { entry.ready = false; });
+        v.addEventListener("stalled", () => this._scheduleProgramPreview());
+        v.addEventListener("suspend", () => {
+            // Decoder may drop frames under GPU load — retry shortly.
+            setTimeout(() => this._scheduleProgramPreview(), 200);
+        });
         v.src = location === "output" ? this._outputVideoUrl(file) : this._videoUrl(file);
         this._previewVideos.set(key, entry);
         return entry;
@@ -8521,10 +8653,12 @@ export class CapTimelineEditorApp {
         const eps = this._timeline?._playing ? 0.25 : 0.04;
         if (Math.abs((v.currentTime || 0) - clamped) <= eps) return;
         entry.seeking = true;
+        this._armPreviewSeekWatch(entry);
         try {
             v.currentTime = clamped;
         } catch {
             entry.seeking = false;
+            this._clearPreviewSeekWatch(entry);
         }
     }
 
@@ -8552,13 +8686,16 @@ export class CapTimelineEditorApp {
 
     _previewVideoCanDraw(entry) {
         const v = entry?.el;
-        // While a seek is pending (e.g. re-entering a clip whose cached
-        // <video> element is still parked at wherever a previous playthrough
-        // left it), skip drawing rather than paint the stale pre-seek frame —
-        // that stale frame is what reads as "a few replayed frames" at the
-        // start of the clip. The pending "seeked" listener already reschedules
-        // a redraw once the correct frame lands.
-        return !!(v && !entry.seeking && v.videoWidth > 0 && v.videoHeight > 0);
+        // While a seek is pending, skip drawing rather than paint a stale
+        // pre-seek frame — the canvas keeps the previous good frame instead
+        // of clearing to black. "seeked" / seek-watch already reschedule.
+        return !!(
+            v
+            && !entry.seeking
+            && v.readyState >= 2
+            && v.videoWidth > 0
+            && v.videoHeight > 0
+        );
     }
 
     _pauseUnusedPreviewVideos(usedKeys) {
@@ -8576,7 +8713,11 @@ export class CapTimelineEditorApp {
         const scale = Math.max(cw / mw, ch / mh);
         const dw = mw * scale;
         const dh = mh * scale;
-        ctx.drawImage(media, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+        try {
+            ctx.drawImage(media, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+        } catch {
+            return false;
+        }
         return true;
     }
 
@@ -8697,16 +8838,55 @@ export class CapTimelineEditorApp {
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         const { canvasW: cw, canvasH: ch } = layout;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = "#000";
-        ctx.fillRect(0, 0, cw, ch);
+        const sizeKey = `${cw}x${ch}`;
+        const sizeChanged = this._programCanvasKey !== sizeKey;
+        this._programCanvasKey = sizeKey;
 
         const t = this._timeline?.currentTime ?? 0;
+        const layers = this._collectPreviewLayers(t);
         const usedVideoKeys = new Set();
-        const drew = this._drawPreviewLayersOnce(ctx, cw, ch, t, { onVideoUsed: (key) => usedVideoKeys.add(key) });
 
+        if (!layers.length) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, cw, ch);
+            this._pauseUnusedPreviewVideos(usedVideoKeys);
+            this._programHadFrame = false;
+            if (this.programEmpty) this.programEmpty.hidden = false;
+            return;
+        }
+
+        // Draw offscreen first. If video is mid-seek / decoder busy, keep the
+        // previous on-screen frame instead of flashing black.
+        let off = this._programOffscreen;
+        if (!off || off.width !== cw || off.height !== ch) {
+            off = document.createElement("canvas");
+            off.width = cw;
+            off.height = ch;
+            this._programOffscreen = off;
+        }
+        const octx = off.getContext("2d");
+        if (!octx) return;
+        octx.setTransform(1, 0, 0, 1, 0, 0);
+        octx.fillStyle = "#000";
+        octx.fillRect(0, 0, cw, ch);
+        const drew = this._drawPreviewLayersOnce(octx, cw, ch, t, {
+            onVideoUsed: (key) => usedVideoKeys.add(key),
+        });
         this._pauseUnusedPreviewVideos(usedVideoKeys);
-        if (this.programEmpty) this.programEmpty.hidden = drew;
+
+        if (drew || sizeChanged || !this._programHadFrame) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            if (drew) {
+                ctx.drawImage(off, 0, 0);
+                this._programHadFrame = true;
+            } else {
+                ctx.fillStyle = "#000";
+                ctx.fillRect(0, 0, cw, ch);
+                this._programHadFrame = false;
+            }
+        }
+        if (this.programEmpty) this.programEmpty.hidden = this._programHadFrame;
     }
 
     _configureTimelineUi() {
