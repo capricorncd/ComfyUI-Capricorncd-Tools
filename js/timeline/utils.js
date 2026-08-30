@@ -32,7 +32,7 @@ export const TRACK_TYPES = {
   video: { color: '#4a9eff', icon: '▶', height: 76 },
   audio: { color: '#3dd68c', icon: '♫', height: 60 },
   image: { color: '#c86aff', icon: '⬛', height: 76 },
-  text:  { color: '#ff9e4a', icon: 'T',  height: 52 },
+  text:  { color: '#ff9e4a', icon: 'T',  height: 39 },
 };
 
 const TRACK_TYPE_LABEL_KEYS = {
@@ -84,13 +84,16 @@ export function generateWaveform(seed, len = 80) {
  * Bind a drag session that ends reliably even when the pointer is released
  * over overlays (sidebar, media panel, etc.) outside the timeline.
  *
+ * Mouse-only: clip/trim/fade all start from `mousedown`. Mixing pointer
+ * capture / pointerup / blur races with sidebar DOM updates on select and
+ * can leave stuck window listeners that eat the next clicks.
+ *
  * Do not listen for `mouseleave` in capture on `document`: that event fires
  * for every element the pointer exits, so the first move off a handle's
  * inner span would end the gesture before any resize/move can apply.
  */
 export function bindDragSession(startEvent, { onMove, onEnd }) {
   let ended = false;
-  const captureTarget = startEvent.currentTarget ?? startEvent.target;
 
   const finish = (ev) => {
     if (ended) return;
@@ -111,27 +114,11 @@ export function bindDragSession(startEvent, { onMove, onEnd }) {
   const teardown = () => {
     window.removeEventListener('mousemove', move, true);
     window.removeEventListener('mouseup', finish, true);
-    window.removeEventListener('pointermove', move, true);
-    window.removeEventListener('pointerup', finish, true);
-    window.removeEventListener('pointercancel', finish, true);
-    window.removeEventListener('blur', finish);
     document.documentElement.removeEventListener('mouseleave', onViewportLeave);
-    if (captureTarget?.releasePointerCapture && startEvent.pointerId != null) {
-      try { captureTarget.releasePointerCapture(startEvent.pointerId); } catch { /* ignore */ }
-    }
   };
-
-  if (startEvent.pointerId != null && captureTarget?.setPointerCapture) {
-    try { captureTarget.setPointerCapture(startEvent.pointerId); } catch { /* ignore */ }
-    captureTarget.addEventListener('lostpointercapture', finish, { once: true });
-  }
 
   window.addEventListener('mousemove', move, true);
   window.addEventListener('mouseup', finish, true);
-  window.addEventListener('pointermove', move, true);
-  window.addEventListener('pointerup', finish, true);
-  window.addEventListener('pointercancel', finish, true);
-  window.addEventListener('blur', finish);
   document.documentElement.addEventListener('mouseleave', onViewportLeave);
 
   return finish;

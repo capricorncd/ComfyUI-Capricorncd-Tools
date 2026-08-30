@@ -16,6 +16,21 @@ from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_proj
 from .timecode import resolve_media_path
 
 
+def _is_subtitle_track(track_type) -> bool:
+    t = str(track_type or "").lower()
+    return t in ("text", "subtitle")
+
+
+def _is_subtitle_clip(clip: dict, track_type: str = "") -> bool:
+    """Subtitle clips are editor preview-only and must not enter data_json."""
+    if _is_subtitle_track(track_type):
+        return True
+    if not isinstance(clip, dict):
+        return False
+    ct = str(clip.get("type") or "").lower()
+    return ct in ("text", "subtitle")
+
+
 def _use_media_prompt(flags, index: int) -> bool:
     if not isinstance(flags, list) or index >= len(flags):
         return True
@@ -585,6 +600,12 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         width = max(1, int(width))
         height = max(1, int(height))
         global_prompt = _strip_comment_lines(settings.get("global_prompt") or "")
+        only_raw = settings.get("runtime_only_clip_ids")
+        only_ids = None
+        if isinstance(only_raw, list) and only_raw:
+            only_ids = {str(x).strip() for x in only_raw if str(x).strip()}
+            if not only_ids:
+                only_ids = None
 
         visual_clips: list[tuple[dict, dict, int]] = []
         audio_clips: list[dict] = []
@@ -595,6 +616,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         for z_index, track in enumerate(tracks, start=1):
             track_type = str(track.get("type") or "visual").lower()
             is_audio_track = track_type == "audio"
+            # Subtitle / text tracks are editor preview overlays only.
+            if _is_subtitle_track(track_type):
+                continue
             if is_audio_track:
                 if not self._audio_track_active(track):
                     continue
@@ -602,6 +626,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             for clip in track.get("clips", []):
                 if not isinstance(clip, dict) or clip.get("enabled", True) is False:
+                    continue
+                if _is_subtitle_clip(clip, track_type):
                     continue
                 clip_type = str(clip.get("type") or ("audio" if is_audio_track else "image")).lower()
                 is_audio_clip = clip_type == "audio" or is_audio_track
@@ -613,6 +639,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                     audio_clips.append(clip)
                 else:
                     if clip.get("visible", True) is False:
+                        continue
+                    if only_ids is not None and str(clip.get("id") or "") not in only_ids:
                         continue
                     visual_clips.append((track, clip, z_index))
                     media_rows = resolve_clip_media(project, clip)
@@ -632,8 +660,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         runtime_clips = []
         materials = []
         seen_materials = set()
-        for index, (clip, start, end, z_index) in enumerate(segments, start=1):
+        for clip, start, end, z_index in segments:
+            if _is_subtitle_clip(clip):
+                continue
             entries = _clip_visual_entries(project, clip)
+            has_media = any(e.get("enabled") and e.get("id") for e in entries)
+            has_prompt = bool(
+                _strip_comment_lines(clip.get("ai_prompt") or "").strip()
+                or _strip_comment_lines(clip.get("prompt") or "").strip()
+            )
+            # Empty package clips are timeline placeholders (preview only).
+            if not has_media and not has_prompt:
+                continue
             for entry in entries:
                 if not entry.get("enabled"):
                     continue
@@ -657,7 +695,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             clip_role, clip_role_custom = _clip_role_fields(clip)
             agent, agent_custom = _clip_agent_fields(clip)
             runtime_clips.append({
-                "id": f"runtime_{index:04d}",
+                "id": f"runtime_{len(runtime_clips) + 1:04d}",
                 "source_clip_id": str(clip.get("id", "")),
                 "clip_type": str(clip.get("type") or "image"),
                 "clip_role": clip_role,

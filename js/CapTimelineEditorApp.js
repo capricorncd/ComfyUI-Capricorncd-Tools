@@ -9,8 +9,9 @@ import { t as T } from "./i18n/timeline_editor.js";
 
 /** Right-side empty margin as a fraction of the timeline viewport width. */
 const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
-/** All tracks (main/overlay/audio) share one row height. */
+/** All tracks (main/overlay/audio) share one row height; subtitle tracks are half. */
 const TRACK_HEIGHT = 78;
+const SUBTITLE_TRACK_HEIGHT = TRACK_HEIGHT / 2;
 const STORAGE_MEDIA_STARS = "capricorncd.timeline.media_stars";
 const MEDIA_STARS_BUCKET = "comfyui-input";
 const STORAGE_AUTOSAVE_INTERVAL = "cat-te-autosave-interval-sec";
@@ -235,6 +236,66 @@ function defaultAudioMeta(trackIndex = 2) {
     };
 }
 
+function defaultSubtitleMeta(trackIndex = 0) {
+    return {
+        clipType: "subtitle",
+        text: "",
+        fontFamily: "",
+        fontPath: "",
+        fontSize: 48,
+        letterSpacing: 0,
+        color: "#ffffff",
+        bold: false,
+        italic: false,
+        opacity: 1,
+        strokeEnabled: true,
+        strokeColor: "#000000",
+        strokeWidth: 3,
+        shadowEnabled: true,
+        shadowColor: "rgba(0,0,0,0.75)",
+        shadowBlur: 4,
+        shadowOffsetX: 2,
+        shadowOffsetY: 2,
+        align: "center",
+        vAlign: "bottom",
+        offsetX: 0,
+        offsetY: 8,
+        disabled: false,
+        visible: true,
+        trackIndex,
+    };
+}
+
+const SUBTITLE_STYLE_KEYS = [
+    "fontFamily", "fontPath", "fontSize", "letterSpacing", "color", "bold", "italic", "opacity",
+    "strokeEnabled", "strokeColor", "strokeWidth",
+    "shadowEnabled", "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY",
+    "align", "vAlign", "offsetX", "offsetY",
+];
+
+function pickSubtitleStyle(meta) {
+    const src = meta && typeof meta === "object" ? meta : {};
+    const out = {};
+    for (const key of SUBTITLE_STYLE_KEYS) {
+        if (src[key] !== undefined) out[key] = src[key];
+    }
+    return out;
+}
+
+function isSubtitleTrackType(type) {
+    const t = String(type || "").toLowerCase();
+    return t === "text" || t === "subtitle";
+}
+
+function trackHeightFor(type) {
+    return isSubtitleTrackType(type) ? SUBTITLE_TRACK_HEIGHT : TRACK_HEIGHT;
+}
+
+function isSubtitleClipMeta(meta, track) {
+    if (isSubtitleTrackType(track?.type)) return true;
+    return String(meta?.clipType || "").toLowerCase() === "subtitle";
+}
+
 const BODY_UI_CLASSES = [
     "cat-te-noscroll",
     "cat-te-col-resize",
@@ -366,6 +427,8 @@ export class CapTimelineEditorApp {
         this._watermark = this._defaultWatermark();
         this._systemFonts = null;
         this._systemFontsPromise = null;
+        /** When set, next queued project_json asks Python to emit only these clip ids. */
+        this._runtimeOnlyClipIds = null;
         this._composePreviewRaf = 0;
         this._videoThumbActive = 0;
         this._videoThumbWaiters = [];
@@ -442,6 +505,7 @@ export class CapTimelineEditorApp {
         document.body.classList.add("cat-te-noscroll");
         CapTimelineEditorApp._open = this;
         this._overlay.focus();
+        void this._ensureFontList();
         const gen = ++this._openGen;
         void this._openEditor(gen);
     }
@@ -868,6 +932,38 @@ export class CapTimelineEditorApp {
         ], r.left, r.bottom + 4);
     }
 
+    _showAddTrackMenu(e) {
+        const r = e.currentTarget.getBoundingClientRect();
+        this._buildCtxMenu([
+            { label: T("media_track_menu"), fn: () => this._addUserTrack("image") },
+            { label: T("audio_track_menu"), fn: () => this._addUserTrack("audio") },
+            { label: T("subtitle_track_menu"), fn: () => this._addUserTrack("text") },
+        ], r.left, r.bottom + 4);
+    }
+
+    _addUserTrack(type) {
+        if (!this._timeline) return;
+        const name = type === "audio"
+            ? T("audio_track_name")
+            : isSubtitleTrackType(type)
+                ? T("subtitle_track_name")
+                : T("overlay_track_name");
+        const track = this._timeline.addTrack({
+            type,
+            name,
+            height: trackHeightFor(type),
+            isMain: false,
+        });
+        this._trackInfo.set(track.id, {
+            trackIndex: this._nextTrackIndex(),
+            enabled: true,
+            role: type === "audio" ? "audio" : isSubtitleTrackType(type) ? "subtitle" : "overlay",
+        });
+        this._setupTrackControls(track);
+        this._saveToWidgets();
+        return track;
+    }
+
     /** Visual clips that are not disabled (and whose track is enabled). */
     _listActiveVisualClips() {
         const out = [];
@@ -876,7 +972,10 @@ export class CapTimelineEditorApp {
             if (info.enabled === false) continue;
             for (const clip of track.clips) {
                 const meta = this._meta.get(clip.id) ?? defaultImageMeta();
-                if (meta.disabled || meta.clipType === "audio") continue;
+                if (meta.disabled || meta.clipType === "audio" || meta.clipType === "subtitle") continue;
+                if (isSubtitleClipMeta(meta, track)) continue;
+                // Empty package clips have nothing to generate.
+                if (this._isEmptyGroupClip(meta)) continue;
                 out.push(clip);
             }
         }
@@ -1264,7 +1363,7 @@ export class CapTimelineEditorApp {
     _defaultWatermark() {
         return {
             mode: "none",
-            text: { content: "", fontFamily: "", fontPath: "", fontSize: 32, color: "#ffffff" },
+            text: { content: "", fontFamily: "", fontPath: "", fontSize: 32, letterSpacing: 0, color: "#ffffff" },
             image: { file: "", disabled: false },
             opacity: 80,
             scale: 100,
@@ -1289,6 +1388,7 @@ export class CapTimelineEditorApp {
                 fontFamily: String(text.fontFamily ?? d.text.fontFamily),
                 fontPath: String(text.fontPath ?? d.text.fontPath),
                 fontSize: num(text.fontSize, 6, 400, d.text.fontSize),
+                letterSpacing: num(text.letterSpacing ?? text.letter_spacing, -50, 200, d.text.letterSpacing),
                 color: /^#[0-9a-fA-F]{6}$/.test(text.color || "") ? text.color : d.text.color,
             },
             image: {
@@ -1340,20 +1440,21 @@ export class CapTimelineEditorApp {
             })
             .catch(() => {
                 this._systemFonts = [];
+                this._populateFontSelect();
                 return this._systemFonts;
             });
         return this._systemFontsPromise;
     }
 
-    _populateFontSelect() {
-        const select = this.wmFontFamily;
+    /** Fill a <select> with system fonts; keep `preferred` if present (or as custom option). */
+    _fillSystemFontSelect(select, preferred, { autoPickFirst = false } = {}) {
         if (!select) return;
         const fonts = this._systemFonts || [];
-        const current = this._watermark.text.fontFamily;
+        const prev = String(preferred || "").trim();
         select.innerHTML = "";
         if (!fonts.length) {
             const opt = document.createElement("option");
-            opt.value = "";
+            opt.value = prev;
             opt.textContent = this._systemFonts ? T("font_not_found") : T("font_loading");
             select.appendChild(opt);
             return;
@@ -1361,16 +1462,49 @@ export class CapTimelineEditorApp {
         for (const f of fonts) {
             const opt = document.createElement("option");
             opt.value = f.family;
-            opt.dataset.path = f.path;
+            opt.dataset.path = f.path || "";
             opt.textContent = f.family;
             select.appendChild(opt);
         }
-        if (current && fonts.some((f) => f.family === current)) {
-            select.value = current;
+        if (prev && fonts.some((f) => f.family === prev)) {
+            select.value = prev;
+        } else if (prev) {
+            const opt = document.createElement("option");
+            opt.value = prev;
+            opt.textContent = prev;
+            select.appendChild(opt);
+            select.value = prev;
+        } else if (autoPickFirst) {
+            select.value = fonts[0].family;
         } else {
             select.value = fonts[0].family;
-            this._watermark.text.fontFamily = fonts[0].family;
-            this._watermark.text.fontPath = fonts[0].path;
+        }
+    }
+
+    _populateFontSelect() {
+        const fonts = this._systemFonts || [];
+        const wmSelect = this.wmFontFamily;
+        if (wmSelect) {
+            const current = this._watermark.text.fontFamily;
+            this._fillSystemFontSelect(wmSelect, current, { autoPickFirst: true });
+            if (fonts.length) {
+                if (current && fonts.some((f) => f.family === current)) {
+                    wmSelect.value = current;
+                } else {
+                    wmSelect.value = fonts[0].family;
+                    this._watermark.text.fontFamily = fonts[0].family;
+                    this._watermark.text.fontPath = fonts[0].path;
+                }
+            }
+        }
+        const subSelect = this.subFontSelect;
+        if (subSelect) {
+            let preferred = subSelect.value;
+            const clip = this._selClip;
+            if (clip && isSubtitleTrackType(clip.track?.type)) {
+                preferred = this._meta.get(clip.id)?.fontFamily || preferred;
+            }
+            this._fillSystemFontSelect(subSelect, preferred, { autoPickFirst: !preferred });
         }
     }
 
@@ -1420,6 +1554,10 @@ export class CapTimelineEditorApp {
         });
         this.wmFontSize?.addEventListener("input", () => {
             this._watermark.text.fontSize = Math.max(6, Math.min(400, Number(this.wmFontSize.value) || 32));
+            this._scheduleComposePreview();
+        });
+        this.wmLetterSpacing?.addEventListener("input", () => {
+            this._watermark.text.letterSpacing = Math.max(-50, Math.min(200, Number(this.wmLetterSpacing.value) || 0));
             this._scheduleComposePreview();
         });
         this.wmFontColor?.addEventListener("input", () => {
@@ -1511,6 +1649,7 @@ export class CapTimelineEditorApp {
         const wm = this._watermark;
         if (this.wmTextContent) this.wmTextContent.value = wm.text.content;
         if (this.wmFontSize) this.wmFontSize.value = String(wm.text.fontSize);
+        if (this.wmLetterSpacing) this.wmLetterSpacing.value = String(wm.text.letterSpacing ?? 0);
         if (this.wmFontColor) this.wmFontColor.value = wm.text.color;
         if (this.wmOpacity) this.wmOpacity.value = String(wm.opacity);
         if (this.wmOpacityReadout) this.wmOpacityReadout.textContent = `${wm.opacity}%`;
@@ -1584,6 +1723,46 @@ export class CapTimelineEditorApp {
         }
     }
 
+    _measureTextWithLetterSpacing(ctx, text, letterSpacing) {
+        const s = String(text ?? "");
+        if (!s) return 0;
+        const spacing = Number(letterSpacing) || 0;
+        if (!spacing) return ctx.measureText(s).width;
+        const chars = Array.from(s);
+        let w = 0;
+        for (let i = 0; i < chars.length; i++) {
+            w += ctx.measureText(chars[i]).width;
+            if (i < chars.length - 1) w += spacing;
+        }
+        return w;
+    }
+
+    _drawTextWithLetterSpacing(ctx, text, x, y, letterSpacing, mode = "fill") {
+        const s = String(text ?? "");
+        if (!s) return;
+        const spacing = Number(letterSpacing) || 0;
+        if (!spacing) {
+            if (mode === "stroke") ctx.strokeText(s, x, y);
+            else ctx.fillText(s, x, y);
+            return;
+        }
+        const chars = Array.from(s);
+        const totalW = this._measureTextWithLetterSpacing(ctx, s, spacing);
+        const align = ctx.textAlign || "left";
+        let startX = x;
+        if (align === "center") startX = x - totalW / 2;
+        else if (align === "right" || align === "end") startX = x - totalW;
+        const prevAlign = ctx.textAlign;
+        ctx.textAlign = "left";
+        let cx = startX;
+        for (let i = 0; i < chars.length; i++) {
+            if (mode === "stroke") ctx.strokeText(chars[i], cx, y);
+            else ctx.fillText(chars[i], cx, y);
+            cx += ctx.measureText(chars[i]).width + (i < chars.length - 1 ? spacing : 0);
+        }
+        ctx.textAlign = prevAlign;
+    }
+
     _drawWatermarkOnCanvas(ctx, cw, ch) {
         const wm = this._watermark;
         if (!wm || wm.mode === "none") return;
@@ -1609,16 +1788,20 @@ export class CapTimelineEditorApp {
             }
         } else if (wm.mode === "text" && wm.text.content) {
             const fontSize = Math.max(1, wm.text.fontSize * scaleFactor * (wm.scale / 100));
+            const letterSpacing = (Number(wm.text.letterSpacing) || 0) * scaleFactor * (wm.scale / 100);
             const family = wm.text.fontFamily ? `"${wm.text.fontFamily}", sans-serif` : "sans-serif";
             ctx.font = `${fontSize}px ${family}`;
             ctx.fillStyle = wm.text.color || "#ffffff";
             ctx.textBaseline = "top";
+            ctx.textAlign = "left";
             const lines = String(wm.text.content).split("\n");
             const lineHeight = fontSize * 1.25;
-            const textW = Math.max(0, ...lines.map((l) => ctx.measureText(l).width));
+            const textW = Math.max(0, ...lines.map((l) => this._measureTextWithLetterSpacing(ctx, l, letterSpacing)));
             const textH = lineHeight * lines.length;
             const { x, y } = this._watermarkXY(previewPos, margin, cw, ch, textW, textH);
-            lines.forEach((line, i) => ctx.fillText(line, x, y + i * lineHeight));
+            lines.forEach((line, i) => {
+                this._drawTextWithLetterSpacing(ctx, line, x, y + i * lineHeight, letterSpacing, "fill");
+            });
         }
         ctx.restore();
     }
@@ -1635,6 +1818,7 @@ export class CapTimelineEditorApp {
         ctx.fillRect(0, 0, cw, ch);
         const t = this._timeline?.currentTime ?? 0;
         this._drawPreviewLayersOnce(ctx, cw, ch, t);
+        this._drawSubtitleOverlays(ctx, cw, ch, t);
         this._drawWatermarkOnCanvas(ctx, cw, ch);
     }
 
@@ -1841,6 +2025,7 @@ export class CapTimelineEditorApp {
                         <img class="cat-te-clip-thumb" alt="" />
                         <video class="cat-te-clip-thumb-video" muted playsinline hidden></video>
                         <div class="cat-te-clip-thumb-empty" hidden>${T("empty_clip")}</div>
+                        <div class="cat-te-clip-thumb-subtitle" hidden>T</div>
                         <button type="button" class="cat-te-clip-thumb-sort" title="${T("view_material_title")}" hidden>${iconHtml("squareArrowOutUpRight", 12)}</button>
                         <button type="button" class="cat-te-clip-thumb-delete" title="${T("remove_from_clip_title")}" hidden>${iconHtml("trash", 12)}</button>
                       </div>
@@ -1866,6 +2051,7 @@ export class CapTimelineEditorApp {
                   </div>
                 </div>
               </div>
+              <div class="cat-te-visual-clip-body">
               <div class="cat-te-clip-settings">
                 <label class="cat-te-clip-setting-row">
                   <span>${T("type_label")}</span>
@@ -1914,7 +2100,7 @@ export class CapTimelineEditorApp {
                 </label>
                 <label class="cat-te-clip-setting-check cat-te-use-global">
                   <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
-                  <span>Use Global</span>
+                  <span>${T("use_global_prompt_label")}</span>
                 </label>
               </div>
               <div class="cat-te-prompt-wrap">
@@ -1942,6 +2128,92 @@ export class CapTimelineEditorApp {
                   <button type="button" class="cat-te-clip-videos-open" title="${T("preview_manage_title")}">${iconHtml("squareArrowOutUpRight", 12)}</button>
                 </div>
                 <div class="cat-te-clip-videos-list"></div>
+              </div>
+              </div>
+              <div class="cat-te-subtitle-panel" hidden>
+                <label class="cat-te-clip-setting-row cat-te-sub-text-row">
+                  <span>${T("subtitle_text_label")}</span>
+                  <textarea class="cat-te-sub-text" rows="3" placeholder="${T("subtitle_default_text")}"></textarea>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_font_label")}</span>
+                  <select class="cat-te-sub-font"></select>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_size_label")}</span>
+                  <input class="cat-te-sub-size" type="number" min="8" max="400" step="1" value="48" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("letter_spacing_label")}</span>
+                  <input class="cat-te-sub-letter-spacing" type="number" min="-50" max="200" step="1" value="0" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_color_label")}</span>
+                  <input class="cat-te-sub-color" type="color" value="#ffffff" />
+                </label>
+                <div class="cat-te-sub-check-row">
+                  <label class="cat-te-clip-setting-check"><input class="cat-te-sub-bold" type="checkbox" /><span>${T("subtitle_bold_label")}</span></label>
+                  <label class="cat-te-clip-setting-check"><input class="cat-te-sub-italic" type="checkbox" /><span>${T("subtitle_italic_label")}</span></label>
+                </div>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_opacity_label")}</span>
+                  <input class="cat-te-sub-opacity" type="range" min="0" max="100" step="1" value="100" />
+                  <span class="cat-te-sub-opacity-val">100%</span>
+                </label>
+                <label class="cat-te-clip-setting-check"><input class="cat-te-sub-stroke" type="checkbox" checked /><span>${T("subtitle_stroke_label")}</span></label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_stroke_color_label")}</span>
+                  <input class="cat-te-sub-stroke-color" type="color" value="#000000" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_stroke_width_label")}</span>
+                  <input class="cat-te-sub-stroke-width" type="number" min="0" max="40" step="0.5" value="3" />
+                </label>
+                <label class="cat-te-clip-setting-check"><input class="cat-te-sub-shadow" type="checkbox" checked /><span>${T("subtitle_shadow_label")}</span></label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_color_label")}</span>
+                  <input class="cat-te-sub-shadow-color" type="color" value="#000000" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_blur_label")}</span>
+                  <input class="cat-te-sub-shadow-blur" type="number" min="0" max="64" step="1" value="4" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_x_label")}</span>
+                  <input class="cat-te-sub-shadow-x" type="number" min="-64" max="64" step="1" value="2" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_y_label")}</span>
+                  <input class="cat-te-sub-shadow-y" type="number" min="-64" max="64" step="1" value="2" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_align_label")}</span>
+                  <select class="cat-te-sub-align">
+                    <option value="left">${T("subtitle_align_left")}</option>
+                    <option value="center" selected>${T("subtitle_align_center")}</option>
+                    <option value="right">${T("subtitle_align_right")}</option>
+                  </select>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_valign_label")}</span>
+                  <select class="cat-te-sub-valign">
+                    <option value="top">${T("subtitle_valign_top")}</option>
+                    <option value="middle">${T("subtitle_valign_middle")}</option>
+                    <option value="bottom" selected>${T("subtitle_valign_bottom")}</option>
+                  </select>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_offset_x_label")}</span>
+                  <input class="cat-te-sub-offset-x" type="number" min="-50" max="50" step="1" value="0" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_offset_y_label")}</span>
+                  <input class="cat-te-sub-offset-y" type="number" min="-50" max="50" step="1" value="8" />
+                </label>
+                <div class="cat-te-sub-apply-row">
+                  <button type="button" class="cat-te-btn cat-te-sub-apply-track">${T("subtitle_apply_track_btn")}</button>
+                  <button type="button" class="cat-te-btn cat-te-sub-apply-all">${T("subtitle_apply_all_btn")}</button>
+                </div>
               </div>
               </div>
               <div class="cat-te-shortcuts">
@@ -2130,6 +2402,10 @@ export class CapTimelineEditorApp {
                         <label class="cat-te-compose-field cat-te-wm-narrow">
                           <span>${T("font_size_label")}</span>
                           <input class="cat-te-wm-font-size" type="number" min="6" max="400" step="1" />
+                        </label>
+                        <label class="cat-te-compose-field cat-te-wm-narrow">
+                          <span>${T("letter_spacing_label")}</span>
+                          <input class="cat-te-wm-letter-spacing" type="number" min="-50" max="200" step="1" />
                         </label>
                         <label class="cat-te-compose-field cat-te-wm-narrow">
                           <span>${T("color_label")}</span>
@@ -2336,6 +2612,8 @@ export class CapTimelineEditorApp {
         this.sidebarTitle = el.querySelector(".cat-te-sidebar-title");
         this.projectPanel = el.querySelector(".cat-te-project-panel");
         this.clipPanel = el.querySelector(".cat-te-clip-panel");
+        this.visualClipBody = el.querySelector(".cat-te-visual-clip-body");
+        this.subtitlePanel = el.querySelector(".cat-te-subtitle-panel");
         this.globalPromptInput = el.querySelector(".cat-te-global-prompt-input");
         this.globalPromptCommentBtn = el.querySelector(".cat-te-global-prompt-comment-btn");
         this.mediaStarFilterHost = el.querySelector(".cat-te-media-header-actions");
@@ -2371,6 +2649,29 @@ export class CapTimelineEditorApp {
         this.clipAgentSelect = el.querySelector(".cat-te-clip-agent");
         this.clipAgentCustomInput = el.querySelector(".cat-te-clip-agent-custom");
         this.clipAgentCustomRow = el.querySelector(".cat-te-clip-agent-custom-row");
+        this.subTextInput = el.querySelector(".cat-te-sub-text");
+        this.subFontSelect = el.querySelector(".cat-te-sub-font");
+        this.subSizeInput = el.querySelector(".cat-te-sub-size");
+        this.subLetterSpacingInput = el.querySelector(".cat-te-sub-letter-spacing");
+        this.subColorInput = el.querySelector(".cat-te-sub-color");
+        this.subBoldCb = el.querySelector(".cat-te-sub-bold");
+        this.subItalicCb = el.querySelector(".cat-te-sub-italic");
+        this.subOpacityInput = el.querySelector(".cat-te-sub-opacity");
+        this.subOpacityVal = el.querySelector(".cat-te-sub-opacity-val");
+        this.subStrokeCb = el.querySelector(".cat-te-sub-stroke");
+        this.subStrokeColorInput = el.querySelector(".cat-te-sub-stroke-color");
+        this.subStrokeWidthInput = el.querySelector(".cat-te-sub-stroke-width");
+        this.subShadowCb = el.querySelector(".cat-te-sub-shadow");
+        this.subShadowColorInput = el.querySelector(".cat-te-sub-shadow-color");
+        this.subShadowBlurInput = el.querySelector(".cat-te-sub-shadow-blur");
+        this.subShadowXInput = el.querySelector(".cat-te-sub-shadow-x");
+        this.subShadowYInput = el.querySelector(".cat-te-sub-shadow-y");
+        this.subAlignSelect = el.querySelector(".cat-te-sub-align");
+        this.subVAlignSelect = el.querySelector(".cat-te-sub-valign");
+        this.subOffsetXInput = el.querySelector(".cat-te-sub-offset-x");
+        this.subOffsetYInput = el.querySelector(".cat-te-sub-offset-y");
+        this.subApplyTrackBtn = el.querySelector(".cat-te-sub-apply-track");
+        this.subApplyAllBtn = el.querySelector(".cat-te-sub-apply-all");
         this.clipInfoDetail = el.querySelector(".cat-te-clip-info-detail");
         this.clipSwiper = el.querySelector(".cat-te-clip-swiper");
         this.clipSwiperPrev = el.querySelector(".cat-te-clip-swiper-nav.prev");
@@ -2379,6 +2680,7 @@ export class CapTimelineEditorApp {
         this.clipThumb = el.querySelector(".cat-te-clip-thumb");
         this.clipThumbVideo = el.querySelector(".cat-te-clip-thumb-video");
         this.clipThumbEmpty = el.querySelector(".cat-te-clip-thumb-empty");
+        this.clipThumbSubtitle = el.querySelector(".cat-te-clip-thumb-subtitle");
         this.clipThumbSortBtn = el.querySelector(".cat-te-clip-thumb-sort");
         this.clipThumbDeleteBtn = el.querySelector(".cat-te-clip-thumb-delete");
         this.clipVideosHost = el.querySelector(".cat-te-clip-videos");
@@ -2446,6 +2748,7 @@ export class CapTimelineEditorApp {
         this.wmTextContent = el.querySelector(".cat-te-wm-text-content");
         this.wmFontFamily = el.querySelector(".cat-te-wm-font-family");
         this.wmFontSize = el.querySelector(".cat-te-wm-font-size");
+        this.wmLetterSpacing = el.querySelector(".cat-te-wm-letter-spacing");
         this.wmFontColor = el.querySelector(".cat-te-wm-font-color");
         this.wmImagePreview = el.querySelector(".cat-te-wm-image-preview");
         this.wmImageUploadBtn = el.querySelector(".cat-te-wm-image-upload");
@@ -2602,6 +2905,7 @@ export class CapTimelineEditorApp {
         this.clipRoleCustomInput?.addEventListener("change", () => this._onClipRoleCustomChange());
         this.clipAgentSelect?.addEventListener("change", () => this._onClipAgentChange());
         this.clipAgentCustomInput?.addEventListener("change", () => this._onClipAgentCustomChange());
+        this._bindSubtitlePanelEvents();
         this.clipSwiperPrev?.addEventListener("click", (e) => {
             e.stopPropagation();
             this._stepClipPreview(-1);
@@ -3135,6 +3439,10 @@ export class CapTimelineEditorApp {
         return (this._timeline?.tracks ?? []).filter(t => t.type === "audio");
     }
 
+    _allTextTracks() {
+        return (this._timeline?.tracks ?? []).filter(t => isSubtitleTrackType(t.type));
+    }
+
     _trackIndex(track) {
         return this._trackInfo.get(track.id)?.trackIndex ?? 0;
     }
@@ -3220,8 +3528,15 @@ export class CapTimelineEditorApp {
         // instead of skipping it, so the icons that DO apply still align
         // vertically with the same column in other rows.
         actions.appendChild(this._makeTrackSlot(track, "lock"));
-        actions.appendChild(this._makeTrackSlot(track, track.type === "image" ? "visible" : null));
-        actions.appendChild(this._makeTrackSlot(track, (track.type === "audio" || track.type === "image" || track.type === "video") ? "mute" : null));
+        actions.appendChild(this._makeTrackSlot(
+            track,
+            (track.type === "image" || isSubtitleTrackType(track.type)) ? "visible" : null,
+        ));
+        // Audio slot: real mute for media/audio; disabled placeholder for subtitle tracks.
+        actions.appendChild(this._makeTrackSlot(
+            track,
+            (track.type === "audio" || track.type === "image" || track.type === "video") ? "mute" : null,
+        ));
     }
 
     /** User-added tracks (not the default main/overlay/audio ones) disappear
@@ -3579,6 +3894,11 @@ export class CapTimelineEditorApp {
                 const source = clip.source && typeof clip.source === "object" ? clip.source : {};
                 const mediaRows = this._jsonClipMediaRows(clip);
                 const isAudio = clip.type === "audio" || trackType === "audio";
+                const isSubtitle = !isAudio && (
+                    clip.type === "subtitle"
+                    || trackType === "subtitle"
+                    || trackType === "text"
+                );
                 const first = mediaRows[0];
                 const startMs = Number(clip.start_ms) || 0;
                 const durationMs = Number(clip.duration_ms);
@@ -3593,18 +3913,19 @@ export class CapTimelineEditorApp {
                 const durationMsOut = Math.max(1, Math.round(duration * 1000));
                 clips.push({
                     ...clip,
-                    clip_type: isAudio ? "audio" : "clip",
+                    clip_type: isAudio ? "audio" : isSubtitle ? "subtitle" : "clip",
                     track: trackIndex,
                     start_ms: startMsOut,
                     duration_ms: durationMsOut,
                     end_ms: startMsOut + durationMsOut,
-                    items: isAudio
+                    items: isAudio || isSubtitle
                         ? []
                         : mediaRows
                             .filter((row) => row.kind !== "audio")
                             .map((row) => ({ id: row.id, kind: row.kind, file: row.file })),
-                    start_image: isAudio ? null : (first?.file || null),
+                    start_image: isAudio || isSubtitle ? null : (first?.file || null),
                     audio_file: isAudio ? (first?.file || null) : null,
+                    text: isSubtitle ? String(clip.text ?? clip.name ?? "") : undefined,
                     source_duration: (
                         Number(source.duration_ms) > 0
                             ? Number(source.duration_ms)
@@ -4085,8 +4406,8 @@ export class CapTimelineEditorApp {
             const name = document.createElement("button");
             name.type = "button";
             name.className = "cat-te-clip-video-name";
-            name.textContent = row.file.split(/[\\/]/).pop();
-            name.title = row.file;
+            name.textContent = String(row.file || "").split(/[\\/]/).pop() || T("asset_fallback_name");
+            name.title = row.file || "";
             name.addEventListener("click", () => this._openGenVideoModal(clip, index));
 
             const mute = document.createElement("button");
@@ -5613,6 +5934,14 @@ export class CapTimelineEditorApp {
         this._addVideoAtTime(filename, this._timeline.currentTime, null);
     }
 
+    _showInsertClipMenu(e) {
+        const r = e.currentTarget.getBoundingClientRect();
+        this._buildCtxMenu([
+            { label: T("insert_media_clip_menu"), fn: () => this._insertPackageAtTime(this._timeline?.currentTime ?? 0) },
+            { label: T("insert_subtitle_clip_menu"), fn: () => this._insertSubtitleAtTime(this._timeline?.currentTime ?? 0) },
+        ], r.left, r.bottom + 4);
+    }
+
     /**
      * Empty Clip containers on image/video tracks — used for 文生视频
      * or as a group that later holds multiple stills / videos.
@@ -5620,6 +5949,37 @@ export class CapTimelineEditorApp {
     _insertPackageAtPlayhead() {
         if (!this._timeline) return;
         this._insertPackageAtTime(this._timeline.currentTime);
+    }
+
+    _insertSubtitleAtTime(atSec, preferredTrack = null) {
+        if (!this._timeline) return;
+        let track = preferredTrack && isSubtitleTrackType(preferredTrack.type) ? preferredTrack : null;
+        if (track?.locked) track = null;
+        if (!track) {
+            track = this._allTextTracks().find((t) => !t.locked && this._trackHasRoom(t, atSec, 0.05));
+        }
+        this._recordUndo();
+        if (!track) {
+            track = this._addUserTrack("text");
+        }
+        if (!track || track.locked) return;
+        const dur = Math.min(2, this._timeline.duration / 4) || 1;
+        const text = T("subtitle_default_text");
+        const clip = this._timeline.addClip(track.id, {
+            name: text,
+            startTime: atSec,
+            duration: dur,
+            color: track.color || "#ff9e4a",
+        });
+        this._meta.set(clip.id, {
+            ...defaultSubtitleMeta(this._trackIndex(track)),
+            text,
+        });
+        this._timeline.selectClip(clip);
+        this._timeline.setCurrentTime(atSec);
+        this._decorateClip(clip);
+        this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
     }
 
     _insertPackageAtTime(atSec) {
@@ -6242,7 +6602,7 @@ export class CapTimelineEditorApp {
             fps,
             timeFormat: "frames",
             zoom: 1.2,
-            addTrackTypes: ["image", "audio"],
+            addTrackTypes: ["image", "audio", "text"],
         });
 
         let project = projectOverride;
@@ -6281,12 +6641,20 @@ export class CapTimelineEditorApp {
         this._timeline.fps = this.getFps();
 
         const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
-        const tracksCfg = projectTracks.map((track, order) => ({
-            ...track,
-            type: track.type === "audio" ? "audio" : "image",
-            trackIndex: order,
-            isMain: track.role === "main",
-        }));
+        const tracksCfg = projectTracks.map((track, order) => {
+            const rawType = String(track.type || "visual").toLowerCase();
+            const type = rawType === "audio"
+                ? "audio"
+                : (rawType === "subtitle" || rawType === "text")
+                    ? "text"
+                    : "image";
+            return {
+                ...track,
+                type,
+                trackIndex: order,
+                isMain: track.role === "main",
+            };
+        });
 
         if (!tracksCfg.length) {
             this._createDefaultTracks();
@@ -6344,9 +6712,15 @@ export class CapTimelineEditorApp {
             const track = tl.addTrackAt({
                 id: row.id,
                 type: row.type || "image",
-                name: row.name || (row.type === "audio" ? T("audio_track_name") : T("generic_track_name")),
+                name: row.name || (
+                    row.type === "audio"
+                        ? T("audio_track_name")
+                        : isSubtitleTrackType(row.type)
+                            ? T("subtitle_track_name")
+                            : T("generic_track_name")
+                ),
                 isMain,
-                height: TRACK_HEIGHT,
+                height: trackHeightFor(row.type),
                 color: row.color,
                 locked: !!row.locked,
                 visible: row.visible !== false,
@@ -6358,7 +6732,15 @@ export class CapTimelineEditorApp {
             this._trackInfo.set(track.id, {
                 trackIndex: row.trackIndex ?? index,
                 enabled: row.enabled !== false,
-                role: row.role || (isMain ? "main" : (row.type === "audio" ? "audio" : "overlay")),
+                role: row.role || (
+                    isMain
+                        ? "main"
+                        : row.type === "audio"
+                            ? "audio"
+                            : isSubtitleTrackType(row.type)
+                                ? "subtitle"
+                                : "overlay"
+                ),
             });
             this._setupTrackControls(track);
         });
@@ -6463,6 +6845,50 @@ export class CapTimelineEditorApp {
                 fadeInMs,
                 fadeOutMs,
                 mediaId: audioMedia?.id || "",
+            });
+            this._decorateClip(clip);
+            return;
+        }
+
+        if (clipType === "subtitle" || clipType === "text" || isSubtitleTrackType(track.type)) {
+            const text = String(c.text ?? c.name ?? T("subtitle_default_text"));
+            const clip = this._timeline.addClip(track.id, {
+                id: c.id || uid(),
+                name: text.slice(0, 40) || T("subtitle_default_text"),
+                startTime,
+                duration: dur,
+                color: track.color || "#ff9e4a",
+            });
+            const style = c.style && typeof c.style === "object" ? c.style : c;
+            this._meta.set(clip.id, {
+                ...defaultSubtitleMeta(trackIdx),
+                ...pickSubtitleStyle({
+                    text,
+                    fontFamily: style.font_family ?? style.fontFamily,
+                    fontPath: style.font_path ?? style.fontPath,
+                    fontSize: style.font_size ?? style.fontSize,
+                    letterSpacing: style.letter_spacing ?? style.letterSpacing,
+                    color: style.color,
+                    bold: style.bold,
+                    italic: style.italic,
+                    opacity: style.opacity,
+                    strokeEnabled: style.stroke_enabled ?? style.strokeEnabled,
+                    strokeColor: style.stroke_color ?? style.strokeColor,
+                    strokeWidth: style.stroke_width ?? style.strokeWidth,
+                    shadowEnabled: style.shadow_enabled ?? style.shadowEnabled,
+                    shadowColor: style.shadow_color ?? style.shadowColor,
+                    shadowBlur: style.shadow_blur ?? style.shadowBlur,
+                    shadowOffsetX: style.shadow_offset_x ?? style.shadowOffsetX,
+                    shadowOffsetY: style.shadow_offset_y ?? style.shadowOffsetY,
+                    align: style.align,
+                    vAlign: style.v_align ?? style.vAlign,
+                    offsetX: style.offset_x ?? style.offsetX,
+                    offsetY: style.offset_y ?? style.offsetY,
+                }),
+                text,
+                disabled: !!c.disabled,
+                visible: c.visible !== false,
+                trackIndex: trackIdx,
             });
             this._decorateClip(clip);
             return;
@@ -6697,6 +7123,7 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!tl?.scrollEl) return null;
         const track = tl._findTrackAtY(clientY, "image")
+            || tl._findTrackAtY(clientY, "text")
             || tl._findTrackAtY(clientY, "audio")
             || tl._findTrackAtY(clientY, "video");
         if (!track) return null;
@@ -6710,13 +7137,20 @@ export class CapTimelineEditorApp {
         if (!clip?.el) return;
         const m = this._ensureClipMeta(clip);
         const track = clip.track;
-        const trackHidden = track.type === "image" && track.visible === false;
+        const trackHidden = (track.type === "image" || isSubtitleTrackType(track.type)) && track.visible === false;
         const trackMuted = track.type === "audio" && track.muted;
         const isAudio = m.clipType === "audio" || track.type === "audio";
+        const isSubtitle = isSubtitleClipMeta(m, track);
         const disabled = !isAudio && (!!m.disabled || trackHidden);
         clip.el.classList.toggle("cat-te-clip-disabled", disabled);
         clip.el.classList.toggle("cat-te-clip-muted", isAudio && (!!m.muted || trackMuted));
-        clip.el.classList.toggle("cat-te-clip-package", !isAudio && this._isEmptyGroupClip(m));
+        clip.el.classList.toggle("cat-te-clip-package", !isAudio && !isSubtitle && this._isEmptyGroupClip(m));
+        if (isSubtitle) {
+            const label = (m.text || clip.name || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+            clip.name = label.slice(0, 40);
+            const labelEl = clip.el.querySelector(".tl-clip-label");
+            if (labelEl) labelEl.textContent = clip.name;
+        }
 
         let muteBadge = clip.el.querySelector(".cat-te-mute-badge");
         if (isAudio) {
@@ -7810,8 +8244,13 @@ export class CapTimelineEditorApp {
             this._timeline.selectClip(clip);
         }
         const m = this._meta.get(clip.id)
-            ?? (clip.track.type === "audio" ? defaultAudioMeta() : defaultImageMeta());
+            ?? (clip.track.type === "audio"
+                ? defaultAudioMeta()
+                : isSubtitleTrackType(clip.track.type)
+                    ? defaultSubtitleMeta()
+                    : defaultImageMeta());
         const isAudio = clip.track.type === "audio" || m.clipType === "audio";
+        const isSubtitle = isSubtitleClipMeta(m, clip.track);
         const t = this._timeline.currentTime;
         const canSplit = t > clip.startTime && t < clip.endTime;
         const items = [
@@ -7826,6 +8265,11 @@ export class CapTimelineEditorApp {
                     this._decorateClip(clip);
                 },
             });
+        } else if (isSubtitle) {
+            items.push(
+                { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
+                { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
+            );
         } else {
             items.push(
                 { label: T("menu_run"), fn: () => void this._runClipDownstream(clip) },
@@ -7872,11 +8316,16 @@ export class CapTimelineEditorApp {
 
     _snapshotClip(clip) {
         const isAudio = clip.track?.type === "audio";
+        const isSubtitle = isSubtitleTrackType(clip.track?.type);
         const meta = this._meta.get(clip.id)
-            ?? (isAudio ? defaultAudioMeta() : defaultImageMeta());
+            ?? (isAudio
+                ? defaultAudioMeta()
+                : isSubtitle
+                    ? defaultSubtitleMeta()
+                    : defaultImageMeta());
         return {
             trackId: clip.track.id,
-            trackType: isAudio ? "audio" : "image",
+            trackType: isAudio ? "audio" : isSubtitle ? "text" : "image",
             startTime: clip.startTime,
             duration: clip.duration,
             name: clip.name,
@@ -7911,14 +8360,23 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!tl || !snap) return null;
         const wantAudio = snap.trackType === "audio";
+        const wantSub = isSubtitleTrackType(snap.trackType);
         const orig = tl.getTrack(snap.trackId);
         if (orig && !orig.locked && orig.visible !== false) {
-            const ok = wantAudio ? orig.type === "audio" : (orig.type === "image" || orig.type === "video");
+            const ok = wantAudio
+                ? orig.type === "audio"
+                : wantSub
+                    ? isSubtitleTrackType(orig.type)
+                    : (orig.type === "image" || orig.type === "video");
             if (ok) return orig;
         }
         if (wantAudio) {
             return this._allAudioTracks().find(t => !t.locked && t.visible !== false)
                 ?? this._createInsertTrack("audio");
+        }
+        if (wantSub) {
+            return this._allTextTracks().find(t => !t.locked && t.visible !== false)
+                ?? this._addUserTrack("text");
         }
         return this._allImageTracks().find(t => !t.locked && t.visible !== false)
             ?? this._createInsertTrack("image");
@@ -8050,7 +8508,8 @@ export class CapTimelineEditorApp {
 
     /**
      * Queue the workflow so Timeline Editor emits data_json / clips_audio for
-     * only this visual clip (others temporarily disabled for the queue snapshot).
+     * only this visual clip. Uses settings.runtime_only_clip_ids (not temporary
+     * disable flags) so the filter survives queuePrompt flush / restore races.
      */
     async _runClipDownstream(clip) {
         if (!clip || !this.node) return;
@@ -8059,44 +8518,19 @@ export class CapTimelineEditorApp {
             alert(T("audio_clip_not_in_data_json"));
             return;
         }
+        if (isSubtitleTrackType(clip.track?.type) || isSubtitleClipMeta(m, clip.track)) {
+            return;
+        }
+        if (this._isEmptyGroupClip(m)) return;
         if (typeof app?.queuePrompt !== "function") {
             alert(T("queue_prompt_not_found"));
             return;
         }
 
-        // Snapshot enable/disable so the editor UI is restored after queue.
-        const snapshot = [];
-        for (const track of this._allImageTracks()) {
-            for (const c of track.clips) {
-                const meta = this._meta.get(c.id) ?? defaultImageMeta();
-                snapshot.push({ id: c.id, disabled: !!meta.disabled });
-            }
-        }
-
+        this._runtimeOnlyClipIds = [String(clip.id)];
         try {
-            for (const track of this._allImageTracks()) {
-                for (const c of track.clips) {
-                    const meta = this._meta.get(c.id) ?? defaultImageMeta();
-                    const next = c.id !== clip.id;
-                    if (meta.disabled !== next) {
-                        meta.disabled = next;
-                        this._meta.set(c.id, meta);
-                        this._decorateClip(c);
-                    }
-                }
-            }
-            // Ensure the chosen clip itself is enabled and its track is usable.
-            const self = this._meta.get(clip.id) ?? defaultImageMeta();
-            self.disabled = false;
-            self.visible = true;
-            this._meta.set(clip.id, self);
-            if (clip.track?.visible === false) clip.track.setVisible?.(true);
-            this._decorateClip(clip);
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
-
-            // Register after queuePrompt so each run keeps its own prompt_id →
-            // clip mapping (multi-clip queue no longer overwrites one global id).
             const result = await app.queuePrompt(0);
             this._pendingGeneratedJobs.push({
                 clipId: clip.id,
@@ -8106,19 +8540,9 @@ export class CapTimelineEditorApp {
         } catch (error) {
             alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
-            for (const row of snapshot) {
-                const c = this._findClipById(row.id);
-                if (!c) continue;
-                const meta = this._meta.get(c.id) ?? defaultImageMeta();
-                if (meta.disabled !== row.disabled) {
-                    meta.disabled = row.disabled;
-                    this._meta.set(c.id, meta);
-                    this._decorateClip(c);
-                }
-            }
+            this._runtimeOnlyClipIds = null;
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
-            this._updatePromptPanel();
         }
     }
 
@@ -8837,6 +9261,21 @@ export class CapTimelineEditorApp {
         return drew;
     }
 
+    _hasVisibleSubtitleAt(t) {
+        for (const track of this._allTextTracks()) {
+            if (track.visible === false) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
+                const m = this._meta.get(clip.id) ?? defaultSubtitleMeta();
+                if (m.disabled || m.visible === false) continue;
+                if (String(m.text || "").trim()) return true;
+            }
+        }
+        return false;
+    }
+
     async _renderProgramPreview() {
         const layout = this._layoutProgramCanvas();
         const canvas = this.programCanvas;
@@ -8850,9 +9289,10 @@ export class CapTimelineEditorApp {
 
         const t = this._timeline?.currentTime ?? 0;
         const layers = this._collectPreviewLayers(t);
+        const hasSub = this._hasVisibleSubtitleAt(t);
         const usedVideoKeys = new Set();
 
-        if (!layers.length) {
+        if (!layers.length && !hasSub) {
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = "#000";
             ctx.fillRect(0, 0, cw, ch);
@@ -8876,9 +9316,11 @@ export class CapTimelineEditorApp {
         octx.setTransform(1, 0, 0, 1, 0, 0);
         octx.fillStyle = "#000";
         octx.fillRect(0, 0, cw, ch);
-        const drew = this._drawPreviewLayersOnce(octx, cw, ch, t, {
+        const drewVisual = this._drawPreviewLayersOnce(octx, cw, ch, t, {
             onVideoUsed: (key) => usedVideoKeys.add(key),
         });
+        this._drawSubtitleOverlays(octx, cw, ch, t);
+        const drew = drewVisual || hasSub;
         this._pauseUnusedPreviewVideos(usedVideoKeys);
 
         if (drew || sizeChanged || !this._programHadFrame) {
@@ -8905,7 +9347,7 @@ export class CapTimelineEditorApp {
         packageBtn.className = "tl-btn tl-btn-add-package";
         packageBtn.title = T("insert_empty_clip_title");
         packageBtn.textContent = T("insert_clip_btn");
-        packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
+        packageBtn.addEventListener("click", (e) => this._showInsertClipMenu(e));
         tl.toolbarEl.appendChild(packageBtn);
 
         this.allGenPreviewBtn = document.createElement("button");
@@ -8942,13 +9384,30 @@ export class CapTimelineEditorApp {
 
         this._updateHistoryButtons();
 
-        // The "+ 轨道" dropdown is built and handled entirely inside
-        // Timeline.js, so there's no app-level call site to record an undo
-        // point right before the new track is actually added. Recording it
-        // here (before the menu even opens) is the closest equivalent —
-        // worst case, a cancelled menu leaves one harmless no-op undo step.
-        tl.toolbarEl.querySelector(".tl-btn-add-track")
-            ?.addEventListener("click", () => this._recordUndo());
+        // Replace Timeline's built-in add-track menu with the same ctx popup as Run.
+        const addTrackBtn = tl.toolbarEl.querySelector(".tl-btn-add-track");
+        if (addTrackBtn) {
+            const neu = addTrackBtn.cloneNode(true);
+            addTrackBtn.replaceWith(neu);
+            neu.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this._recordUndo();
+                this._showAddTrackMenu(e);
+            });
+        }
+
+        tl._tracksEl?.addEventListener("dblclick", (e) => {
+            if (e.target.closest?.(".tl-clip")) return;
+            const trackEl = e.target.closest?.(".tl-track");
+            if (!trackEl) return;
+            const track = tl.tracks.find((row) => row.el === trackEl);
+            if (!isSubtitleTrackType(track?.type) || track.locked) return;
+            const rect = tl.scrollEl.getBoundingClientRect();
+            const x = e.clientX - rect.left + tl.scrollEl.scrollLeft;
+            const at = Math.max(0, x / Math.max(1e-6, tl.pixelsPerSecond));
+            this._insertSubtitleAtTime(at, track);
+        });
 
         const scroll = tl.scrollEl;
         scroll.addEventListener("dragover", (e) => {
@@ -8991,9 +9450,15 @@ export class CapTimelineEditorApp {
         tl.on("clip:select", ({ selected }) => {
             this._selClips = selected ?? tl.getSelectedClips();
             this._syncSelectedClip();
-            this._updatePromptPanel();
-            this._retargetOutputVideosPickerFromSelection();
-            this._overlay?.focus();
+            // Do not focus the overlay here: focus during clip mousedown aborts
+            // the mouse sequence and can leave drag listeners stuck, which then
+            // eat sidebar clicks (settings look dead, drag feels broken).
+            try {
+                this._updatePromptPanel();
+                this._retargetOutputVideosPickerFromSelection();
+            } catch (err) {
+                console.error("[CapTE] clip settings panel sync failed", err);
+            }
         });
         tl.on("clip:add", ({ clip }) => {
             this._decorateClip(clip);
@@ -9016,9 +9481,14 @@ export class CapTimelineEditorApp {
         });
         tl.on("clip:trackchange", ({ clip, from, to }) => {
             const m = this._meta.get(clip.id)
-                ?? (to.type === "audio" ? defaultAudioMeta() : defaultImageMeta());
+                ?? (to.type === "audio"
+                    ? defaultAudioMeta()
+                    : isSubtitleTrackType(to.type)
+                        ? defaultSubtitleMeta()
+                        : defaultImageMeta());
             m.trackIndex = this._trackIndex(to);
             if (to.type === "audio") m.clipType = "audio";
+            else if (isSubtitleTrackType(to.type)) m.clipType = "subtitle";
             else m.clipType = "image";
             this._meta.set(clip.id, m);
             this._updateClipInfoPanel(clip);
@@ -9029,25 +9499,30 @@ export class CapTimelineEditorApp {
             this._trackInfo.delete(trackId);
             this._scheduleProgramPreview();
         });
+        // Per-frame move/resize: only refresh the info readout. Duration /
+        // program preview run on gesture end - refreshing duration every
+        // frame can clamp the live drag against a shrinking timeline.
         tl.on("clip:move", ({ clip }) => {
             if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
-            this._refreshTimelineDuration();
-            this._scheduleProgramPreview();
         });
         tl.on("clip:resize", ({ clip }) => {
             if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
-            this._refreshTimelineDuration();
-            this._scheduleProgramPreview();
         });
         // A drag (move/trim) fires many per-frame events; only the gesture
         // as a whole should become one undo step, and only if it actually
         // changed anything.
         tl.on("clip:movestart", () => this._beginPendingUndo());
-        tl.on("clip:moveend", ({ moved }) => this._commitPendingUndo(moved));
+        tl.on("clip:moveend", ({ moved }) => {
+            this._commitPendingUndo(moved);
+            this._refreshTimelineDuration();
+            this._scheduleProgramPreview();
+        });
         tl.on("clip:resizestart", () => this._beginPendingUndo());
         tl.on("clip:resizeend", ({ clip, moved }) => {
             this._syncAudioFadeMeta(clip);
             this._commitPendingUndo(moved);
+            this._refreshTimelineDuration();
+            this._scheduleProgramPreview();
         });
         tl.on("clip:fadestart", () => this._beginPendingUndo());
         tl.on("clip:fadeend", ({ clip, moved }) => {
@@ -9055,16 +9530,17 @@ export class CapTimelineEditorApp {
             this._commitPendingUndo(moved);
         });
         tl.on("clip:fade", ({ clip }) => {
-            if (this._selClip?.id === clip.id) this._updateClipInfoView(clip);
+            if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
             if (this._timeline?._playing) this._startAudioPlayback();
         });
         tl.on("track:add", ({ track }) => {
             if (!this._trackInfo.has(track.id)) {
                 this._trackInfo.set(track.id, { trackIndex: this._nextTrackIndex() });
             }
-            track.height = TRACK_HEIGHT;
-            track.el.style.height = `${TRACK_HEIGHT}px`;
-            track.headerEl.style.height = `${TRACK_HEIGHT}px`;
+            const h = trackHeightFor(track.type);
+            track.height = h;
+            track.el.style.height = `${h}px`;
+            track.headerEl.style.height = `${h}px`;
             this._setupTrackControls(track);
         });
         tl.on("zoomchange", () => this._refreshTimelineDuration());
@@ -9100,16 +9576,18 @@ export class CapTimelineEditorApp {
     }
 
     _clearClipInfoPanel() {
-        this.clipInfoDetail.hidden = true;
-        this.clipThumb.removeAttribute("src");
-        this.clipThumb.style.display = "";
-        this.clipThumb.parentElement.classList.remove("cat-te-clip-thumb-audio");
-        this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-clickable");
+        if (this.clipInfoDetail) this.clipInfoDetail.hidden = true;
+        if (this.clipThumb) {
+            this.clipThumb.removeAttribute("src");
+            this.clipThumb.style.display = "";
+            this.clipThumb.parentElement?.classList.remove("cat-te-clip-thumb-audio");
+        }
+        this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-clickable", "cat-te-clip-thumb-audio");
         this.clipThumbWrap?.removeAttribute("title");
-        this.clipNameEl.textContent = "";
-        this.clipStartEl.textContent = "";
-        this.clipEndEl.textContent = "";
-        this.clipDurEl.textContent = "";
+        if (this.clipNameEl) this.clipNameEl.textContent = "";
+        if (this.clipStartEl) this.clipStartEl.textContent = "";
+        if (this.clipEndEl) this.clipEndEl.textContent = "";
+        if (this.clipDurEl) this.clipDurEl.textContent = "";
         if (this.clipItemIndexEl) this.clipItemIndexEl.textContent = "";
         if (this.clipThumbVideo) {
             this.clipThumbVideo.pause();
@@ -9117,15 +9595,15 @@ export class CapTimelineEditorApp {
             this.clipThumbVideo.hidden = true;
         }
         if (this.clipThumbEmpty) this.clipThumbEmpty.hidden = true;
-        this.clipSwiperPrev && (this.clipSwiperPrev.hidden = true);
-        this.clipSwiperNext && (this.clipSwiperNext.hidden = true);
+        if (this.clipThumbSubtitle) this.clipThumbSubtitle.hidden = true;
+        if (this.clipSwiperPrev) this.clipSwiperPrev.hidden = true;
+        if (this.clipSwiperNext) this.clipSwiperNext.hidden = true;
         if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = true;
         if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = true;
         if (this.clipVideosHost) this.clipVideosHost.hidden = true;
         this.clipVideosList?.replaceChildren();
         this._syncCurrentMediaPromptUi(null, false);
     }
-
     _stepClipPreview(delta) {
         const clip = this._selClip;
         if (!clip) return;
@@ -9144,60 +9622,87 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         const track = clip.track;
         const isAudio = track.type === "audio";
-        const m = this._ensureClipMeta(clip);
-        const items = isAudio ? [] : this._clipItems(m);
-        const idx = this._clipPreviewItemIndex(clip, m);
-        const current = items[idx] || null;
-        this.clipInfoDetail.hidden = false;
-
+        const isSubtitle = isSubtitleTrackType(track.type);
+        // Reset thumb overlays before any meta work that might throw.
         if (this.clipThumbVideo) {
             this.clipThumbVideo.pause();
             this.clipThumbVideo.hidden = true;
         }
         if (this.clipThumbEmpty) this.clipThumbEmpty.hidden = true;
-        this.clipThumb.style.display = "";
-        this.clipThumb.parentElement.classList.remove("cat-te-clip-thumb-audio");
+        if (this.clipThumbSubtitle) this.clipThumbSubtitle.hidden = true;
+        this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-audio");
+        if (this.clipThumb) {
+            this.clipThumb.style.display = "";
+            this.clipThumb.parentElement?.classList.remove("cat-te-clip-thumb-audio");
+        }
+
+        const m = this._ensureClipMeta(clip);
+        const items = (isAudio || isSubtitle) ? [] : this._clipItems(m);
+        const idx = this._clipPreviewItemIndex(clip, m);
+        const current = items[idx] || null;
+        if (this.clipInfoDetail) this.clipInfoDetail.hidden = false;
 
         if (isAudio) {
-            this.clipThumb.removeAttribute("src");
-            this.clipThumb.style.display = "none";
-            this.clipThumb.parentElement.classList.add("cat-te-clip-thumb-audio");
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+                this.clipThumb.parentElement?.classList.add("cat-te-clip-thumb-audio");
+            }
+            this.clipThumbWrap?.classList.add("cat-te-clip-thumb-audio");
+        } else if (isSubtitle) {
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+            }
+            if (this.clipThumbSubtitle) this.clipThumbSubtitle.hidden = false;
         } else if (!current) {
-            this.clipThumb.removeAttribute("src");
-            this.clipThumb.style.display = "none";
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+            }
             if (this.clipThumbEmpty) this.clipThumbEmpty.hidden = false;
         } else if (current.kind === "video") {
-            this.clipThumb.removeAttribute("src");
-            this.clipThumb.style.display = "none";
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+            }
             if (this.clipThumbVideo) {
                 this.clipThumbVideo.hidden = false;
                 const url = this._videoUrl(current.file);
                 if (this.clipThumbVideo.src !== url) this.clipThumbVideo.src = url;
             }
-        } else {
+        } else if (this.clipThumb) {
             this.clipThumb.style.display = "";
             this.clipThumb.src = this._imgUrl(current.file);
         }
 
-        const canPreview = isAudio ? !!clip.src : !!current;
-        this.clipThumbWrap.classList.toggle("cat-te-clip-thumb-clickable", canPreview);
-        this.clipThumbWrap.title = canPreview ? T("click_to_preview_asset_title") : "";
-        this.clipNameEl.textContent = current?.file?.split(/[\\/]/).pop() || clip.name || DEFAULT_CLIP_NAME;
-        this.clipStartEl.textContent = tl.formatTime(clip.startTime);
-        this.clipEndEl.textContent = tl.formatTime(clip.endTime);
+        const canPreview = isAudio ? !!clip.src : isSubtitle ? false : !!current;
+        if (this.clipThumbWrap) {
+            this.clipThumbWrap.classList.toggle("cat-te-clip-thumb-clickable", canPreview);
+            this.clipThumbWrap.title = canPreview ? T("click_to_preview_asset_title") : "";
+        }
+        if (this.clipNameEl) {
+            this.clipNameEl.textContent = isSubtitle
+                ? ((m.text || clip.name || T("subtitle_default_text")).trim() || T("subtitle_default_text"))
+                : (current?.file?.split(/[\\/]/).pop() || clip.name || DEFAULT_CLIP_NAME);
+        }
+        if (this.clipStartEl) this.clipStartEl.textContent = tl.formatTime(clip.startTime);
+        if (this.clipEndEl) this.clipEndEl.textContent = tl.formatTime(clip.endTime);
         const fps = this.getFps();
         const totalFrames = Math.max(0, frameIndexFromSecs(clip.endTime, fps) - frameIndexFromSecs(clip.startTime, fps));
-        this.clipDurEl.textContent = T("clip_duration_frames", { duration: tl.formatTime(clip.duration), frames: totalFrames });
+        if (this.clipDurEl) {
+            this.clipDurEl.textContent = T("clip_duration_frames", { duration: tl.formatTime(clip.duration), frames: totalFrames });
+        }
         if (this.clipItemIndexEl) {
             this.clipItemIndexEl.textContent = current ? `${idx + 1}/${items.length}` : "";
         }
         const multi = items.length > 1;
         if (this.clipSwiperPrev) this.clipSwiperPrev.hidden = !multi;
         if (this.clipSwiperNext) this.clipSwiperNext.hidden = !multi;
-        if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = isAudio;
-        if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = isAudio || !current;
-        this._renderClipGeneratedVideosList(clip, m, isAudio);
-        this._syncCurrentMediaPromptUi(current, !isAudio);
+        if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = isAudio || isSubtitle;
+        if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = isAudio || isSubtitle || !current;
+        this._renderClipGeneratedVideosList(clip, m, isAudio || isSubtitle);
+        this._syncCurrentMediaPromptUi(current, !isAudio && !isSubtitle);
     }
 
     _syncCurrentMediaPromptUi(current, enabled) {
@@ -9229,10 +9734,14 @@ export class CapTimelineEditorApp {
         let m = this._meta.get(clip.id);
         if (!m) {
             const ti = this._trackIndex(clip.track);
-            m = clip.track?.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti);
+            if (clip.track?.type === "audio") m = defaultAudioMeta(ti);
+            else if (isSubtitleTrackType(clip.track?.type)) m = defaultSubtitleMeta(ti);
+            else m = defaultImageMeta(ti);
             this._meta.set(clip.id, m);
         }
-        if (clip.track?.type !== "audio") this._normalizeVisualMeta(clip, m);
+        if (clip.track?.type !== "audio" && !isSubtitleClipMeta(m, clip.track)) {
+            this._normalizeVisualMeta(clip, m);
+        }
         return m;
     }
 
@@ -9311,33 +9820,46 @@ export class CapTimelineEditorApp {
         if (this.aiOptimizeBtn) this.aiOptimizeBtn.disabled = !enabled;
     }
 
+    _disableVisualPromptControls() {
+        this._setVisualSettingsEnabled(false);
+        if (this.promptInput) this.promptInput.disabled = true;
+        if (this.aiPromptInput) this.aiPromptInput.disabled = true;
+        if (this.useGlobalCb) this.useGlobalCb.disabled = true;
+        if (this.useAiPromptCb) this.useAiPromptCb.disabled = true;
+        if (this.useMediaPromptCb) {
+            this.useMediaPromptCb.disabled = true;
+            this.useMediaPromptCb.checked = true;
+        }
+        try {
+            setRichPromptValue(this.promptInput, "", false);
+            setRichPromptValue(this.aiPromptInput, "", false);
+        } catch (err) {
+            console.error("[CapTE] clear prompt failed", err);
+        }
+    }
+
     _updatePromptPanel() {
         const clip = this._syncSelectedClip();
         this._syncClipSettingRefs();
         this._syncSidebarMode(!!clip);
-        this._updateClipInfoPanel(clip);
         const isAudio = clip?.track?.type === "audio";
-        const m = clip ? this._ensureClipMeta(clip) : null;
-        if (!clip) {
-            this._setVisualSettingsEnabled(false);
-            if (this.promptInput) this.promptInput.disabled = true;
-            if (this.aiPromptInput) this.aiPromptInput.disabled = true;
-            if (this.useGlobalCb) this.useGlobalCb.disabled = true;
-            if (this.useAiPromptCb) {
-                this.useAiPromptCb.disabled = true;
-                this.useAiPromptCb.checked = true;
+        const isSubtitle = isSubtitleTrackType(clip?.track?.type);
+        const isVisual = !!clip && !isAudio && !isSubtitle;
+        // Unlock / show panels before any meta / info work. Controls ship as
+        // HTML `disabled`; a throw in _ensureClipMeta or info view used to
+        // leave the sidebar looking interactive but dead.
+        if (this.visualClipBody) this.visualClipBody.hidden = !isVisual;
+        if (this.subtitlePanel) this.subtitlePanel.hidden = !clip || !isSubtitle;
+        if (!clip || isAudio || isSubtitle) {
+            this._disableVisualPromptControls();
+            if (!clip) {
+                if (this.useAiPromptCb) this.useAiPromptCb.checked = true;
+                this._setClipPromptTab("clip");
             }
-            if (this.useMediaPromptCb) {
-                this.useMediaPromptCb.disabled = true;
-                this.useMediaPromptCb.checked = true;
-            }
-            setRichPromptValue(this.promptInput, "", false);
-            setRichPromptValue(this.aiPromptInput, "", false);
-            this._setClipPromptTab("clip");
-            return;
-        }
-        const isVisual = !isAudio;
-        if (isVisual) {
+        } else {
+            // Enable immediately with whatever meta we already have (or defaults).
+            // Full normalize can throw on corrupt media rows — do that after unlock.
+            let m = this._meta.get(clip.id) || defaultImageMeta(this._trackIndex(clip.track));
             this._setVisualSettingsEnabled(true, m);
             if (this.promptInput) this.promptInput.disabled = false;
             if (this.aiPromptInput) this.aiPromptInput.disabled = false;
@@ -9349,21 +9871,294 @@ export class CapTimelineEditorApp {
                 this.useAiPromptCb.disabled = false;
                 this.useAiPromptCb.checked = m.useAiPrompt !== false;
             }
-            setRichPromptValue(this.promptInput, m.prompt ?? "", true);
-            setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
-        } else {
-            this._setVisualSettingsEnabled(false);
-            if (this.promptInput) this.promptInput.disabled = true;
-            if (this.aiPromptInput) this.aiPromptInput.disabled = true;
-            if (this.useGlobalCb) this.useGlobalCb.disabled = true;
-            if (this.useAiPromptCb) this.useAiPromptCb.disabled = true;
-            if (this.useMediaPromptCb) {
-                this.useMediaPromptCb.disabled = true;
-                this.useMediaPromptCb.checked = true;
+            try {
+                m = this._ensureClipMeta(clip) || m;
+                this._setVisualSettingsEnabled(true, m);
+                if (this.useGlobalCb) this.useGlobalCb.checked = m.useGlobalPrompt !== false;
+                if (this.useAiPromptCb) this.useAiPromptCb.checked = m.useAiPrompt !== false;
+                setRichPromptValue(this.promptInput, m.prompt ?? "", true);
+                setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
+            } catch (err) {
+                console.error("[CapTE] clip meta / prompt fill failed", err);
+                try {
+                    setRichPromptValue(this.promptInput, m.prompt ?? "", true);
+                    setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
+                } catch { /* keep controls enabled */ }
             }
-            setRichPromptValue(this.promptInput, "", false);
-            setRichPromptValue(this.aiPromptInput, "", false);
         }
+        if (isSubtitle) {
+            try {
+                this._fillSubtitlePanel(this._ensureClipMeta(clip));
+            } catch (err) {
+                console.error("[CapTE] subtitle panel fill failed", err);
+            }
+        }
+        try {
+            this._updateClipInfoPanel(clip);
+        } catch (err) {
+            console.error("[CapTE] clip info view failed", err);
+        }
+    }
+
+
+    _bindSubtitlePanelEvents() {
+        const bind = (el, ev, fn) => el?.addEventListener(ev, fn);
+        bind(this.subTextInput, "focus", () => { this._subUndoArmed = true; });
+        bind(this.subTextInput, "blur", () => { this._subUndoArmed = false; });
+        bind(this.subTextInput, "input", () => this._onSubtitleFieldChange({ text: true }));
+        for (const [el, key, cast] of [
+            [this.subFontSelect, "fontFamily", "str"],
+            [this.subSizeInput, "fontSize", "num"],
+            [this.subLetterSpacingInput, "letterSpacing", "num"],
+            [this.subColorInput, "color", "str"],
+            [this.subBoldCb, "bold", "bool"],
+            [this.subItalicCb, "italic", "bool"],
+            [this.subOpacityInput, "opacity", "opacity"],
+            [this.subStrokeCb, "strokeEnabled", "bool"],
+            [this.subStrokeColorInput, "strokeColor", "str"],
+            [this.subStrokeWidthInput, "strokeWidth", "num"],
+            [this.subShadowCb, "shadowEnabled", "bool"],
+            [this.subShadowColorInput, "shadowColor", "str"],
+            [this.subShadowBlurInput, "shadowBlur", "num"],
+            [this.subShadowXInput, "shadowOffsetX", "num"],
+            [this.subShadowYInput, "shadowOffsetY", "num"],
+            [this.subAlignSelect, "align", "str"],
+            [this.subVAlignSelect, "vAlign", "str"],
+            [this.subOffsetXInput, "offsetX", "num"],
+            [this.subOffsetYInput, "offsetY", "num"],
+        ]) {
+            const ev = el?.type === "checkbox" || el?.type === "range" || el?.tagName === "SELECT" || el?.type === "color"
+                ? "input"
+                : "change";
+            bind(el, ev === "input" ? "input" : "change", () => this._onSubtitleFieldChange({ [key]: cast }));
+            if (ev === "input" && (el?.type === "number")) {
+                bind(el, "change", () => this._onSubtitleFieldChange({ [key]: cast }));
+            }
+        }
+        bind(this.subApplyTrackBtn, "click", () => this._applySubtitleStyleToTrack());
+        bind(this.subApplyAllBtn, "click", () => this._applySubtitleStyleToAllUnlocked());
+    }
+
+    _fillSubtitlePanel(m) {
+        if (!m) return;
+        this._subPanelFilling = true;
+        try {
+            if (this.subTextInput) this.subTextInput.value = m.text ?? "";
+            if (this.subFontSelect) {
+                let font = String(m.fontFamily || "").trim();
+                if (!font && this._systemFonts?.length) {
+                    font = this._systemFonts[0].family;
+                    m.fontFamily = font;
+                    m.fontPath = this._systemFonts[0].path || "";
+                }
+                this._fillSystemFontSelect(this.subFontSelect, font || "sans-serif", { autoPickFirst: true });
+                if (!m.fontPath) {
+                    m.fontPath = this.subFontSelect.selectedOptions?.[0]?.dataset?.path || "";
+                }
+                void this._ensureFontList();
+            }
+            if (this.subSizeInput) this.subSizeInput.value = String(Math.max(8, Math.round(Number(m.fontSize) || 48)));
+            if (this.subLetterSpacingInput) {
+                this.subLetterSpacingInput.value = String(Math.max(-50, Math.min(200, Math.round(Number(m.letterSpacing) || 0))));
+            }
+            if (this.subColorInput) this.subColorInput.value = /^#[0-9a-fA-F]{6}$/.test(m.color) ? m.color : "#ffffff";
+            if (this.subBoldCb) this.subBoldCb.checked = !!m.bold;
+            if (this.subItalicCb) this.subItalicCb.checked = !!m.italic;
+            const opacityPct = Math.round(Math.max(0, Math.min(1, Number(m.opacity) || 1)) * 100);
+            if (this.subOpacityInput) this.subOpacityInput.value = String(opacityPct);
+            if (this.subOpacityVal) this.subOpacityVal.textContent = `${opacityPct}%`;
+            if (this.subStrokeCb) this.subStrokeCb.checked = m.strokeEnabled !== false;
+            if (this.subStrokeColorInput) {
+                this.subStrokeColorInput.value = /^#[0-9a-fA-F]{6}$/.test(m.strokeColor) ? m.strokeColor : "#000000";
+            }
+            if (this.subStrokeWidthInput) this.subStrokeWidthInput.value = String(Number(m.strokeWidth) || 0);
+            if (this.subShadowCb) this.subShadowCb.checked = m.shadowEnabled !== false;
+            const shadowHex = String(m.shadowColor || "#000000");
+            if (this.subShadowColorInput) {
+                this.subShadowColorInput.value = /^#[0-9a-fA-F]{6}$/.test(shadowHex) ? shadowHex : "#000000";
+            }
+            if (this.subShadowBlurInput) this.subShadowBlurInput.value = String(Number(m.shadowBlur) || 0);
+            if (this.subShadowXInput) this.subShadowXInput.value = String(Number(m.shadowOffsetX) || 0);
+            if (this.subShadowYInput) this.subShadowYInput.value = String(Number(m.shadowOffsetY) || 0);
+            if (this.subAlignSelect) this.subAlignSelect.value = ["left", "center", "right"].includes(m.align) ? m.align : "center";
+            if (this.subVAlignSelect) this.subVAlignSelect.value = ["top", "middle", "bottom"].includes(m.vAlign) ? m.vAlign : "bottom";
+            if (this.subOffsetXInput) this.subOffsetXInput.value = String(Number(m.offsetX) || 0);
+            if (this.subOffsetYInput) this.subOffsetYInput.value = String(Number(m.offsetY) || 0);
+        } finally {
+            this._subPanelFilling = false;
+        }
+    }
+
+    _readSubtitlePanelInto(meta) {
+        if (!meta) return meta;
+        meta.text = String(this.subTextInput?.value ?? meta.text ?? "");
+        meta.fontFamily = String(this.subFontSelect?.value || meta.fontFamily || "sans-serif");
+        meta.fontPath = String(
+            this.subFontSelect?.selectedOptions?.[0]?.dataset?.path
+            || meta.fontPath
+            || "",
+        );
+        meta.fontSize = Math.max(8, Math.round(Number(this.subSizeInput?.value) || meta.fontSize || 48));
+        meta.letterSpacing = Math.max(-50, Math.min(200, Math.round(Number(this.subLetterSpacingInput?.value) || 0)));
+        meta.color = String(this.subColorInput?.value || meta.color || "#ffffff");
+        meta.bold = !!this.subBoldCb?.checked;
+        meta.italic = !!this.subItalicCb?.checked;
+        const opacityPct = Math.max(0, Math.min(100, Number(this.subOpacityInput?.value) || 100));
+        meta.opacity = opacityPct / 100;
+        if (this.subOpacityVal) this.subOpacityVal.textContent = `${Math.round(opacityPct)}%`;
+        meta.strokeEnabled = !!this.subStrokeCb?.checked;
+        meta.strokeColor = String(this.subStrokeColorInput?.value || meta.strokeColor || "#000000");
+        meta.strokeWidth = Math.max(0, Number(this.subStrokeWidthInput?.value) || 0);
+        meta.shadowEnabled = !!this.subShadowCb?.checked;
+        meta.shadowColor = String(this.subShadowColorInput?.value || meta.shadowColor || "#000000");
+        meta.shadowBlur = Math.max(0, Number(this.subShadowBlurInput?.value) || 0);
+        meta.shadowOffsetX = Number(this.subShadowXInput?.value) || 0;
+        meta.shadowOffsetY = Number(this.subShadowYInput?.value) || 0;
+        meta.align = String(this.subAlignSelect?.value || "center");
+        meta.vAlign = String(this.subVAlignSelect?.value || "bottom");
+        meta.offsetX = Number(this.subOffsetXInput?.value) || 0;
+        meta.offsetY = Number(this.subOffsetYInput?.value) || 0;
+        return meta;
+    }
+
+    _onSubtitleFieldChange() {
+        if (this._subPanelFilling) return;
+        const clip = this._selClip;
+        if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
+        if (this._subUndoArmed) {
+            this._recordUndo();
+            this._subUndoArmed = false;
+        } else if (!this._subStyleUndoArmed) {
+            this._recordUndo();
+            this._subStyleUndoArmed = true;
+            clearTimeout(this._subStyleUndoTimer);
+            this._subStyleUndoTimer = setTimeout(() => { this._subStyleUndoArmed = false; }, 600);
+        }
+        const m = this._ensureClipMeta(clip);
+        this._readSubtitlePanelInto(m);
+        const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+        clip.name = label.slice(0, 40);
+        const labelEl = clip.el?.querySelector?.(".tl-clip-label");
+        if (labelEl) labelEl.textContent = clip.name;
+        this._meta.set(clip.id, m);
+        if (this.clipNameEl) this.clipNameEl.textContent = clip.name;
+        this._decorateClip(clip);
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+    }
+
+    _applySubtitleStyleToTrack() {
+        const clip = this._selClip;
+        if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
+        const style = pickSubtitleStyle(this._ensureClipMeta(clip));
+        this._recordUndo();
+        for (const other of clip.track.clips) {
+            if (other.id === clip.id) continue;
+            const m = this._ensureClipMeta(other);
+            Object.assign(m, style);
+            const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+            other.name = label.slice(0, 40);
+            const labelEl = other.el?.querySelector?.(".tl-clip-label");
+            if (labelEl) labelEl.textContent = other.name;
+            this._meta.set(other.id, m);
+            this._decorateClip(other);
+        }
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+    }
+
+    _applySubtitleStyleToAllUnlocked() {
+        const clip = this._selClip;
+        if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
+        const style = pickSubtitleStyle(this._ensureClipMeta(clip));
+        this._recordUndo();
+        for (const track of this._allTextTracks()) {
+            if (track.locked) continue;
+            for (const other of track.clips) {
+                const m = this._ensureClipMeta(other);
+                Object.assign(m, style);
+                const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+                other.name = label.slice(0, 40);
+                const labelEl = other.el?.querySelector?.(".tl-clip-label");
+                if (labelEl) labelEl.textContent = other.name;
+                this._meta.set(other.id, m);
+                this._decorateClip(other);
+            }
+        }
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+    }
+
+    _drawSubtitleOverlays(ctx, cw, ch, t) {
+        const tracks = [...this._allTextTracks()].reverse();
+        for (const track of tracks) {
+            if (track.visible === false) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
+                const m = this._meta.get(clip.id) ?? defaultSubtitleMeta();
+                if (m.disabled || m.visible === false) continue;
+                this._paintSubtitle(ctx, cw, ch, m);
+            }
+        }
+    }
+
+    _paintSubtitle(ctx, cw, ch, m) {
+        const text = String(m.text || "").trim();
+        if (!text) return;
+        const scale = ch / Math.max(1, Number(this._w("height")?.value) || ch);
+        const fontSize = Math.max(8, Number(m.fontSize) || 48) * scale;
+        const letterSpacing = (Number(m.letterSpacing) || 0) * scale;
+        const weight = m.bold ? "700" : "400";
+        const style = m.italic ? "italic" : "normal";
+        const family = m.fontFamily ? `"${String(m.fontFamily).replace(/"/g, "")}", sans-serif` : "sans-serif";
+        ctx.save();
+        ctx.font = `${style} ${weight} ${fontSize}px ${family}`;
+        ctx.textAlign = m.align === "left" || m.align === "right" ? m.align : "center";
+        ctx.textBaseline = "middle";
+        ctx.globalAlpha = Math.max(0, Math.min(1, Number(m.opacity) || 1));
+
+        const lines = text.split(/\r?\n/);
+        const lineHeight = fontSize * 1.25;
+        const blockH = lineHeight * lines.length;
+        const padX = cw * 0.04;
+        let x = cw / 2;
+        if (m.align === "left") x = padX;
+        else if (m.align === "right") x = cw - padX;
+        x += (Number(m.offsetX) || 0) / 100 * cw;
+
+        let y;
+        const oy = (Number(m.offsetY) || 0) / 100 * ch;
+        if (m.vAlign === "top") y = padX + blockH / 2 + oy;
+        else if (m.vAlign === "middle") y = ch / 2 + oy;
+        else y = ch - padX - blockH / 2 - oy;
+
+        if (m.shadowEnabled !== false) {
+            ctx.shadowColor = m.shadowColor || "rgba(0,0,0,0.75)";
+            ctx.shadowBlur = Math.max(0, Number(m.shadowBlur) || 0);
+            ctx.shadowOffsetX = Number(m.shadowOffsetX) || 0;
+            ctx.shadowOffsetY = Number(m.shadowOffsetY) || 0;
+        } else {
+            ctx.shadowColor = "transparent";
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+
+        const startY = y - (blockH - lineHeight) / 2;
+        for (let i = 0; i < lines.length; i++) {
+            const ly = startY + i * lineHeight;
+            if (m.strokeEnabled !== false && Number(m.strokeWidth) > 0) {
+                ctx.lineWidth = Number(m.strokeWidth) || 1;
+                ctx.strokeStyle = m.strokeColor || "#000";
+                ctx.lineJoin = "round";
+                this._drawTextWithLetterSpacing(ctx, lines[i], x, ly, letterSpacing, "stroke");
+            }
+            ctx.fillStyle = m.color || "#fff";
+            this._drawTextWithLetterSpacing(ctx, lines[i], x, ly, letterSpacing, "fill");
+        }
+        ctx.restore();
     }
 
     _syncSidebarMode(hasClip) {
@@ -9980,12 +10775,50 @@ export class CapTimelineEditorApp {
         const fps = this.getFps();
         const tracks = (this._timeline?.tracks ?? []).map((track, order) => {
             const ti = this._trackIndex(track);
+            const isSubTrack = isSubtitleTrackType(track.type);
             const clips = track.clips.map(clip => {
                 const m = this._meta.get(clip.id)
-                    ?? (track.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti));
-                if (track.type !== "audio") this._normalizeVisualMeta(clip, m);
+                    ?? (track.type === "audio"
+                        ? defaultAudioMeta(ti)
+                        : isSubTrack
+                            ? defaultSubtitleMeta(ti)
+                            : defaultImageMeta(ti));
+                if (track.type !== "audio" && !isSubTrack) this._normalizeVisualMeta(clip, m);
                 // Frame-grid ms so abutting clips share boundaries on reload.
                 const { startMs, durationMs } = encodeClipTimingMs(clip.startTime, clip.duration, fps);
+                if (isSubTrack) {
+                    const style = pickSubtitleStyle(m);
+                    return {
+                        id: clip.id,
+                        type: "subtitle",
+                        enabled: !m.disabled,
+                        visible: m.visible !== false,
+                        start_ms: startMs,
+                        duration_ms: durationMs,
+                        name: clip.name || T("subtitle_default_text"),
+                        text: m.text ?? "",
+                        font_family: style.fontFamily,
+                        font_path: style.fontPath || "",
+                        font_size: style.fontSize,
+                        letter_spacing: style.letterSpacing ?? 0,
+                        color: style.color,
+                        bold: !!style.bold,
+                        italic: !!style.italic,
+                        opacity: style.opacity,
+                        stroke_enabled: style.strokeEnabled !== false,
+                        stroke_color: style.strokeColor,
+                        stroke_width: style.strokeWidth,
+                        shadow_enabled: style.shadowEnabled !== false,
+                        shadow_color: style.shadowColor,
+                        shadow_blur: style.shadowBlur,
+                        shadow_offset_x: style.shadowOffsetX,
+                        shadow_offset_y: style.shadowOffsetY,
+                        align: style.align,
+                        v_align: style.vAlign,
+                        offset_x: style.offsetX,
+                        offset_y: style.offsetY,
+                    };
+                }
                 const sourceInFrames = Math.max(0, Math.round((clip.sourceOffset || 0) * fps));
                 const sourceInMs = Math.round((sourceInFrames * 1000) / fps);
                 const items = track.type === "audio" ? [] : this._clipItems(m);
@@ -10068,8 +10901,14 @@ export class CapTimelineEditorApp {
             const trackInfo = this._trackInfo.get(track.id) || {};
             return {
                 id: track.id,
-                type: track.type === "audio" ? "audio" : "visual",
-                role: track.isMain ? "main" : (trackInfo.role || (track.type === "audio" ? "audio" : "overlay")),
+                type: track.type === "audio"
+                    ? "audio"
+                    : isSubTrack
+                        ? "subtitle"
+                        : "visual",
+                role: track.isMain
+                    ? "main"
+                    : (trackInfo.role || (track.type === "audio" ? "audio" : isSubTrack ? "subtitle" : "overlay")),
                 name: track.name,
                 order,
                 enabled: trackInfo.enabled !== false,
@@ -10095,6 +10934,9 @@ export class CapTimelineEditorApp {
                 timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,
                 timeline_scroll_top: Number(this._timeline?.scrollEl?.scrollTop ?? 0) || 0,
                 watermark: this._watermark,
+                ...(Array.isArray(this._runtimeOnlyClipIds) && this._runtimeOnlyClipIds.length
+                    ? { runtime_only_clip_ids: this._runtimeOnlyClipIds.map(String) }
+                    : {}),
             },
             tracks,
         };
@@ -10275,12 +11117,20 @@ export class CapTimelineEditorApp {
             }
             this._syncProjectScalarDisplay();
             const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
-            const tracks = projectTracks.map((track, order) => ({
-                ...track,
-                type: track.type === "audio" ? "audio" : "image",
-                trackIndex: order,
-                isMain: track.role === "main",
-            }));
+            const tracks = projectTracks.map((track, order) => {
+                const rawType = String(track.type || "visual").toLowerCase();
+                const type = rawType === "audio"
+                    ? "audio"
+                    : (rawType === "subtitle" || rawType === "text")
+                        ? "text"
+                        : "image";
+                return {
+                    ...track,
+                    type,
+                    trackIndex: order,
+                    isMain: track.role === "main",
+                };
+            });
             this._timeline.clearTracks();
             if (tracks.length) {
                 this._loadTracksFromJson(tracks);

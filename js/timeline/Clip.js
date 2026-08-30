@@ -318,12 +318,17 @@ export class Clip extends EventEmitter {
   }
 
   _setupDrag(el, body, lh, rh) {
-  const canEdit = () => !this.track.locked;
+    const canEdit = () => !this.track.locked;
 
     body.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       e.stopPropagation();
-      this.track.timeline.selectClip(this, { additive: e.ctrlKey || e.metaKey });
+      // Keep select errors from blocking the drag session (panel sync can throw).
+      try {
+        this.track.timeline.selectClip(this, { additive: e.ctrlKey || e.metaKey });
+      } catch (err) {
+        console.error('[CapTE] selectClip failed', err);
+      }
       if (!canEdit()) return;
       this._dragMove(e);
     });

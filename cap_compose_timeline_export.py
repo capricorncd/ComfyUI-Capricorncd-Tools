@@ -284,6 +284,12 @@ def _render_text_watermark_png(text_cfg: dict, scale_pct: float) -> str:
         font_size = max(1, round(float(text_cfg.get("fontSize", 32)) * scale_pct))
     except (TypeError, ValueError):
         font_size = max(1, round(32 * scale_pct))
+    try:
+        letter_spacing = round(float(
+            text_cfg.get("letterSpacing", text_cfg.get("letter_spacing", 0)) or 0
+        ) * scale_pct)
+    except (TypeError, ValueError):
+        letter_spacing = 0
     color = str(text_cfg.get("color") or "#ffffff").strip().lstrip("#") or "ffffff"
     if len(color) != 6:
         color = "ffffff"
@@ -294,7 +300,29 @@ def _render_text_watermark_png(text_cfg: dict, scale_pct: float) -> str:
 
     scratch = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     line_gap = max(2, round(font_size * 0.25))
-    boxes = [scratch.textbbox((0, 0), line or " ", font=font) for line in lines]
+
+    def _line_size(line: str) -> tuple[int, int, int, int]:
+        sample = line if line else " "
+        if not letter_spacing:
+            return scratch.textbbox((0, 0), sample, font=font)
+        chars = list(sample)
+        max_top = 0
+        max_bottom = 0
+        width = 0
+        for i, ch in enumerate(chars):
+            box = scratch.textbbox((0, 0), ch, font=font)
+            if i == 0:
+                max_top = box[1]
+                max_bottom = box[3]
+            else:
+                max_top = min(max_top, box[1])
+                max_bottom = max(max_bottom, box[3])
+            width += box[2] - box[0]
+            if i < len(chars) - 1:
+                width += letter_spacing
+        return (0, max_top, width, max_bottom)
+
+    boxes = [_line_size(line) for line in lines]
     width = max(1, max(b[2] - b[0] for b in boxes))
     height = max(1, sum(b[3] - b[1] for b in boxes) + line_gap * (len(lines) - 1))
 
@@ -302,7 +330,15 @@ def _render_text_watermark_png(text_cfg: dict, scale_pct: float) -> str:
     draw = ImageDraw.Draw(img)
     y = 0
     for line, box in zip(lines, boxes):
-        draw.text((-box[0], y - box[1]), line, font=font, fill=(*rgb, 255))
+        sample = line if line else " "
+        if not letter_spacing:
+            draw.text((-box[0], y - box[1]), sample, font=font, fill=(*rgb, 255))
+        else:
+            x = 0
+            for i, ch in enumerate(list(sample)):
+                ch_box = scratch.textbbox((0, 0), ch, font=font)
+                draw.text((x - ch_box[0], y - ch_box[1]), ch, font=font, fill=(*rgb, 255))
+                x += (ch_box[2] - ch_box[0]) + (letter_spacing if i < len(sample) - 1 else 0)
         y += (box[3] - box[1]) + line_gap
 
     fd, path = tempfile.mkstemp(suffix=".png", prefix="cap_wm_text_")
