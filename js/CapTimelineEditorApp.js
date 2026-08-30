@@ -2042,6 +2042,13 @@ export class CapTimelineEditorApp {
                         <span class="cat-te-clip-sep">→</span>
                         <span class="cat-te-clip-end"></span>
                       </div>
+                      <div class="cat-te-clip-source-trim" hidden>
+                        <span class="cat-te-clip-source-trim-label"></span>
+                        <span class="cat-te-clip-source-in"></span>
+                        <span class="cat-te-clip-sep">→</span>
+                        <span class="cat-te-clip-source-out"></span>
+                      </div>
+                      <div class="cat-te-clip-source-dur" hidden></div>
                       <div class="cat-te-clip-dur"></div>
                       <label class="cat-te-clip-setting-check cat-te-use-media-prompt">
                         <input class="cat-te-use-media-prompt-cb" type="checkbox" checked disabled />
@@ -2689,6 +2696,11 @@ export class CapTimelineEditorApp {
         this.clipNameEl = el.querySelector(".cat-te-clip-name");
         this.clipStartEl = el.querySelector(".cat-te-clip-start");
         this.clipEndEl = el.querySelector(".cat-te-clip-end");
+        this.clipSourceTrimEl = el.querySelector(".cat-te-clip-source-trim");
+        this.clipSourceTrimLabelEl = el.querySelector(".cat-te-clip-source-trim-label");
+        this.clipSourceInEl = el.querySelector(".cat-te-clip-source-in");
+        this.clipSourceOutEl = el.querySelector(".cat-te-clip-source-out");
+        this.clipSourceDurEl = el.querySelector(".cat-te-clip-source-dur");
         this.clipDurEl = el.querySelector(".cat-te-clip-dur");
         this.clipItemIndexEl = el.querySelector(".cat-te-clip-item-index");
         this.framePreview = el.querySelector(".cat-te-frame-preview");
@@ -9587,6 +9599,13 @@ export class CapTimelineEditorApp {
         if (this.clipNameEl) this.clipNameEl.textContent = "";
         if (this.clipStartEl) this.clipStartEl.textContent = "";
         if (this.clipEndEl) this.clipEndEl.textContent = "";
+        if (this.clipSourceTrimEl) this.clipSourceTrimEl.hidden = true;
+        if (this.clipSourceInEl) this.clipSourceInEl.textContent = "";
+        if (this.clipSourceOutEl) this.clipSourceOutEl.textContent = "";
+        if (this.clipSourceDurEl) {
+            this.clipSourceDurEl.hidden = true;
+            this.clipSourceDurEl.textContent = "";
+        }
         if (this.clipDurEl) this.clipDurEl.textContent = "";
         if (this.clipItemIndexEl) this.clipItemIndexEl.textContent = "";
         if (this.clipThumbVideo) {
@@ -9692,6 +9711,30 @@ export class CapTimelineEditorApp {
         const totalFrames = Math.max(0, frameIndexFromSecs(clip.endTime, fps) - frameIndexFromSecs(clip.startTime, fps));
         if (this.clipDurEl) {
             this.clipDurEl.textContent = T("clip_duration_frames", { duration: tl.formatTime(clip.duration), frames: totalFrames });
+        }
+        if (isAudio) {
+            const srcIn = Math.max(0, Number(clip.sourceOffset) || Number(m.trimIn) || 0);
+            const srcOut = srcIn + Math.max(0, Number(clip.duration) || 0);
+            const srcDur = Math.max(0, Number(clip.sourceDuration ?? m.sourceDuration) || 0);
+            if (this.clipSourceTrimLabelEl) this.clipSourceTrimLabelEl.textContent = T("clip_source_trim_label");
+            if (this.clipSourceInEl) this.clipSourceInEl.textContent = tl.formatTime(srcIn);
+            if (this.clipSourceOutEl) this.clipSourceOutEl.textContent = tl.formatTime(srcOut);
+            if (this.clipSourceTrimEl) this.clipSourceTrimEl.hidden = false;
+            if (this.clipSourceDurEl) {
+                if (srcDur > 0) {
+                    this.clipSourceDurEl.hidden = false;
+                    this.clipSourceDurEl.textContent = T("clip_source_duration", { duration: tl.formatTime(srcDur) });
+                } else {
+                    this.clipSourceDurEl.hidden = true;
+                    this.clipSourceDurEl.textContent = "";
+                }
+            }
+        } else {
+            if (this.clipSourceTrimEl) this.clipSourceTrimEl.hidden = true;
+            if (this.clipSourceDurEl) {
+                this.clipSourceDurEl.hidden = true;
+                this.clipSourceDurEl.textContent = "";
+            }
         }
         if (this.clipItemIndexEl) {
             this.clipItemIndexEl.textContent = current ? `${idx + 1}/${items.length}` : "";

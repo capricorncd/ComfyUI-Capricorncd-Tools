@@ -1835,6 +1835,29 @@ body.cat-te-media-dnd-over-tl {
 }
 .cat-te-clip-sep { color: #505080; }
 
+.cat-te-clip-source-trim {
+    font-family: "SF Mono", "Consolas", monospace;
+    font-size: 11px;
+    color: #a8a070;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.cat-te-clip-source-trim[hidden] { display: none !important; }
+.cat-te-clip-source-trim-label {
+    font-family: inherit;
+    font-size: 10px;
+    color: #808060;
+    margin-right: 2px;
+}
+
+.cat-te-clip-source-dur {
+    font-size: 10px;
+    color: #707050;
+}
+.cat-te-clip-source-dur[hidden] { display: none !important; }
+
 .cat-te-clip-dur {
     font-size: 10px;
     color: #6868a0;
