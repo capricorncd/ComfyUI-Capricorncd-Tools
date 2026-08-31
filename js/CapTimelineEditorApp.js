@@ -311,6 +311,15 @@ export class CapTimelineEditorApp {
     static _instances = new Set();
     /** Session clipboard for timeline clips (survives editor close/reopen). */
     static _clipClipboard = null;
+    /**
+     * FIFO jobs applied inside graphToPrompt so each queued batch item keeps the
+     * correct runtime_only_clip_ids (ComfyUI may defer graphToPrompt after
+     * queuePrompt returns false while processingQueue is busy).
+     * @type {{ clipId: string, stamp: string|null, expectedFile: string|null }[]}
+     */
+    static _clipRunJobs = [];
+    /** @type {CapTimelineEditorApp|null} */
+    static _clipRunEditor = null;
 
     /** Drop body-level classes / orphaned DOM left by a killed editor. */
     static scrubGlobalUi() {
@@ -1057,13 +1066,119 @@ export class CapTimelineEditorApp {
         }
         if (this._runAllClipsBusy) return;
         this._runAllClipsBusy = true;
+
+        const stamp = this._useClipSpecifiedVideoFilename !== false
+            ? this._makeGenVideoStamp()
+            : null;
+        const jobs = clips.map((clip) => ({
+            clipId: String(clip.id),
+            stamp,
+            expectedFile: stamp ? this._clipSpecifiedVideoPath(clip.id, stamp) : null,
+        }));
+
+        CapTimelineEditorApp._installClipRunJobHook();
+        CapTimelineEditorApp._clipRunEditor = this;
+        CapTimelineEditorApp._clipRunJobs = jobs.slice();
+
+        let queued = 0;
         try {
-            for (const clip of clips) {
+            // Chunk by BatchCountLimit so a low UI limit (e.g. 30) cannot truncate
+            // a large run-all — each chunk still applies one clip filter per item.
+            const limit = CapTimelineEditorApp._batchCountLimit();
+            for (let offset = 0; offset < jobs.length; ) {
                 if (this._destroyed || !this._timeline) break;
-                await this._runClipDownstream(clip);
+                const chunk = Math.min(limit, jobs.length - offset);
+                await this._waitForQueueIdle();
+                // Keep remaining jobs at the front for this chunk's graphToPrompt calls.
+                CapTimelineEditorApp._clipRunJobs = jobs.slice(offset);
+                CapTimelineEditorApp._clipRunEditor = this;
+                const pendingBefore = CapTimelineEditorApp._clipRunJobs.length;
+                const result = await app.queuePrompt(0, chunk);
+                if (result === false) {
+                    // Request was pushed while another processor was starting; keep
+                    // jobs until graphToPrompt consumes them.
+                    await this._waitForQueueIdle();
+                }
+                const consumed = Math.max(0, pendingBefore - CapTimelineEditorApp._clipRunJobs.length);
+                for (let i = 0; i < consumed; i++) {
+                    const job = jobs[offset + i];
+                    this._pendingGeneratedJobs.push({
+                        clipId: job.clipId,
+                        promptId: null,
+                        files: [],
+                        expectedFile: job.expectedFile,
+                    });
+                }
+                queued += consumed;
+                offset += consumed;
+                // Validation/API error aborts the batch early — stop rather than
+                // spinning on the same failing prompt.
+                if (consumed < chunk) break;
             }
+            if (queued < jobs.length) {
+                alert(T("run_all_partial", { queued, total: jobs.length }));
+            }
+        } catch (error) {
+            alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
+            CapTimelineEditorApp._clipRunJobs = [];
+            CapTimelineEditorApp._clipRunEditor = null;
+            this._runtimeOnlyClipIds = null;
+            this._genVideoStamp = null;
+            this._saveToWidgets();
+            this._openedProjectJson = JSON.stringify(this._buildProject());
             this._runAllClipsBusy = false;
+        }
+    }
+
+    /** ComfyUI setting: max tasks per queuePrompt batch (UI default 100). */
+    static _batchCountLimit() {
+        try {
+            const n = Number(app.extensionManager?.setting?.get?.("Comfy.QueueButton.BatchCountLimit"));
+            if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+        } catch { /* ignore */ }
+        try {
+            const n = Number(app.ui?.settings?.getSettingValue?.("Comfy.QueueButton.BatchCountLimit"));
+            if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+        } catch { /* ignore */ }
+        return 100;
+    }
+
+    static _installClipRunJobHook() {
+        if (typeof app?.graphToPrompt !== "function" || app.graphToPrompt._capTeClipRunHooked) return;
+        const orig = app.graphToPrompt;
+        app.graphToPrompt = async function (...args) {
+            const jobs = CapTimelineEditorApp._clipRunJobs;
+            const job = jobs?.[0];
+            const editor = CapTimelineEditorApp._clipRunEditor;
+            if (job && editor && !editor._destroyed) {
+                editor._runtimeOnlyClipIds = [String(job.clipId)];
+                editor._genVideoStamp = job.stamp || null;
+                try { editor._saveToWidgets(); } catch { /* ignore */ }
+            }
+            try {
+                return await orig.apply(this, args);
+            } finally {
+                if (job && jobs?.[0] === job) {
+                    jobs.shift();
+                    if (editor && !editor._destroyed) {
+                        editor._runtimeOnlyClipIds = null;
+                        editor._genVideoStamp = null;
+                        try { editor._saveToWidgets(); } catch { /* ignore */ }
+                    }
+                }
+            }
+        };
+        app.graphToPrompt._capTeClipRunHooked = true;
+    }
+
+    async _waitForQueueIdle(timeoutMs = 120000) {
+        const start = Date.now();
+        while (app.processingQueue) {
+            if (Date.now() - start > timeoutMs) {
+                throw new Error(T("queue_busy_timeout"));
+            }
+            await new Promise((r) => setTimeout(r, 50));
         }
     }
 
@@ -8390,7 +8505,7 @@ export class CapTimelineEditorApp {
         } else {
             items.push(
                 { label: T("menu_run"), fn: () => void this._runClipDownstream(clip) },
-                { label: T("menu_ai_optimize_prompt"), fn: () => void this._openAiOptimizeModal() },
+                { label: T("menu_ai_optimize_prompt"), fn: () => void this._openAiOptimizeModal(clip) },
                 { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
                 { label: T("menu_disable_others_assets_shortcut"), fn: () => this._disableOthers(clip) },
                 { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
@@ -8644,18 +8759,30 @@ export class CapTimelineEditorApp {
             return;
         }
 
-        this._runtimeOnlyClipIds = [String(clip.id)];
+        CapTimelineEditorApp._installClipRunJobHook();
         let expectedFile = null;
+        let stamp = null;
         if (this._useClipSpecifiedVideoFilename !== false) {
-            this._genVideoStamp = this._makeGenVideoStamp();
-            expectedFile = this._clipSpecifiedVideoPath(clip.id, this._genVideoStamp);
-        } else {
-            this._genVideoStamp = null;
+            stamp = this._makeGenVideoStamp();
+            expectedFile = this._clipSpecifiedVideoPath(clip.id, stamp);
         }
+        const job = {
+            clipId: String(clip.id),
+            stamp,
+            expectedFile,
+        };
+        CapTimelineEditorApp._clipRunEditor = this;
+        CapTimelineEditorApp._clipRunJobs = [job];
+        this._runtimeOnlyClipIds = [job.clipId];
+        this._genVideoStamp = stamp;
         try {
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
-            const result = await app.queuePrompt(0);
+            await this._waitForQueueIdle();
+            const result = await app.queuePrompt(0, 1);
+            if (result === false) {
+                await this._waitForQueueIdle();
+            }
             this._pendingGeneratedJobs.push({
                 clipId: clip.id,
                 promptId: this._promptIdFromQueueResult(result),
@@ -8663,8 +8790,14 @@ export class CapTimelineEditorApp {
                 expectedFile,
             });
         } catch (error) {
+            const idx = CapTimelineEditorApp._clipRunJobs.indexOf(job);
+            if (idx >= 0) CapTimelineEditorApp._clipRunJobs.splice(idx, 1);
             alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
+            if (CapTimelineEditorApp._clipRunEditor === this
+                && CapTimelineEditorApp._clipRunJobs.length === 0) {
+                CapTimelineEditorApp._clipRunEditor = null;
+            }
             this._runtimeOnlyClipIds = null;
             this._genVideoStamp = null;
             this._saveToWidgets();
@@ -9524,7 +9657,19 @@ export class CapTimelineEditorApp {
         }
 
         tl._tracksEl?.addEventListener("dblclick", (e) => {
-            if (e.target.closest?.(".tl-clip")) return;
+            const clipEl = e.target.closest?.(".tl-clip");
+            if (clipEl) {
+                const clip = this._findClipById(clipEl.dataset.clipId);
+                if (!clip) return;
+                const meta = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (clip.track?.type === "audio" || meta.clipType === "audio") return;
+                if (isSubtitleTrackType(clip.track?.type) || isSubtitleClipMeta(meta, clip.track)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                this._timeline.selectClip(clip);
+                void this._openAiOptimizeModal(clip);
+                return;
+            }
             const trackEl = e.target.closest?.(".tl-track");
             if (!trackEl) return;
             const track = tl.tracks.find((row) => row.el === trackEl);
@@ -10533,8 +10678,7 @@ export class CapTimelineEditorApp {
         return AI_PROMPT_LANGUAGES.includes(value) ? value : "简体中文";
     }
 
-    async _openAiOptimizeModal() {
-        const clip = this._selClip;
+    async _openAiOptimizeModal(clip = this._selClip) {
         if (!clip || clip.track?.type === "audio" || isSubtitleTrackType(clip.track?.type) || !this.aiOptimizeModal) return;
         this.aiOptimizeModal.hidden = false;
         this._aiOptimizeSrc = "clip";
