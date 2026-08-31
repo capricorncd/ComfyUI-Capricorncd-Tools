@@ -16,6 +16,18 @@ from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_proj
 from .timecode import resolve_media_path
 
 
+def _safe_filename_part(value, fallback: str = "Untitled") -> str:
+    text = str(value or "").strip()
+    out = []
+    for ch in text:
+        if ch in '<>:"/\\|?*' or ord(ch) < 32:
+            out.append("_")
+        else:
+            out.append(ch)
+    text = "".join(out).rstrip(". ").strip() or fallback
+    return text[:80] or fallback
+
+
 def _is_subtitle_track(track_type) -> bool:
     t = str(track_type or "").lower()
     return t in ("text", "subtitle")
@@ -600,6 +612,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         width = max(1, int(width))
         height = max(1, int(height))
         global_prompt = _strip_comment_lines(settings.get("global_prompt") or "")
+        use_clip_video_name = settings.get("use_clip_specified_video_filename", True) is not False
+        gen_video_stamp = str(settings.get("gen_video_stamp") or "").strip()
+        if not gen_video_stamp:
+            gen_video_stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        project_name_safe = _safe_filename_part(project.get("name"), "Untitled")
         only_raw = settings.get("runtime_only_clip_ids")
         only_ids = None
         if isinstance(only_raw, list) and only_raw:
@@ -694,9 +711,10 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 ext_end = ext_start + 1
             clip_role, clip_role_custom = _clip_role_fields(clip)
             agent, agent_custom = _clip_agent_fields(clip)
-            runtime_clips.append({
+            source_clip_id = str(clip.get("id", ""))
+            runtime_row = {
                 "id": f"runtime_{len(runtime_clips) + 1:04d}",
-                "source_clip_id": str(clip.get("id", "")),
+                "source_clip_id": source_clip_id,
                 "clip_type": str(clip.get("type") or "image"),
                 "clip_role": clip_role,
                 "clip_role_custom": clip_role_custom,
@@ -719,7 +737,13 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "audios": self._audio_slices(
                     ext_start, ext_end, audio_clips, resolve_media, project, materials, seen_materials,
                 ),
-            })
+            }
+            if use_clip_video_name:
+                clip_id_safe = _safe_filename_part(source_clip_id, "clip")
+                runtime_row["output_video"] = (
+                    f"CapTimelineEditor/{project_name_safe}/{gen_video_stamp}_{clip_id_safe}.mp4"
+                )
+            runtime_clips.append(runtime_row)
 
         total_frame_count = max(1, sum(
             int(round((clip["end_ms"] - clip["start_ms"]) * fps / 1000))

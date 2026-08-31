@@ -204,6 +204,12 @@
       },
       "clip_json": {
         "name": "片段JSON"
+      },
+      "second_sample": {
+        "name": "二次采样"
+      },
+      "output_video": {
+        "name": "输出视频路径"
       }
     }
   },
@@ -626,6 +632,9 @@
       },
       "audio": {
         "name": "音频"
+      },
+      "output_video": {
+        "name": "输出视频路径"
       }
     }
   },

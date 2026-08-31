@@ -186,7 +186,9 @@
 | `current_time` | number | 播放头时间（秒） |
 | `timeline_scroll_left` / `timeline_scroll_top` | number | 时间轴滚动位置 |
 | `watermark` | object | 合成视频水印（见下） |
+| `use_clip_specified_video_filename` | bool | 默认 `true`。开启时运行写入 `output_video` 并按该路径关联生成视频；关闭走旧的自动识别 |
 | `runtime_only_clip_ids` | string[]? | 仅单 clip「运行」时临时写入；正常保存通常无无 |
+| `gen_video_stamp` | string? | 仅「运行」排队时临时写入（`yyyyMMdd-HHmmss`），供 `output_video` 与前端期望路径对齐 |
 
 #### `settings.watermark`
 
@@ -468,6 +470,7 @@
 | `start_image` / `end_image` | 经 ComfyUI `input` 解析后的绝对路径 |
 | `audios[]` | 与该视觉区间重叠的音/视频切片；由 [Data Json Clip Parser](data-json-clip-parser.md) 混音。非音频轨无素材的时间段内，音频不导出 |
 | `z_index` | 构建片段时使用的轨道叠放顺序 |
+| `output_video` | 可选；开启「生成视频使用Clip指定文件名」时写入，形如 `CapTimelineEditor/[项目名]/yyyyMMdd-HHmmss_[clip_id].mp4`（相对 `output/`） |
 
 没有顶层 `audio_path`（该字段仅属于 Audio Timeline）。
 

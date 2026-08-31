@@ -333,10 +333,32 @@ export class CapTimelineEditorApp {
         CapTimelineEditorApp._open = null;
     }
 
-    /** Persist any open editor into its node widgets (for serialize / tab switch). */
-    static flushOpenEditors() {
+    /** Walk to the outermost graph (root) for a LiteGraph graph / subgraph. */
+    static _graphRoot(graph) {
+        if (!graph) return null;
+        let cur = graph;
+        const seen = new Set();
+        while (cur && !seen.has(cur)) {
+            seen.add(cur);
+            const parent = cur.parent_graph ?? cur.parent ?? null;
+            if (!parent) return cur;
+            cur = parent;
+        }
+        return graph;
+    }
+
+    /**
+     * Persist open editors into node widgets (for serialize / tab switch).
+     * When `forGraph` is set, only flush editors whose node still belongs to
+     * that graph tree — avoids writing timeline state into the wrong workflow
+     * if a serialize runs while another graph is active.
+     */
+    static flushOpenEditors(forGraph = null) {
+        const root = forGraph ? CapTimelineEditorApp._graphRoot(forGraph) : null;
         for (const te of CapTimelineEditorApp._instances) {
             if (te._destroyed || !te._overlay?.classList.contains("open") || !te._timeline) continue;
+            if (!te.node?.graph) continue;
+            if (root && CapTimelineEditorApp._graphRoot(te.node.graph) !== root) continue;
             try { te._saveToWidgets(); } catch { /* node may be mid-teardown */ }
         }
     }
@@ -425,6 +447,10 @@ export class CapTimelineEditorApp {
         this._outputVideoHoverAnchor = null;
         this._composeBusy = false;
         this._watermark = this._defaultWatermark();
+        /** When true, Run associates CapTimelineEditor/..._{clipId}.mp4 by specified name. */
+        this._useClipSpecifiedVideoFilename = true;
+        /** Temporary stamp written into project settings for one queuePrompt. */
+        this._genVideoStamp = null;
         this._systemFonts = null;
         this._systemFontsPromise = null;
         /** When set, next queued project_json asks Python to emit only these clip ids. */
@@ -625,6 +651,22 @@ export class CapTimelineEditorApp {
         return true;
     }
 
+    /**
+     * Arrow keys — switch clip while AI Optimize modal is open.
+     * @returns {boolean} true if the event was handled
+     */
+    handleAiOptimizeKey(e) {
+        if (!this._overlay?.classList.contains("open")) return false;
+        if (!this.aiOptimizeModal || this.aiOptimizeModal.hidden) return false;
+        if (e.target?.closest?.("input, textarea, select, [contenteditable='true']")) return false;
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return false;
+        void this._stepAiOptimizeClip(e.key === "ArrowRight" ? 1 : -1);
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        return true;
+    }
+
     async _openEditor(gen = this._openGen) {
         this._historyReady = false;
         this._openedWidgetValues = Object.fromEntries(
@@ -793,6 +835,9 @@ export class CapTimelineEditorApp {
     _openSettings() {
         if (!this.settingsModal) return;
         this.autosaveIntervalInput.value = String(this._getAutosaveIntervalSec());
+        if (this.useClipVideoFilenameCb) {
+            this.useClipVideoFilenameCb.checked = this._useClipSpecifiedVideoFilename !== false;
+        }
         this.settingsModal.hidden = false;
         void this._loadAgentConfigs();
     }
@@ -1028,6 +1073,19 @@ export class CapTimelineEditorApp {
             .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
             .replace(/[. ]+$/g, "")
             .slice(0, 80) || fallback;
+    }
+
+    _makeGenVideoStamp() {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    }
+
+    _clipSpecifiedVideoPath(clipId, stamp = this._genVideoStamp) {
+        const name = this._safeProjectFilename();
+        const id = String(clipId || "clip").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 80) || "clip";
+        const st = String(stamp || this._makeGenVideoStamp());
+        return `CapTimelineEditor/${name}/${st}_${id}.mp4`;
     }
 
     async _pickDirectory(mode = "readwrite") {
@@ -1920,8 +1978,10 @@ export class CapTimelineEditorApp {
 
     destroy() {
         if (this._destroyed) return;
+        // Save BEFORE marking destroyed — `_saveToWidgets` bails on `_destroyed`,
+        // and tab-switch teardown (beforeConfigureGraph) used to skip the flush.
+        try { this._closeInternal(true); } catch { /* continue teardown */ }
         this._destroyed = true;
-        this._closeInternal(true);
         if (this._onDocClick) {
             document.removeEventListener("click", this._onDocClick);
             this._onDocClick = null;
@@ -2036,6 +2096,7 @@ export class CapTimelineEditorApp {
                       <div class="cat-te-clip-name-row">
                         <div class="cat-te-clip-name"></div>
                       </div>
+                      <div class="cat-te-clip-id" hidden></div>
 
                       <div class="cat-te-clip-times">
                         <span class="cat-te-clip-start"></span>
@@ -2503,7 +2564,9 @@ export class CapTimelineEditorApp {
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-ai-optimize-modal" hidden>
-            <div class="cat-te-modal cat-te-ai-optimize-dialog">
+            <div class="cat-te-ai-optimize-shell">
+              <button type="button" class="cat-te-ai-optimize-nav prev" title="${T("ai_optimize_prev_clip_title")}" aria-label="${T("ai_optimize_prev_clip_title")}" disabled>${iconHtml("chevronLeft", 20)}</button>
+              <div class="cat-te-modal cat-te-ai-optimize-dialog">
               <div class="cat-te-modal-header">
                 <span class="cat-te-ai-optimize-title">${T("ai_optimize_prompt_title")}</span>
                 <button type="button" class="cat-te-modal-close cat-te-ai-optimize-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
@@ -2562,6 +2625,8 @@ export class CapTimelineEditorApp {
                   </div>
                 </div>
               </div>
+              </div>
+              <button type="button" class="cat-te-ai-optimize-nav next" title="${T("ai_optimize_next_clip_title")}" aria-label="${T("ai_optimize_next_clip_title")}" disabled>${iconHtml("chevronLeft", 20)}</button>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-skill-picker-modal" hidden>
@@ -2584,6 +2649,14 @@ export class CapTimelineEditorApp {
                 <label class="cat-te-modal-row">
                   <span>${T("autosave_interval_label")}</span>
                   <input class="cat-te-autosave-interval" type="number" min="1" max="300" step="1" />
+                </label>
+                <label class="cat-te-modal-check-row">
+                  <input class="cat-te-use-clip-video-filename" type="checkbox" checked />
+                  <span>${T("use_clip_specified_video_filename_label")}</span>
+                  <span class="cat-te-info-tip" tabindex="0" aria-label="${T("use_clip_specified_video_filename_info_aria")}">
+                    ${iconHtml("info", 12)}
+                    <span class="cat-te-info-tip-pop">${T("use_clip_specified_video_filename_info_text")}</span>
+                  </span>
                 </label>
                 <div class="cat-te-agent-settings">
                   <div class="cat-te-agent-heading">
@@ -2694,6 +2767,7 @@ export class CapTimelineEditorApp {
         this.clipVideosList = el.querySelector(".cat-te-clip-videos-list");
         this.clipVideosOpenBtn = el.querySelector(".cat-te-clip-videos-open");
         this.clipNameEl = el.querySelector(".cat-te-clip-name");
+        this.clipIdEl = el.querySelector(".cat-te-clip-id");
         this.clipStartEl = el.querySelector(".cat-te-clip-start");
         this.clipEndEl = el.querySelector(".cat-te-clip-end");
         this.clipSourceTrimEl = el.querySelector(".cat-te-clip-source-trim");
@@ -2780,6 +2854,8 @@ export class CapTimelineEditorApp {
         this.wmMarginLockBtn = el.querySelector(".cat-te-wm-margin-lock");
         this.aiOptimizeModal = el.querySelector(".cat-te-ai-optimize-modal");
         this.aiOptimizeTitle = el.querySelector(".cat-te-ai-optimize-title");
+        this.aiOptimizePrevBtn = el.querySelector(".cat-te-ai-optimize-nav.prev");
+        this.aiOptimizeNextBtn = el.querySelector(".cat-te-ai-optimize-nav.next");
         this.aiModelSelect = el.querySelector(".cat-te-ai-model");
         this.aiLangSelect = el.querySelector(".cat-te-ai-lang");
         this.aiSystemInput = el.querySelector(".cat-te-ai-system");
@@ -2796,6 +2872,7 @@ export class CapTimelineEditorApp {
 
         this.settingsModal = el.querySelector(".cat-te-settings-modal");
         this.autosaveIntervalInput = el.querySelector(".cat-te-autosave-interval");
+        this.useClipVideoFilenameCb = el.querySelector(".cat-te-use-clip-video-filename");
         this.agentList = el.querySelector(".cat-te-agent-list");
         this.agentForm = el.querySelector(".cat-te-agent-form");
         this.agentLabelInput = el.querySelector(".cat-te-agent-label");
@@ -2887,6 +2964,10 @@ export class CapTimelineEditorApp {
             localStorage.setItem(STORAGE_AUTOSAVE_INTERVAL, String(clamped));
             this.autosaveIntervalInput.value = String(clamped);
             if (this._overlay?.classList.contains("open")) this._startAutoSave();
+        });
+        this.useClipVideoFilenameCb?.addEventListener("change", () => {
+            this._useClipSpecifiedVideoFilename = !!this.useClipVideoFilenameCb.checked;
+            this._saveToWidgets();
         });
 
         this.promptInput.addEventListener("focus", () => { this._promptUndoArmed = true; });
@@ -2986,6 +3067,16 @@ export class CapTimelineEditorApp {
         this.mediaPreviewTags?.addEventListener("blur", () => this._saveMediaPreviewMeta());
         el.querySelector(".cat-te-clip-items-close")?.addEventListener("click", () => this._closeClipItemsModal());
         el.querySelector(".cat-te-ai-optimize-close")?.addEventListener("click", () => this._closeAiOptimizeModal());
+        this.aiOptimizePrevBtn?.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this._stepAiOptimizeClip(-1);
+        });
+        this.aiOptimizeNextBtn?.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this._stepAiOptimizeClip(1);
+        });
         this.aiSrcTabs?.forEach((tab) => {
             tab.addEventListener("click", () => this._setAiOptimizeSrcTab(tab.dataset.src));
         });
@@ -3028,6 +3119,13 @@ export class CapTimelineEditorApp {
             }
             if (!this.genVideoModal?.hidden && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
                 this._stepGenVideoPreview(e.key === "ArrowRight" ? 1 : -1);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            if (this.aiOptimizeModal && !this.aiOptimizeModal.hidden
+                && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
+                void this._stepAiOptimizeClip(e.key === "ArrowRight" ? 1 : -1);
                 e.preventDefault();
                 e.stopPropagation();
                 return;
@@ -4224,6 +4322,7 @@ export class CapTimelineEditorApp {
     }
 
     _onPromptExecuted(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
         const files = this._collectExecutedOutputVideos(e?.detail);
         if (!files.length) return;
         const job = this._findPendingGeneratedJob(this._promptIdFromEvent(e));
@@ -4232,9 +4331,13 @@ export class CapTimelineEditorApp {
     }
 
     _flushPendingGeneratedVideos(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
         const job = this._takePendingGeneratedJob(this._promptIdFromEvent(e));
         if (!job) return;
-        const files = [...new Set(job.files || [])];
+        let files = [...new Set(job.files || [])];
+        if (this._useClipSpecifiedVideoFilename !== false && job.expectedFile) {
+            files = [normalizeOutputVideoPath(job.expectedFile)].filter(Boolean);
+        }
         if (!files.length) return;
         // Always write into project_json immediately so close/reopen keeps
         // auto-linked videos even if the timeline UI is closed or mid-rebuild.
@@ -6637,12 +6740,14 @@ export class CapTimelineEditorApp {
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
         this._applyScalarSettings(settings, { applySettingsFromProject });
         this._watermark = this._normalizeWatermark(settings.watermark);
+        this._useClipSpecifiedVideoFilename = settings.use_clip_specified_video_filename !== false;
         project.settings = {
             ...settings,
             fps: Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps),
             width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
             height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
             global_prompt: String(settings.global_prompt ?? this._readGlobalPrompt() ?? ""),
+            use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
         };
         if (settings.global_prompt != null) {
             this._writeGlobalPrompt(settings.global_prompt);
@@ -8540,6 +8645,13 @@ export class CapTimelineEditorApp {
         }
 
         this._runtimeOnlyClipIds = [String(clip.id)];
+        let expectedFile = null;
+        if (this._useClipSpecifiedVideoFilename !== false) {
+            this._genVideoStamp = this._makeGenVideoStamp();
+            expectedFile = this._clipSpecifiedVideoPath(clip.id, this._genVideoStamp);
+        } else {
+            this._genVideoStamp = null;
+        }
         try {
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
@@ -8548,11 +8660,13 @@ export class CapTimelineEditorApp {
                 clipId: clip.id,
                 promptId: this._promptIdFromQueueResult(result),
                 files: [],
+                expectedFile,
             });
         } catch (error) {
             alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
             this._runtimeOnlyClipIds = null;
+            this._genVideoStamp = null;
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
         }
@@ -9597,6 +9711,10 @@ export class CapTimelineEditorApp {
         this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-clickable", "cat-te-clip-thumb-audio");
         this.clipThumbWrap?.removeAttribute("title");
         if (this.clipNameEl) this.clipNameEl.textContent = "";
+        if (this.clipIdEl) {
+            this.clipIdEl.hidden = true;
+            this.clipIdEl.textContent = "";
+        }
         if (this.clipStartEl) this.clipStartEl.textContent = "";
         if (this.clipEndEl) this.clipEndEl.textContent = "";
         if (this.clipSourceTrimEl) this.clipSourceTrimEl.hidden = true;
@@ -9704,6 +9822,11 @@ export class CapTimelineEditorApp {
             this.clipNameEl.textContent = isSubtitle
                 ? ((m.text || clip.name || T("subtitle_default_text")).trim() || T("subtitle_default_text"))
                 : (current?.file?.split(/[\\/]/).pop() || clip.name || DEFAULT_CLIP_NAME);
+        }
+        if (this.clipIdEl) {
+            const id = String(clip.id || "").trim();
+            this.clipIdEl.hidden = !id;
+            this.clipIdEl.textContent = id ? T("clip_id_label", { id }) : "";
         }
         if (this.clipStartEl) this.clipStartEl.textContent = tl.formatTime(clip.startTime);
         if (this.clipEndEl) this.clipEndEl.textContent = tl.formatTime(clip.endTime);
@@ -10412,10 +10535,43 @@ export class CapTimelineEditorApp {
 
     async _openAiOptimizeModal() {
         const clip = this._selClip;
-        if (!clip || clip.track?.type === "audio" || !this.aiOptimizeModal) return;
+        if (!clip || clip.track?.type === "audio" || isSubtitleTrackType(clip.track?.type) || !this.aiOptimizeModal) return;
+        this.aiOptimizeModal.hidden = false;
+        this._aiOptimizeSrc = "clip";
+        await this._bindAiOptimizeToClip(clip, { reloadModels: true });
+    }
+
+    _closeAiOptimizeModal() {
+        this._cancelAiOptimize();
+        if (!this.aiOptimizeModal) return;
+        this.aiOptimizeModal.hidden = true;
+        this._aiOptimizeClipId = null;
+        this._syncAiOptimizeNavButtons();
+    }
+
+    _aiOptimizeEligibleClips() {
+        const out = [];
+        for (const track of this._timeline?.tracks ?? []) {
+            if (track.type === "audio" || isSubtitleTrackType(track.type)) continue;
+            const clips = [...track.clips].sort((a, b) => a.startTime - b.startTime || String(a.id).localeCompare(String(b.id)));
+            out.push(...clips);
+        }
+        return out;
+    }
+
+    _syncAiOptimizeNavButtons() {
+        const open = !!(this.aiOptimizeModal && !this.aiOptimizeModal.hidden);
+        const clips = open ? this._aiOptimizeEligibleClips() : [];
+        const multi = clips.length > 1;
+        if (this.aiOptimizePrevBtn) this.aiOptimizePrevBtn.disabled = !multi;
+        if (this.aiOptimizeNextBtn) this.aiOptimizeNextBtn.disabled = !multi;
+    }
+
+    async _bindAiOptimizeToClip(clip, { reloadModels = false } = {}) {
+        if (!clip || !this.aiOptimizeModal) return;
+        this._cancelAiOptimize();
         const meta = this._ensureClipMeta(clip);
         this._aiOptimizeClipId = clip.id;
-        this.aiOptimizeModal.hidden = false;
         if (this.aiOptimizeTitle) {
             this.aiOptimizeTitle.textContent = T("ai_optimize_title_dynamic", { name: clip.name || DEFAULT_CLIP_NAME });
         }
@@ -10424,16 +10580,22 @@ export class CapTimelineEditorApp {
             this.aiSkillInput.value = localStorage.getItem(STORAGE_AI_PROMPT_SKILL) || "";
         }
         this._restoreAiOutputLanguage();
-        this._setAiOptimizeSrcTab("clip");
-        await this._loadAiOptimizeModels();
+        this._setAiOptimizeSrcTab(this._aiOptimizeSrc || "clip");
+        if (reloadModels) await this._loadAiOptimizeModels();
         await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
+        this._syncAiOptimizeNavButtons();
     }
 
-    _closeAiOptimizeModal() {
-        this._cancelAiOptimize();
-        if (!this.aiOptimizeModal) return;
-        this.aiOptimizeModal.hidden = true;
-        this._aiOptimizeClipId = null;
+    async _stepAiOptimizeClip(delta) {
+        if (!this.aiOptimizeModal || this.aiOptimizeModal.hidden) return;
+        const clips = this._aiOptimizeEligibleClips();
+        if (clips.length < 2) return;
+        let idx = clips.findIndex((c) => c.id === this._aiOptimizeClipId);
+        if (idx < 0) idx = 0;
+        const next = clips[(idx + delta + clips.length * 10) % clips.length];
+        if (!next || next.id === this._aiOptimizeClipId) return;
+        this._timeline?.selectClip(next);
+        await this._bindAiOptimizeToClip(next, { reloadModels: false });
     }
 
     _cancelAiOptimize() {
@@ -10977,6 +11139,10 @@ export class CapTimelineEditorApp {
                 timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,
                 timeline_scroll_top: Number(this._timeline?.scrollEl?.scrollTop ?? 0) || 0,
                 watermark: this._watermark,
+                use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
+                ...(this._genVideoStamp
+                    ? { gen_video_stamp: String(this._genVideoStamp) }
+                    : {}),
                 ...(Array.isArray(this._runtimeOnlyClipIds) && this._runtimeOnlyClipIds.length
                     ? { runtime_only_clip_ids: this._runtimeOnlyClipIds.map(String) }
                     : {}),
@@ -10985,8 +11151,18 @@ export class CapTimelineEditorApp {
         };
     }
 
+    /** True when this editor's node still belongs to the live root graph. */
+    _isNodeOnLiveGraph() {
+        if (this._destroyed || !this.node?.graph) return false;
+        const live = app.rootGraph ?? app.graph;
+        if (!live) return false;
+        return CapTimelineEditorApp._graphRoot(this.node.graph)
+            === CapTimelineEditorApp._graphRoot(live);
+    }
+
     _saveToWidgets() {
         if (this._destroyed) return;
+        if (!this._isNodeOnLiveGraph()) return;
         if (!this._timeline || !this._timelineReady) return;
         this._writeProjectJson(JSON.stringify(this._buildProject()));
         try { this._persistViewToLocalCache(); } catch { /* ignore */ }
@@ -10995,11 +11171,16 @@ export class CapTimelineEditorApp {
 
     /** Write project_json to the widget and keep workflow restore mirrors in sync. */
     _writeProjectJson(json) {
+        if (this._destroyed) return;
+        const node = this.node;
+        // Detached / other-tab nodes must not receive writes (dual Timeline Editor
+        // workflows share one rootGraph object across tab switches).
+        if (!this._isNodeOnLiveGraph()) return;
+
         const projectW = this._w("project_json");
         if (projectW) projectW.value = json;
 
-        const node = this.node;
-        if (node && Array.isArray(node.widgets)) {
+        if (Array.isArray(node.widgets)) {
             const values = [];
             for (const w of node.widgets) {
                 if (w.serialize === false) continue;
@@ -11016,7 +11197,7 @@ export class CapTimelineEditorApp {
             node.properties.cat_named = named;
         }
 
-        this.node?.setDirtyCanvas?.(true, true);
+        node.setDirtyCanvas?.(true, true);
     }
 
     /**

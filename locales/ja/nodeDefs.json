@@ -87,7 +87,9 @@
       "clip_role": { "name": "クリップの種類" },
       "agent": { "name": "エージェント" },
       "ai_prompt": { "name": "AI プロンプト" },
-      "clip_json": { "name": "クリップ JSON" }
+      "clip_json": { "name": "クリップ JSON" },
+      "second_sample": { "name": "二次サンプリング" },
+      "output_video": { "name": "出力動画パス" }
     }
   },
 
@@ -311,7 +313,8 @@
       "prompt": { "name": "プロンプト" },
       "images": { "name": "画像" },
       "videos": { "name": "動画" },
-      "audio": { "name": "オーディオ" }
+      "audio": { "name": "オーディオ" },
+      "output_video": { "name": "出力動画パス" }
     }
   },
 

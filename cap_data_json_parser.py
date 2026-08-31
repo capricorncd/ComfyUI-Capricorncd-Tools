@@ -31,7 +31,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -49,6 +49,7 @@ class CAP_DataJsonClipParser:
         "ai_prompt",
         "clip_json",
         "second_sample",
+        "output_video",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -59,7 +60,8 @@ class CAP_DataJsonClipParser:
         "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
         "images (all clip images in editor order as one IMAGE batch), "
         "clip_role, agent, ai_prompt, clip_json (self-contained clip with resolved "
-        "image/video file paths and embedded materials), and second_sample."
+        "image/video file paths and embedded materials), second_sample, and output_video "
+        "(CapTimelineEditor-specified save path when enabled)."
     )
 
     @classmethod
@@ -421,9 +423,13 @@ class CAP_DataJsonClipParser:
                 entry[key] = copy.deepcopy(mat[key])
         return entry
 
-    def _build_clip_json(self, clip: dict, materials: dict) -> str:
+    def _build_clip_json(self, clip: dict, materials: dict, *, fps: float = 24.0,
+                         global_prompt: str = "") -> str:
         """Self-contained clip JSON: images/videos with absolute paths + embedded materials."""
         out = copy.deepcopy(clip) if isinstance(clip, dict) else {}
+        # Carry project-level fields so clip_json alone is enough for MiniMaxH3 etc.
+        out["fps"] = float(fps)
+        out["global_prompt"] = global_prompt if isinstance(global_prompt, str) else ""
         images = []
         videos = []
         used_ids: list[str] = []
@@ -551,7 +557,8 @@ class CAP_DataJsonClipParser:
         clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
         agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
         ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
-        clip_json = self._build_clip_json(clip, materials)
+        clip_json = self._build_clip_json(clip, materials, fps=fps, global_prompt=global_prompt)
+        output_video = str(clip.get("output_video") or "").strip().replace("\\", "/")
 
         return (
             audio_out,
@@ -570,6 +577,7 @@ class CAP_DataJsonClipParser:
             ai_prompt,
             clip_json,
             second_sample,
+            output_video,
         )
 
 

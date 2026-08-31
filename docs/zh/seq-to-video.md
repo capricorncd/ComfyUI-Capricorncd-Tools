@@ -40,13 +40,23 @@ D:\ComfyUI\output\temp\img_00000.png, D:\ComfyUI\output\temp\img_00001.png
 
 ## 输出文件名
 
+**前缀模式**（不以 `.mp4` 结尾）：
+
 ```
 {filename_prefix}_{yyyyMMdd_HHmmss}.mp4
 ```
 
-每次运行生成唯一文件，不覆盖历史渲染结果。
+每次运行生成唯一文件，不覆盖历史渲染结果。例如 `video/nsfw-audio/STV` → `output/video/nsfw-audio/STV_{yyyyMMdd_HHmmss}.mp4`。
 
-`filename_prefix` 可以包含子目录，例如 `video/nsfw-audio/STV` 会写入 `output/video/nsfw-audio/STV_{yyyyMMdd_HHmmss}.mp4`。子目录不存在时会自动创建。若解析后的路径会超出 `output` 目录范围（例如通过 `..`），则会被拒绝。
+**精确路径模式**（以 `.mp4` 结尾）：
+
+```
+dir/xxxx/xxx.mp4  →  output/dir/xxxx/xxx.mp4
+```
+
+直接保存为同名文件（已存在则覆盖），不再追加时间戳。适合接入 Timeline Editor / Data Json Clip Parser 的 `output_video`。
+
+子目录不存在时会自动创建。若解析后的路径会超出 `output` 目录范围（例如通过 `..`），则会被拒绝。
 
 默认开启 `save_sidecar` 时，会在 MP4 旁写入同名 JSON，例如 `STV_20260815_201800.mp4` → `STV_20260815_201800.json`。把片段提示词接到 `metadata`，会写入 `note`。
 
@@ -85,7 +95,7 @@ D:\ComfyUI\output\temp\img_00000.png, D:\ComfyUI\output\temp\img_00001.png
 |------|------|--------|------|
 | `frames_dir` | STRING | `""` | 目录模式使用的路径（`images` 与 `image_paths` 均为空时生效） |
 | `fps` | FLOAT | 24.0 | 输出视频的帧率 |
-| `filename_prefix` | STRING | `STV` | 输出文件名前缀；可包含子目录（如 `video/nsfw-audio/STV`） |
+| `filename_prefix` | STRING | `STV` | 输出文件名前缀，可含子目录；若以 `.mp4` 结尾则按精确路径保存同名文件 |
 | `images` | IMAGE | *（可选）* | 最高优先级的帧来源 |
 | `image_paths` | STRING | `""` | 逗号分隔的图片文件路径 |
 | `audio` | AUDIO | *（可选）* | 混入视频的音频；省略则输出纯视频 |

@@ -58,7 +58,7 @@ Accepts either:
 |------|------|-------------|
 | `positive` | CONDITIONING | H3 positive conditioning |
 | `latent` | LATENT | H3 latent for sampling |
-| `total_frame_count` | INT | Aligned frame count for this clip |
+| `total_frame_count` | INT | Aligned frame count at **clip_json / data_json fps** (Timeline Editor fps), on the H3 17k+5 grid. Example: 7s at 60fps → ~430. |
 | `prompt` | STRING | Effective prompt text sent to H3 |
 | `images` | IMAGE | Stacked still refs (letterboxed); blank 64×64 if none |
 | `videos` | IMAGE | Stacked video ref frames (letterboxed); blank if none |

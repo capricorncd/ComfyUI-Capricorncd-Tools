@@ -79,8 +79,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
             },
         }
 
-    RETURN_TYPES = ("CONDITIONING", "LATENT", "INT", "STRING", "IMAGE", "IMAGE", "AUDIO")
-    RETURN_NAMES = ("positive", "latent", "total_frame_count", "prompt", "images", "videos", "audio")
+    RETURN_TYPES = ("CONDITIONING", "LATENT", "INT", "STRING", "IMAGE", "IMAGE", "AUDIO", "STRING")
+    RETURN_NAMES = ("positive", "latent", "total_frame_count", "prompt", "images", "videos", "audio", "output_video")
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
@@ -88,7 +88,10 @@ class CAP_MiniMaxH3ReferenceToVideo:
         "or a self-contained clip_json (when set, data_json and index are ignored). "
         "Clip images map to ref_image, videos to ref_video (+ soundtrack), "
         "and clip audios to ref_audio. Frame count and prompt come from the clip. "
-        "Also outputs clip stills, video frames, and mixed clip audio."
+        "Also outputs clip stills, video frames, mixed clip audio, and output_video "
+        "(CapTimelineEditor-specified save path when enabled). "
+        "total_frame_count uses clip_json/data_json fps (Timeline Editor fps), "
+        "aligned to the H3 17k+5 frame grid — e.g. 7s at 60fps → ~430 frames."
     )
 
     @classmethod
@@ -260,12 +263,17 @@ class CAP_MiniMaxH3ReferenceToVideo:
             data, clip_row, materials, parser = self._parse_clip_json(clip_json)
         else:
             data, clip_row, materials, parser = self._parse_clip(data_json, index)
-        fps = max(1.0, float(data.get("fps", 24.0)))
         start_ms = int(clip_row.get("start_ms", 0) or 0)
         end_ms = int(clip_row.get("end_ms", start_ms) or start_ms)
-        length = align_frame_count(max(5, parser._frame_count(start_ms, end_ms, fps)))
         clip_duration_ms = max(1, end_ms - start_ms)
-        extra_end_ms = max(0, int(round(length * 1000 / H3_FPS)) - clip_duration_ms)
+        # Prefer Timeline fps from clip_json / data_json (e.g. 60). Fall back to H3's 24.
+        try:
+            fps = float(data.get("fps", clip_row.get("fps", H3_FPS)))
+        except (TypeError, ValueError):
+            fps = float(H3_FPS)
+        fps = max(1.0, fps)
+        length = align_frame_count(max(5, int(round(clip_duration_ms * fps / 1000))))
+        extra_end_ms = max(0, int(round(length * 1000 / fps)) - clip_duration_ms)
 
         ref_images = {}
         ref_videos = {}
@@ -355,7 +363,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
             ref_video_audios=ref_video_audios or None,
             ref_audios=ref_audios or None,
         )
-        return (*out.args, length, prompt, images_out, videos_out, audio_out)
+        output_video = str(clip_row.get("output_video") or "").strip().replace("\\", "/")
+        return (*out.args, length, prompt, images_out, videos_out, audio_out, output_video)
 
 
 NODE_CLASS_MAPPINGS = {"CAP_MiniMaxH3ReferenceToVideo": CAP_MiniMaxH3ReferenceToVideo}

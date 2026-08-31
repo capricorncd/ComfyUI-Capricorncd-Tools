@@ -188,7 +188,9 @@ Legacy `resources` is migration input only and is not written back.
 | `current_time` | number | Playhead time (seconds) |
 | `timeline_scroll_left` / `timeline_scroll_top` | number | Timeline scroll |
 | `watermark` | object | Compose-video watermark (below) |
+| `use_clip_specified_video_filename` | bool | Default `true`. When on, Run writes `output_video` and auto-links that path; when off, keep legacy auto-detect |
 | `runtime_only_clip_ids` | string[]? | Temporary; set only during single-clip Run |
+| `gen_video_stamp` | string? | Temporary stamp (`yyyyMMdd-HHmmss`) for aligning `output_video` with the frontend expected path |
 
 #### `settings.watermark`
 
@@ -470,6 +472,7 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 | `start_image` / `end_image` | Absolute paths resolved via ComfyUI `input` |
 | `audios[]` | Audio/video slices overlapping this visual range; mixed by [Data Json Clip Parser](data-json-clip-parser.md) |
 | `z_index` | Track stacking order used when building segments |
+| `output_video` | Optional; when clip-specified filenames are enabled: `CapTimelineEditor/[project]/yyyyMMdd-HHmmss_[clip_id].mp4` (relative to `output/`) |
 
 There is no top-level `audio_path` (that field is Audio Timeline only).
 
