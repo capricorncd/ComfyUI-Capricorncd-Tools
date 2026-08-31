@@ -1186,6 +1186,21 @@ body.cat-te-row-resize * {
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 28px rgba(0, 0, 0, 0.45);
 }
 
+.cat-te-program-gen-preview-video {
+    position: absolute;
+    display: block;
+    object-fit: contain;
+    background: #000;
+    z-index: 3;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.cat-te-program-gen-preview-video[hidden] {
+    display: none !important;
+}
+.cat-te-program-stage.is-gen-previewing .cat-te-program-canvas {
+    visibility: hidden;
+}
+
 .cat-te-program-empty {
     position: absolute;
     inset: 0;
@@ -1333,6 +1348,43 @@ body.cat-te-media-dnd-over-tl {
     filter: saturate(0.35);
 }
 
+/* Queued for Run: blue outline. Running: green outline + bottom progress bar.
+   Selected variants must beat .selected box-shadow or a running clip looks queued. */
+.cat-te-timeline-host .tl-clip.cat-te-clip-queued,
+.cat-te-timeline-host .tl-clip.selected.cat-te-clip-queued {
+    z-index: 14;
+    background: aqua;
+}
+.cat-te-timeline-host .tl-clip.cat-te-clip-running,
+.cat-te-timeline-host .tl-clip.selected.cat-te-clip-running {
+    z-index: 15;
+}
+.cat-te-clip-run-progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    z-index: 6;
+    overflow: hidden;
+}
+.cat-te-clip-run-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #2fbf71, #7dffb3);
+    transition: width 0.12s linear;
+}
+.cat-te-clip-run-progress-fill.is-indeterminate {
+    width: 35% !important;
+    animation: cat-te-run-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes cat-te-run-indeterminate {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(320%); }
+}
+
 /* Package clip: placeholder container (contents TBD) — dashed border +
    a box icon standing in for a thumbnail. */
 .cat-te-timeline-host .tl-clip.cat-te-clip-package {
@@ -1359,6 +1411,37 @@ body.cat-te-media-dnd-over-tl {
     opacity: 0.85;
 }
 
+/* Generated-edit mode: clip has no enabled generated video yet. */
+.cat-te-timeline-host .tl-clip.cat-te-clip-gen-empty {
+    border-style: dashed;
+    border-color: rgba(158, 197, 255, 0.45);
+    opacity: 0.9;
+}
+.cat-te-timeline-host .tl-clip.cat-te-clip-gen-empty .tl-clip-body {
+    background-image: none !important;
+    background-color: #1a1a28;
+}
+.cat-te-timeline-host .tl-clip.cat-te-clip-gen-empty .tl-clip-row-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(158, 197, 255, 0.06),
+        rgba(158, 197, 255, 0.06) 6px,
+        transparent 6px,
+        transparent 12px
+    );
+}
+.cat-te-timeline-host .tl-clip.cat-te-clip-gen-empty .tl-clip-row-thumb::after {
+    content: "Clip";
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    opacity: 0.8;
+    color: #9ec5ff;
+}
+
 .cat-te-end-badge.cat-te-clip-view-badge,
 .cat-te-end-badge.cat-te-clip-preview-badge {
     display: inline-flex;
@@ -1379,6 +1462,10 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-end-badge.cat-te-clip-view-badge:hover,
 .cat-te-end-badge.cat-te-clip-preview-badge:hover {
     background: rgba(91, 78, 255, 0.85);
+}
+.cat-te-end-badge.cat-te-clip-preview-badge.is-previewing {
+    background: rgba(74, 158, 255, 0.95);
+    box-shadow: 0 0 0 1px rgba(158, 197, 255, 0.8);
 }
 
 .cat-te-mute-badge {

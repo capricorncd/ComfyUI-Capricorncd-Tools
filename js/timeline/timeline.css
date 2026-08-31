@@ -202,6 +202,20 @@
   color: var(--tl-text-muted);
 }
 
+.tl-btn-add-package:disabled,
+.tl-btn-run-menu:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+  border-color: var(--tl-border);
+}
+.tl-btn-add-package:disabled:hover,
+.tl-btn-run-menu:disabled:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--tl-text-muted);
+}
+
 .tl-btn-history:disabled {
   opacity: 0.35;
   cursor: default;
