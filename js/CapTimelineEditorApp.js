@@ -616,8 +616,9 @@ export class CapTimelineEditorApp {
 
     /**
      * Editor shortcuts when fullscreen is open.
-     * Ctrl/Cmd+Z/Y are always swallowed so ComfyUI graph-undo cannot close
-     * the editor; outside text fields they drive the timeline undo/redo stack.
+     * Ctrl/Cmd+Z/Y drive the timeline undo/redo stack (outside text fields).
+     * Graph undo is blocked separately by patching ChangeTracker (its keydown
+     * defers undo to rAF, so stopImmediatePropagation alone is not enough).
      * Ctrl+C/V copy/paste clips when clips are selected (even if focus is in a
      * prompt field), unless that field has a text selection — then native wins.
      * @returns {boolean} true if the event was handled
@@ -631,7 +632,8 @@ export class CapTimelineEditorApp {
         const key = this._shortcutModKey(e);
         const inField = !!e.target?.closest?.("input, textarea, select, [contenteditable='true']");
 
-        // Block ComfyUI undo/redo from tearing down the fullscreen shell.
+        // Claim the shortcut so other bubble handlers skip; tracker undo is
+        // patched while fullscreen is open (see _capTePatchChangeTrackerUndo).
         if (key === "z" || key === "y") {
             e.stopPropagation();
             e.stopImmediatePropagation?.();

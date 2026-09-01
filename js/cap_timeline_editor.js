@@ -108,8 +108,49 @@ function _capTeResolveChangeTrackerClass() {
  * the new graph. Coming back loads that corrupted activeState → nodes / AI prompts
  * look "reset". Both tabs having Timeline Editor makes the race easy to hit.
  */
+function _capTeFullscreenOpen() {
+    const te = CapTimelineEditorApp._open;
+    return !!(te && !te._destroyed && te._overlay?.classList.contains("open"));
+}
+
+/**
+ * ChangeTracker.init binds window keydown (capture) and defers Ctrl+Z to rAF.
+ * stopImmediatePropagation on our handler cannot cancel that already-queued
+ * undo — which restores the graph and closes the timeline editor. Block
+ * tracker undo/redo while the fullscreen shell is open.
+ */
+function _capTePatchChangeTrackerUndo() {
+    const CT = _capTeResolveChangeTrackerClass();
+    if (!CT?.prototype || CT.prototype.undoRedo?._capTeUndoPatched) {
+        return !!CT?.prototype?.undoRedo?._capTeUndoPatched;
+    }
+    const origUndoRedo = CT.prototype.undoRedo;
+    CT.prototype.undoRedo = async function (e) {
+        if (_capTeFullscreenOpen()) return true;
+        return origUndoRedo.apply(this, arguments);
+    };
+    CT.prototype.undoRedo._capTeUndoPatched = true;
+
+    if (typeof CT.prototype.undo === "function") {
+        const origUndo = CT.prototype.undo;
+        CT.prototype.undo = async function (...args) {
+            if (_capTeFullscreenOpen()) return;
+            return origUndo.apply(this, args);
+        };
+    }
+    if (typeof CT.prototype.redo === "function") {
+        const origRedo = CT.prototype.redo;
+        CT.prototype.redo = async function (...args) {
+            if (_capTeFullscreenOpen()) return;
+            return origRedo.apply(this, args);
+        };
+    }
+    return true;
+}
+
 function patchChangeTrackerAgainstTabRace() {
     const CT = _capTeResolveChangeTrackerClass();
+    _capTePatchChangeTrackerUndo();
     if (!CT?.prototype || CT.prototype.deactivate?._capTePatched) return !!CT?.prototype?.deactivate?._capTePatched;
 
     const origCapture = CT.prototype.captureCanvasState;
@@ -296,16 +337,18 @@ app.registerExtension({
     name: "Capricorncd.TimelineEditor",
 
     async setup() {
-        // Capture on `window`, not `document`: capture-phase listeners fire
-        // in ancestor order (window before document before canvas/body),
-        // so this runs before ComfyUI's own Ctrl+Z (graph undo) handler no
-        // matter which DOM node or registration order that uses — otherwise
-        // its undo can fire first and e.g. close the director's console.
+        // Capture on `window` for timeline shortcuts. ComfyUI ChangeTracker
+        // also listens on window (capture) but defers Ctrl+Z to rAF — so we
+        // must patch tracker undo (see _capTePatchChangeTrackerUndo), not
+        // rely on stopImmediatePropagation alone.
         window.addEventListener("keydown", onTeGlobalKeyDown, true);
         hookQueuePrompt();
         hookLoadGraphData();
         // comfyAPI / ChangeTracker may boot after extension setup.
-        const tryPatch = () => patchChangeTrackerAgainstTabRace();
+        const tryPatch = () => {
+            _capTePatchChangeTrackerUndo();
+            return patchChangeTrackerAgainstTabRace();
+        };
         if (!tryPatch()) {
             for (const ms of [0, 200, 1000, 3000]) setTimeout(tryPatch, ms);
         }
