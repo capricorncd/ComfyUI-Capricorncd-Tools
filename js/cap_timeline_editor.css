@@ -1411,6 +1411,141 @@ body.cat-te-media-dnd-over-tl {
     opacity: 0.85;
 }
 
+.cat-te-timeline-host.is-gen-edit-mode .tl-track-image .tl-clip-handle,
+.cat-te-timeline-host.is-gen-edit-mode .tl-track-video .tl-clip-handle {
+    pointer-events: none;
+    opacity: 0.35;
+}
+
+/* Generated-video edit modal */
+.cat-te-gen-edit-dialog {
+    width: 96vw;
+    height: 92vh;
+    display: flex;
+    flex-direction: column;
+}
+.cat-te-gen-edit-body {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+    gap: 12px;
+    padding: 12px 14px;
+}
+.cat-te-gen-edit-left {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    --cat-te-gen-edit-preview-h: 280px;
+}
+.cat-te-gen-edit-preview {
+    position: relative;
+    flex: 0 0 var(--cat-te-gen-edit-preview-h, 280px);
+    height: var(--cat-te-gen-edit-preview-h, 280px);
+    min-height: 120px;
+    background: #000;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.cat-te-gen-edit-preview-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.cat-te-gen-edit-preview-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8a8ab0;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 1;
+}
+.cat-te-gen-edit-preview-empty[hidden] {
+    display: none !important;
+}
+.cat-te-gen-edit-vsplit {
+    flex: 0 0 6px;
+    margin: 2px 0;
+    cursor: row-resize;
+    border-radius: 3px;
+    background: transparent;
+    position: relative;
+}
+.cat-te-gen-edit-vsplit::after {
+    content: "";
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    top: 50%;
+    height: 2px;
+    margin-top: -1px;
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.18);
+}
+.cat-te-gen-edit-vsplit:hover::after,
+.cat-te-gen-edit-vsplit.dragging::after {
+    background: rgba(158, 197, 255, 0.55);
+}
+.cat-te-gen-edit-tl-host {
+    flex: 1 1 auto;
+    min-height: 160px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #12121a;
+}
+.cat-te-gen-edit-right {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.cat-te-gen-edit-name {
+    font-size: 14px;
+    font-weight: 600;
+    word-break: break-all;
+}
+.cat-te-gen-edit-file {
+    font-size: 11px;
+    opacity: 0.65;
+    word-break: break-all;
+}
+.cat-te-gen-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-height: 0;
+}
+.cat-te-gen-edit-field span {
+    font-size: 12px;
+    opacity: 0.8;
+}
+.cat-te-gen-edit-prompt {
+    flex: 1;
+    min-height: 120px;
+    resize: vertical;
+    width: 100%;
+    box-sizing: border-box;
+}
+.cat-te-gen-edit-hint {
+    margin: 0;
+    font-size: 12px;
+    opacity: 0.55;
+}
+.cat-te-gen-edit-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 14px 14px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+
 /* Generated-edit mode: clip has no enabled generated video yet. */
 .cat-te-timeline-host .tl-clip.cat-te-clip-gen-empty {
     border-style: dashed;

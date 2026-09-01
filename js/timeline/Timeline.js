@@ -344,6 +344,7 @@ export class Timeline extends EventEmitter {
     // were attached.
     const consume = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); };
     this._onKey = (e) => {
+      if (this._keyboardSuspended) return;
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       switch (e.code) {
         case 'Space':
