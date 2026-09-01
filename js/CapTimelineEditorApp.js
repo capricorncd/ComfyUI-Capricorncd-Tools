@@ -1264,6 +1264,30 @@ export class CapTimelineEditorApp {
         return `CapTimelineEditor/${name}/${st}_${id}.mp4`;
     }
 
+    /** Parse clip id from CapTimelineEditor/{project}/{YYYYMMDD-HHMMSS}_{clipId}.mp4 */
+    _clipIdFromSpecifiedVideoPath(file) {
+        const n = normalizeOutputVideoPath(file);
+        if (!n) return null;
+        const m = n.match(/^CapTimelineEditor\/[^/]+\/(\d{8}-\d{6})_(.+)\.mp4$/i);
+        return m ? String(m[2]).trim() || null : null;
+    }
+
+    _teNotifyBelongsHere(clipId, file) {
+        const id = String(clipId || "").trim();
+        if (id) {
+            if (this._findClipById(id)) return true;
+            if (this._pendingGeneratedJobs.some((j) => String(j.clipId) === id)) return true;
+        }
+        const n = normalizeOutputVideoPath(file);
+        if (!n) return false;
+        const prefix = `CapTimelineEditor/${this._safeProjectFilename()}/`;
+        if (n.startsWith(prefix)) return true;
+        const expected = normalizeOutputVideoPath(file);
+        return this._pendingGeneratedJobs.some(
+            (j) => j.expectedFile && normalizeOutputVideoPath(j.expectedFile) === expected,
+        );
+    }
+
     async _pickDirectory(mode = "readwrite") {
         if (typeof window.showDirectoryPicker !== "function") {
             throw new Error(T("directory_picker_unsupported"));
@@ -4709,6 +4733,8 @@ export class CapTimelineEditorApp {
         this._onProgress = (e) => this._onRunProgress(e);
         this._onProgressState = (e) => this._onRunProgressState(e);
         this._onQueueStatus = (e) => this._onQueueStatusEvent(e);
+        this._onTeClipRunning = (e) => this._onTimelineClipRunning(e);
+        this._onTeVideoSaved = (e) => this._onTimelineVideoSaved(e);
         api.addEventListener("executed", this._onExecuted);
         api.addEventListener("execution_success", this._onExecSuccess);
         api.addEventListener("execution_error", this._onExecAbort);
@@ -4717,6 +4743,8 @@ export class CapTimelineEditorApp {
         api.addEventListener("progress", this._onProgress);
         api.addEventListener("progress_state", this._onProgressState);
         api.addEventListener("status", this._onQueueStatus);
+        api.addEventListener("cat_te_clip_running", this._onTeClipRunning);
+        api.addEventListener("cat_te_video_saved", this._onTeVideoSaved);
     }
 
     _unbindExecutionWatch() {
@@ -4730,6 +4758,8 @@ export class CapTimelineEditorApp {
         api.removeEventListener?.("progress", this._onProgress);
         api.removeEventListener?.("progress_state", this._onProgressState);
         api.removeEventListener?.("status", this._onQueueStatus);
+        api.removeEventListener?.("cat_te_clip_running", this._onTeClipRunning);
+        api.removeEventListener?.("cat_te_video_saved", this._onTeVideoSaved);
         if (this._queueReconcileTimer) {
             clearTimeout(this._queueReconcileTimer);
             this._queueReconcileTimer = 0;
@@ -4741,6 +4771,8 @@ export class CapTimelineEditorApp {
         this._onProgress = null;
         this._onProgressState = null;
         this._onQueueStatus = null;
+        this._onTeClipRunning = null;
+        this._onTeVideoSaved = null;
     }
 
     _promptIdFromQueueResult(result) {
@@ -4934,6 +4966,74 @@ export class CapTimelineEditorApp {
         this._syncClipRunDecorations();
     }
 
+    /**
+     * For-loop / batch: Data Json Clip Parser emits which timeline clip is starting.
+     * Prefer this over prompt_id FIFO — one prompt can run many clips.
+     */
+    _onTimelineClipRunning(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const d = e?.detail;
+        if (!d || typeof d !== "object") return;
+        const clipId = String(d.clip_id || "").trim();
+        if (!clipId || !this._teNotifyBelongsHere(clipId, null)) return;
+        const promptId = String(d.prompt_id ?? d.promptId ?? "").trim();
+        const job = this._pendingGeneratedJobs.find((j) => String(j.clipId) === clipId);
+        if (job && promptId && !job.promptId) job.promptId = promptId;
+        if (promptId) this._runningPromptId = promptId;
+        this._runningClipId = clipId;
+        this._runningProgress = 0;
+        this._syncClipRunDecorations();
+    }
+
+    /**
+     * Seq To Video finished one file — attach immediately (do not wait for prompt success).
+     */
+    _onTimelineVideoSaved(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const d = e?.detail;
+        if (!d || typeof d !== "object") return;
+        let file = normalizeOutputVideoPath(d.file);
+        if (!file) {
+            const name = d.filename || d.file;
+            if (name) {
+                const sub = String(d.subfolder || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                file = normalizeOutputVideoPath(sub ? `${sub}/${name}` : name);
+            }
+        }
+        if (!file) return;
+
+        let clipId = String(d.clip_id || "").trim()
+            || this._clipIdFromSpecifiedVideoPath(file)
+            || "";
+        if (!clipId) {
+            const expected = file;
+            const job = this._pendingGeneratedJobs.find(
+                (j) => j.expectedFile && normalizeOutputVideoPath(j.expectedFile) === expected,
+            );
+            clipId = job?.clipId ? String(job.clipId) : "";
+        }
+        if (!clipId || !this._teNotifyBelongsHere(clipId, file)) return;
+
+        const idx = this._pendingGeneratedJobs.findIndex((j) => String(j.clipId) === clipId);
+        let stamp = null;
+        if (idx >= 0) {
+            stamp = this._pendingGeneratedJobs[idx]?.stamp || null;
+            this._pendingGeneratedJobs.splice(idx, 1);
+        }
+        if (this._runningClipId != null && String(this._runningClipId) === clipId) {
+            this._runningClipId = null;
+            this._runningProgress = 0;
+        }
+        this._syncClipRunDecorations();
+        this._persistGeneratedVideosToProjectJson(clipId, [file]);
+        if (!this._timeline || !this._timelineReady) {
+            this._deferredGeneratedJobs.push({ clipId, files: [file] });
+        } else {
+            this._attachGeneratedVideos(clipId, [file]);
+        }
+        if (stamp) this._maybeClearGenVideoStamp(stamp);
+    }
+
     _clearRunningForPrompt(promptId) {
         if (promptId && this._runningPromptId && this._runningPromptId !== promptId) return;
         this._runningPromptId = null;
@@ -5004,8 +5104,13 @@ export class CapTimelineEditorApp {
         if (clipId == null) return null;
         const id = String(clipId);
         if (this._runningClipId != null && String(this._runningClipId) === id) return "running";
-        // Running prompt already known but clip bind raced: treat matching
-        // pending job as running once it is the active prompt.
+        // Parser notify already named the active clip — do not also mark the
+        // FIFO pending head as running (same prompt / for-loop left both green).
+        if (this._runningClipId != null) {
+            if (this._pendingGeneratedJobs.some((j) => String(j.clipId) === id)) return "queued";
+            return null;
+        }
+        // No notify yet: treat the head pending job of the active prompt as running.
         if (this._runningPromptId) {
             const job = this._pendingGeneratedJobs.find((j) => String(j.clipId) === id);
             if (job && (job.promptId === this._runningPromptId || !job.promptId)) {
@@ -5070,17 +5175,52 @@ export class CapTimelineEditorApp {
         if (this._destroyed || !this._isNodeOnLiveGraph()) return;
         const files = this._collectExecutedOutputVideos(e?.detail);
         if (!files.length) return;
-        const job = this._findPendingGeneratedJob(this._promptIdFromEvent(e));
-        if (!job) return;
-        job.files.push(...files);
+        const promptId = this._promptIdFromEvent(e);
+        for (const file of files) {
+            const clipId = this._clipIdFromSpecifiedVideoPath(file);
+            if (clipId) {
+                const job = this._pendingGeneratedJobs.find((j) => String(j.clipId) === clipId);
+                if (job) {
+                    if (promptId && !job.promptId) job.promptId = promptId;
+                    job.files.push(file);
+                }
+                continue;
+            }
+            const job = this._findPendingGeneratedJob(promptId);
+            if (job) job.files.push(file);
+        }
     }
 
     _flushPendingGeneratedVideos(e) {
         if (this._destroyed || !this._isNodeOnLiveGraph()) return;
         const promptId = this._promptIdFromEvent(e);
-        const job = this._takePendingGeneratedJob(promptId);
+        // One prompt may finish several for-loop clips — flush every matching job.
+        const jobs = [];
+        if (promptId) {
+            this._pendingGeneratedJobs = this._pendingGeneratedJobs.filter((j) => {
+                if (j.promptId === promptId) {
+                    jobs.push(j);
+                    return false;
+                }
+                return true;
+            });
+            // Unbound leftovers only when nothing else claims them (single-run race).
+            if (!jobs.length) {
+                const job = this._takePendingGeneratedJob(null);
+                if (job) jobs.push(job);
+            }
+        } else {
+            const job = this._takePendingGeneratedJob(null);
+            if (job) jobs.push(job);
+        }
         this._clearRunningForPrompt(promptId);
         this._syncClipRunDecorations();
+        for (const job of jobs) {
+            this._flushOnePendingGeneratedJob(job);
+        }
+    }
+
+    _flushOnePendingGeneratedJob(job) {
         if (!job) return;
         let files = [...new Set(
             (job.files || []).map((f) => normalizeOutputVideoPath(f)).filter(Boolean),
@@ -5090,7 +5230,6 @@ export class CapTimelineEditorApp {
             if (files.includes(expected)) {
                 files = [expected];
             } else if (files.length) {
-                // Prefer outputs that clearly belong to this clip / expected name.
                 const base = expected.split("/").pop() || "";
                 const clipHint = String(job.clipId || "");
                 const matched = files.filter((f) => (
@@ -5099,7 +5238,6 @@ export class CapTimelineEditorApp {
                 ));
                 if (matched.length) files = matched;
             } else {
-                // No executed outputs — do not attach a phantom expected path.
                 files = [];
             }
         }
@@ -5107,8 +5245,6 @@ export class CapTimelineEditorApp {
             this._maybeClearGenVideoStamp(job.stamp);
         }
         if (!files.length) return;
-        // Always write into project_json immediately so close/reopen keeps
-        // auto-linked videos even if the timeline UI is closed or mid-rebuild.
         this._persistGeneratedVideosToProjectJson(job.clipId || null, files);
         if (!this._timeline || !this._timelineReady) {
             this._deferredGeneratedJobs.push({

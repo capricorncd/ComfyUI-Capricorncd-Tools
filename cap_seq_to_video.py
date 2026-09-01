@@ -14,6 +14,11 @@ import folder_paths
 
 from .cap_i18n import get_last_known_lang, t as _t
 from .cap_save_sidecar import build_sidecar_payload, sidecar_path, write_sidecar
+from .cap_te_notify import (
+    EVENT_VIDEO_SAVED,
+    clip_id_from_output_video,
+    notify_timeline,
+)
 
 log = logging.getLogger(__name__)
 
@@ -390,6 +395,15 @@ class CAP_SeqToVideo:
                 ),
             )
         rel_name = f"{subfolder}/{output_filename}" if subfolder else output_filename
+        rel_name = str(rel_name).replace("\\", "/")
+        clip_id = clip_id_from_output_video(rel_name)
+        notify_timeline(
+            EVENT_VIDEO_SAVED,
+            clip_id=clip_id or None,
+            file=rel_name,
+            filename=output_filename,
+            subfolder=subfolder or "",
+        )
 
         return {
             "ui": {

@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from .cap_te_notify import EVENT_CLIP_RUNNING, notify_timeline
 from .timecode import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, resolve_media_path
 
 
@@ -514,6 +515,17 @@ class CAP_DataJsonClipParser:
         clip = clips[index] if clips and 0 <= index < len(clips) else {}
         if not isinstance(clip, dict):
             clip = {}
+
+        # Prefer source_clip_id (timeline id); runtime rows use id=runtime_XXXX.
+        timeline_clip_id = str(
+            clip.get("source_clip_id") or clip.get("id") or ""
+        ).strip()
+        if timeline_clip_id:
+            notify_timeline(
+                EVENT_CLIP_RUNNING,
+                clip_id=timeline_clip_id,
+                index=int(index),
+            )
 
         clip_start_ms = int(clip.get("start_ms", 0) or 0)
         clip_end_ms = int(clip.get("end_ms", clip_start_ms) or clip_start_ms)
