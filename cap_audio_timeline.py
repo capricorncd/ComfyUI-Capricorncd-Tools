@@ -12,7 +12,36 @@ def _strip_comment_lines(text: str) -> str:
     )
 
 
+_PROMPT_INCLUDE_KEYS = ("global", "style", "non_diegetic_music", "negative")
+_PROMPT_INCLUDE_KEY_SET = set(_PROMPT_INCLUDE_KEYS)
+
+
+def _clip_prompt_includes(clip: dict) -> list[str]:
+    """Normalize clip.prompt_includes; fall back to legacy use_global_prompt."""
+    if not isinstance(clip, dict):
+        return ["global"]
+    raw = clip.get("prompt_includes")
+    if isinstance(raw, list):
+        out: list[str] = []
+        seen: set[str] = set()
+        for value in raw:
+            key = str(value or "").strip()
+            if key not in _PROMPT_INCLUDE_KEY_SET or key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
+        return [k for k in _PROMPT_INCLUDE_KEYS if k in seen]
+    if "use_global_prompt" in clip:
+        return ["global"] if bool(clip["use_global_prompt"]) else []
+    # Legacy: empty clip prompt implied using the global prompt.
+    if not bool(_strip_comment_lines(clip.get("prompt") or "").strip()):
+        return ["global"]
+    return []
+
+
 def _clip_use_global_prompt(clip: dict) -> bool:
+    if isinstance(clip, dict) and isinstance(clip.get("prompt_includes"), list):
+        return "global" in _clip_prompt_includes(clip)
     if "use_global_prompt" in clip:
         return bool(clip["use_global_prompt"])
     return not bool(_strip_comment_lines(clip.get("prompt") or "").strip())

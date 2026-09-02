@@ -150,7 +150,28 @@ class CAP_DataJsonClipParser:
         aligned = [self._match_image_size(frame, height, width) for frame in frames]
         return torch.cat(aligned, dim=0)
 
+    def _clip_prompt_includes(self, clip: dict) -> list[str]:
+        allowed = ("global", "style", "non_diegetic_music", "negative")
+        allowed_set = set(allowed)
+        if not isinstance(clip, dict):
+            return ["global"]
+        raw = clip.get("prompt_includes")
+        if isinstance(raw, list):
+            seen: set[str] = set()
+            for value in raw:
+                key = str(value or "").strip()
+                if key in allowed_set:
+                    seen.add(key)
+            return [k for k in allowed if k in seen]
+        if "use_global_prompt" in clip:
+            return ["global"] if bool(clip["use_global_prompt"]) else []
+        if not bool(self._strip_comment_lines(clip.get("prompt") or "").strip()):
+            return ["global"]
+        return []
+
     def _clip_use_global_prompt(self, clip: dict) -> bool:
+        if isinstance(clip, dict) and isinstance(clip.get("prompt_includes"), list):
+            return "global" in self._clip_prompt_includes(clip)
         if "use_global_prompt" in clip:
             return bool(clip["use_global_prompt"])
         return not bool(self._strip_comment_lines(clip.get("prompt") or "").strip())
@@ -166,16 +187,21 @@ class CAP_DataJsonClipParser:
             if not line.startswith("#")
         )
 
-    def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None) -> str:
+    def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None,
+                        *, style_prompt: str = "") -> str:
         if self._clip_use_ai_prompt(clip):
             ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
             if ai_prompt:
                 return ai_prompt
+        includes = self._clip_prompt_includes(clip)
         clip_prompt = self._strip_comment_lines(clip.get("prompt") or "")
         global_prompt = self._strip_comment_lines(global_prompt)
+        style_prompt = self._strip_comment_lines(style_prompt)
         parts = []
-        if self._clip_use_global_prompt(clip) and global_prompt.strip():
+        if "global" in includes and global_prompt.strip():
             parts.append(global_prompt.strip())
+        if "style" in includes and style_prompt.strip():
+            parts.append(style_prompt.strip())
         if clip_prompt.strip():
             parts.append(clip_prompt.strip())
         materials = materials if isinstance(materials, dict) else {}
@@ -425,12 +451,17 @@ class CAP_DataJsonClipParser:
         return entry
 
     def _build_clip_json(self, clip: dict, materials: dict, *, fps: float = 24.0,
-                         global_prompt: str = "") -> str:
+                         global_prompt: str = "", style_prompt: str = "",
+                         non_diegetic_music: str = "", negative_prompt: str = "") -> str:
         """Self-contained clip JSON: images/videos with absolute paths + embedded materials."""
         out = copy.deepcopy(clip) if isinstance(clip, dict) else {}
         # Carry project-level fields so clip_json alone is enough for MiniMaxH3 etc.
         out["fps"] = float(fps)
         out["global_prompt"] = global_prompt if isinstance(global_prompt, str) else ""
+        out["style_prompt"] = style_prompt if isinstance(style_prompt, str) else ""
+        out["non_diegetic_music"] = non_diegetic_music if isinstance(non_diegetic_music, str) else ""
+        out["negative_prompt"] = negative_prompt if isinstance(negative_prompt, str) else ""
+        out["prompt_includes"] = self._clip_prompt_includes(out)
         images = []
         videos = []
         used_ids: list[str] = []
@@ -509,6 +540,9 @@ class CAP_DataJsonClipParser:
 
         fps = max(1.0, float(data.get("fps", 24.0)))
         global_prompt = data.get("global_prompt", "")
+        style_prompt = data.get("style_prompt", "")
+        non_diegetic_music = data.get("non_diegetic_music", "")
+        negative_prompt = data.get("negative_prompt", "")
         run_timestamp = str(data.get("run_timestamp") or data.get("run_prefix") or "").strip()
         materials = self._materials_by_id(data)
 
@@ -530,7 +564,9 @@ class CAP_DataJsonClipParser:
         clip_start_ms = int(clip.get("start_ms", 0) or 0)
         clip_end_ms = int(clip.get("end_ms", clip_start_ms) or clip_start_ms)
         frame_count = self._frame_count(clip_start_ms, clip_end_ms, fps)
-        prompt = self._compose_prompt(clip, global_prompt, materials)
+        prompt = self._compose_prompt(
+            clip, global_prompt, materials, style_prompt=style_prompt,
+        )
         generate_preview_video = bool(clip.get("generate_preview_video", False))
         second_sample = bool(clip.get("second_sample", False))
 
@@ -569,7 +605,15 @@ class CAP_DataJsonClipParser:
         clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
         agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
         ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
-        clip_json = self._build_clip_json(clip, materials, fps=fps, global_prompt=global_prompt)
+        clip_json = self._build_clip_json(
+            clip,
+            materials,
+            fps=fps,
+            global_prompt=global_prompt,
+            style_prompt=style_prompt,
+            non_diegetic_music=non_diegetic_music,
+            negative_prompt=negative_prompt,
+        )
         output_video = str(clip.get("output_video") or "").strip().replace("\\", "/")
 
         return (

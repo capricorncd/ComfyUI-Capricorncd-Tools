@@ -177,14 +177,19 @@ class CAP_MiniMaxH3ReferenceToVideo:
         return f"{label}: {body}"
 
     def _compose_prompt(self, parser: CAP_DataJsonClipParser, clip: dict, global_prompt: str,
-                        media_lines: list[str]) -> str:
+                        media_lines: list[str], *, style_prompt: str = "") -> str:
         if parser._clip_use_ai_prompt(clip):
             ai_prompt = parser._strip_comment_lines(clip.get("ai_prompt") or "").strip()
             if ai_prompt:
                 return ai_prompt
+        includes = parser._clip_prompt_includes(clip)
         parts = [line for line in (media_lines or []) if line]
-        if parser._clip_use_global_prompt(clip):
+        if "global" in includes:
             text = parser._strip_comment_lines(global_prompt or "").strip()
+            if text:
+                parts.append(text)
+        if "style" in includes:
+            text = parser._strip_comment_lines(style_prompt or "").strip()
             if text:
                 parts.append(text)
         clip_prompt = parser._strip_comment_lines(clip.get("prompt") or "").strip()
@@ -346,6 +351,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
         prompt = self._compose_prompt(
             parser, clip_row, data.get("global_prompt", ""),
             picture_lines + video_lines + audio_lines,
+            style_prompt=data.get("style_prompt", ""),
         )
 
         if parser._uses_master_audio(data, clip_row):

@@ -163,7 +163,10 @@ def _collect_plan(
                     "start_sec": start / 1000.0,
                     "duration_sec": duration / 1000.0,
                     "end_sec": end / 1000.0,
-                    "muted": bool(gen["muted"]),
+                    # Track / clip / generated-video mute all silence render audio.
+                    "muted": bool(gen["muted"])
+                        or bool(track.get("muted"))
+                        or bool(clip.get("muted")),
                 })
             continue
 

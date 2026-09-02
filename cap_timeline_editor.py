@@ -10,7 +10,7 @@ import re
 
 import torch
 
-from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines
+from .cap_audio_timeline import CAP_AudioTimeline, _clip_prompt_includes, _strip_comment_lines
 from .cap_clip_prompt_vl import clear_clip_prompt_vl
 from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_project, resolve_clip_media
 from .timecode import resolve_media_path
@@ -612,6 +612,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         width = max(1, int(width))
         height = max(1, int(height))
         global_prompt = _strip_comment_lines(settings.get("global_prompt") or "")
+        style_prompt = _strip_comment_lines(settings.get("style_prompt") or "")
+        non_diegetic_music = _strip_comment_lines(settings.get("non_diegetic_music") or "")
+        negative_prompt = _strip_comment_lines(settings.get("negative_prompt") or "")
         use_clip_video_name = settings.get("use_clip_specified_video_filename", True) is not False
         gen_video_stamp = str(settings.get("gen_video_stamp") or "").strip()
         if not gen_video_stamp:
@@ -712,6 +715,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             clip_role, clip_role_custom = _clip_role_fields(clip)
             agent, agent_custom = _clip_agent_fields(clip)
             source_clip_id = str(clip.get("id", ""))
+            prompt_includes = _clip_prompt_includes(clip)
             runtime_row = {
                 "id": f"runtime_{len(runtime_clips) + 1:04d}",
                 "source_clip_id": source_clip_id,
@@ -731,7 +735,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "images": _clip_image_refs(entries),
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
                 "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),
-                "use_global_prompt": _clip_use_global_prompt(clip),
+                "prompt_includes": prompt_includes,
+                "use_global_prompt": "global" in prompt_includes,
                 "use_ai_prompt": clip.get("use_ai_prompt", True) is not False,
                 "z_index": z_index,
                 "audios": self._audio_slices(
@@ -763,6 +768,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "width": width,
             "height": height,
             "global_prompt": global_prompt,
+            "style_prompt": style_prompt,
+            "non_diegetic_music": non_diegetic_music,
+            "negative_prompt": negative_prompt,
             "total_frame_count": total_frame_count,
             "run_timestamp": run_timestamp,
             "materials": materials,
