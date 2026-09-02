@@ -32,7 +32,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING", "BOOLEAN")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -51,6 +51,7 @@ class CAP_DataJsonClipParser:
         "clip_json",
         "second_sample",
         "output_video",
+        "save_latent",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -61,8 +62,9 @@ class CAP_DataJsonClipParser:
         "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
         "images (all clip images in editor order as one IMAGE batch), "
         "clip_role, agent, ai_prompt, clip_json (self-contained clip with resolved "
-        "image/video file paths and embedded materials), second_sample, and output_video "
-        "(CapTimelineEditor-specified save path when enabled)."
+        "image/video file paths and embedded materials), second_sample, output_video "
+        "(CapTimelineEditor-specified save path when enabled), and save_latent "
+        "(whether to run H3 Motion Context Save Latent for this clip)."
     )
 
     @classmethod
@@ -564,6 +566,7 @@ class CAP_DataJsonClipParser:
         )
         generate_preview_video = bool(clip.get("generate_preview_video", False))
         second_sample = bool(clip.get("second_sample", False))
+        save_latent = bool(clip.get("save_latent", False))
 
         preview_start_ms = clip.get("preview_start_ms", None)
         preview_end_ms = clip.get("preview_end_ms", None)
@@ -630,6 +633,7 @@ class CAP_DataJsonClipParser:
             clip_json,
             second_sample,
             output_video,
+            save_latent,
         )
 
 

@@ -89,7 +89,11 @@
       "ai_prompt": { "name": "AI プロンプト" },
       "clip_json": { "name": "クリップ JSON" },
       "second_sample": { "name": "二次サンプリング" },
-      "output_video": { "name": "出力動画パス" }
+      "output_video": { "name": "出力動画パス" },
+      "save_latent": {
+        "name": "Save Latent",
+        "tooltip": "true のとき、このクリップの sampler 出力を H3 Motion Context Save Latent で保存する。"
+      }
     }
   },
 
@@ -304,7 +308,11 @@
       "ref_image_size": { "name": "参照画像サイズ" },
       "data_json": { "name": "データ JSON" },
       "index": { "name": "インデックス" },
-      "clip_json": { "name": "クリップ JSON" }
+      "clip_json": { "name": "クリップ JSON" },
+      "context_latent": {
+        "name": "Context Latent",
+        "tooltip": "前クリップのサンプラー出力 latent。クリップの h3_motion_context_length > 0 のとき使用。ピン長は H3 VAE グリッド（5/22/39/56…）に切り下げ。latent が無い初回は通常生成。Decode 後に trim_frames を Trim へ。次クリップ用に Save Latent。ComfyUI-H3-Motion-Context が必要。"
+      }
     },
     "outputs": {
       "positive": { "name": "ポジティブ" },
@@ -314,7 +322,15 @@
       "images": { "name": "画像" },
       "videos": { "name": "動画" },
       "audio": { "name": "オーディオ" },
-      "output_video": { "name": "出力動画パス" }
+      "output_video": { "name": "出力動画パス" },
+      "trim_frames": {
+        "name": "Trim Frames",
+        "tooltip": "デコード後に先頭から削るピン留めフレーム数（H3 Motion Context Trim へ配線）。"
+      },
+      "save_latent": {
+        "name": "Save Latent",
+        "tooltip": "クリップ設定フラグ。sampler 出力を H3 Motion Context Save Latent で保存するか（サンプリング前の空 latent ではない）。"
+      }
     }
   },
 

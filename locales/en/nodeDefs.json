@@ -89,7 +89,11 @@
       "ai_prompt": { "name": "AI Prompt" },
       "clip_json": { "name": "Clip JSON" },
       "second_sample": { "name": "Second Sample" },
-      "output_video": { "name": "Output Video" }
+      "output_video": { "name": "Output Video" },
+      "save_latent": {
+        "name": "Save Latent",
+        "tooltip": "When true, run H3 Motion Context Save Latent on this clip's sampler output for the next clip."
+      }
     }
   },
 
@@ -304,7 +308,11 @@
       "ref_image_size": { "name": "Ref Image Size" },
       "data_json": { "name": "Data JSON" },
       "index": { "name": "Index" },
-      "clip_json": { "name": "Clip JSON" }
+      "clip_json": { "name": "Clip JSON" },
+      "context_latent": {
+        "name": "Context Latent",
+        "tooltip": "Previous clip sampler latent. Used when clip h3_motion_context_length > 0. Pin snaps to H3 VAE grid (5/22/39/56…). Missing latent → normal generate. Wire Trim with trim_frames; Save Latent for the next clip. Requires ComfyUI-H3-Motion-Context."
+      }
     },
     "outputs": {
       "positive": { "name": "Positive" },
@@ -314,7 +322,15 @@
       "images": { "name": "Images" },
       "videos": { "name": "Videos" },
       "audio": { "name": "Audio" },
-      "output_video": { "name": "Output Video" }
+      "output_video": { "name": "Output Video" },
+      "trim_frames": {
+        "name": "Trim Frames",
+        "tooltip": "Pinned head frames to remove after decode (wire to H3 Motion Context Trim)."
+      },
+      "save_latent": {
+        "name": "Save Latent",
+        "tooltip": "Clip flag: gate H3 Motion Context Save Latent on the sampler output (not the empty pre-sample latent)."
+      }
     }
   },
 

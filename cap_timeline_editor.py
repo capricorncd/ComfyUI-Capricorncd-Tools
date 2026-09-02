@@ -33,6 +33,13 @@ def _safe_filename_part(value, fallback: str = "Untitled") -> str:
     return text[:80] or fallback
 
 
+def _h3_motion_context_length(clip: dict) -> int:
+    try:
+        return max(0, int(round(float((clip or {}).get("h3_motion_context_length", 0) or 0))))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _is_subtitle_track(track_type) -> bool:
     t = str(track_type or "").lower()
     return t in ("text", "subtitle")
@@ -738,6 +745,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "tail_extend_sec": tail_sec,
                 "generate_preview_video": bool(clip.get("generate_preview_video", False)),
                 "second_sample": bool(clip.get("second_sample", False)),
+                "h3_motion_context_length": _h3_motion_context_length(clip),
+                "save_latent": bool(clip.get("save_latent", False)),
                 "images": _clip_image_refs(entries),
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
                 "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),

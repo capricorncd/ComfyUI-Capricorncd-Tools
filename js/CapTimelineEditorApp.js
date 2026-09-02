@@ -368,6 +368,8 @@ function defaultImageMeta(trackIndex = 0) {
         tailExtendSec: 0,
         generatePreviewVideo: false,
         secondSample: false,
+        h3MotionContextLength: 0,
+        saveLatent: false,
         trackIndex,
         clipRole: "multi_ref",
         clipRoleCustom: "",
@@ -2812,6 +2814,14 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-second-sample" type="checkbox" disabled />
                   <span>${T("second_sample_label")}</span>
                 </label>
+                <label class="cat-te-clip-setting-row" title="${T("h3_motion_context_length_title")}">
+                  <span>${T("h3_motion_context_length_label")}</span>
+                  <input class="cat-te-h3-motion-context" type="number" min="0" max="72" step="24" value="0" disabled />
+                </label>
+                <label class="cat-te-clip-setting-check" title="${T("save_latent_title")}">
+                  <input class="cat-te-save-latent" type="checkbox" disabled />
+                  <span>${T("save_latent_label")}</span>
+                </label>
                 <div class="cat-te-prompt-includes" aria-label="${T("prompt_includes_label")}">
                   <div class="cat-te-prompt-includes-label">${T("prompt_includes_label")}</div>
                   <div class="cat-te-prompt-includes-chips" role="group">
@@ -3475,6 +3485,8 @@ export class CapTimelineEditorApp {
         this.tailExtendInput = el.querySelector(".cat-te-tail-extend");
         this.genPreviewVideoCb = el.querySelector(".cat-te-gen-preview-video");
         this.secondSampleCb = el.querySelector(".cat-te-second-sample");
+        this.h3MotionContextInput = el.querySelector(".cat-te-h3-motion-context");
+        this.saveLatentCb = el.querySelector(".cat-te-save-latent");
         this.clipRoleSelect = el.querySelector(".cat-te-clip-role");
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
@@ -3779,6 +3791,8 @@ export class CapTimelineEditorApp {
             this.tailExtendInput?.addEventListener("change", () => this._onTailExtendChange());
             this.genPreviewVideoCb?.addEventListener("change", () => this._onGenPreviewVideoChange());
             this.secondSampleCb?.addEventListener("change", () => this._onSecondSampleChange());
+            this.h3MotionContextInput?.addEventListener("change", () => this._onH3MotionContextChange());
+            this.saveLatentCb?.addEventListener("change", () => this._onSaveLatentChange());
         }
         this.clipRoleSelect?.addEventListener("change", () => this._onClipRoleChange());
         this.clipRoleCustomInput?.addEventListener("change", () => this._onClipRoleCustomChange());
@@ -6269,6 +6283,55 @@ export class CapTimelineEditorApp {
         return Math.max(0.05, this._ensureResourceDuration(clip, m));
     }
 
+
+    /** Timeline length for gen-edit: at least parent clip + room to show source overhang. */
+    _genEditTimelineDuration(clipDur, draft) {
+        let maxEnd = Math.max(0.05, Number(clipDur) || 0.05);
+        for (const g of draft || []) {
+            const tin = Math.max(0, Number(g.trim_in_sec) || 0);
+            let eff = this._genEffectiveDurationSec(g);
+            const full = Number(g.duration_sec);
+            if (!(eff > 0)) {
+                eff = Number.isFinite(full) && full > tin ? full - tin : 0;
+            }
+            const start = Math.max(0, Number(g.edit_start_sec) || 0);
+            if (eff > 0) maxEnd = Math.max(maxEnd, start + eff);
+            if (Number.isFinite(full) && full > 0) maxEnd = Math.max(maxEnd, full);
+        }
+        return Math.max(maxEnd, clipDur + Math.max(1, clipDur * 0.25));
+    }
+
+    _syncGenEditOutOfBoundsUI(tl, clipDur) {
+        if (!tl?._contentEl) return;
+        let host = tl._contentEl.querySelector(".cat-te-gen-edit-oob");
+        if (!host) {
+            host = document.createElement("div");
+            host.className = "cat-te-gen-edit-oob";
+            host.innerHTML = [
+                '<div class="cat-te-gen-edit-oob-fill"></div>',
+                '<div class="cat-te-gen-edit-oob-line"></div>',
+                '<div class="cat-te-gen-edit-oob-label"></div>',
+            ].join("");
+            tl._contentEl.appendChild(host);
+        }
+        const pps = tl.pixelsPerSecond;
+        const startPx = Math.max(0, clipDur * pps);
+        const widthPx = Math.max(0, tl.duration * pps - startPx);
+        host.style.left = `${startPx}px`;
+        host.style.width = `${widthPx}px`;
+        host.hidden = widthPx < 1;
+        const label = host.querySelector(".cat-te-gen-edit-oob-label");
+        if (label) {
+            label.textContent = T("gen_edit_oob_label", { time: tl.formatTime(clipDur) });
+        }
+        for (const track of tl.tracks) {
+            for (const c of track.clips || []) {
+                const oob = c.startTime >= clipDur - 1e-6;
+                c.el?.classList.toggle("cat-te-gen-edit-clip-oob", oob);
+            }
+        }
+    }
+
     async _openGenEditModal(clip) {
         if (!this.genEditModal || !clip || clip.track?.type === "audio") return;
         if (isSubtitleTrackType(clip.track?.type)) return;
@@ -6289,23 +6352,22 @@ export class CapTimelineEditorApp {
             if (!(eff > 0)) {
                 eff = Number.isFinite(full) && full > tin ? full - tin : clipDur;
             }
-            // Cap into the parent clip window on first open / overflow.
-            let start = Math.max(0, Number(g.edit_start_sec) || 0);
-            if (start >= clipDur) start = 0;
-            const maxDur = Math.max(0.05, clipDur - start);
-            if (eff > maxDur) {
-                eff = maxDur;
-                g.trim_out_sec = tin + eff;
-            }
+            // Keep placements past the parent clip window — they stay editable
+            // but are outside the playable / rendered range.
+            const start = Math.max(0, Number(g.edit_start_sec) || 0);
             g.edit_start_sec = start;
             if (!(Number.isFinite(Number(g.duration_sec)) && g.duration_sec > 0) && Number.isFinite(full)) {
                 g.duration_sec = full;
+            }
+            if (!(eff > 0)) {
+                g.trim_out_sec = tin + Math.max(0.05, clipDur);
             }
         }
         this._genEditState = {
             clipId: clip.id,
             draft,
-            selectedId: draft[draft.length - 1]?.id || draft[0]?.id || null,
+            // generatedVideos is newest-first; select the newest entry.
+            selectedId: draft[0]?.id || null,
             clipMap: new Map(),
             previewRaf: 0,
         };
@@ -6332,30 +6394,34 @@ export class CapTimelineEditorApp {
         if (!st || !this.genEditTlHost) return;
         this._destroyGenEditTimeline();
         const clipDur = this._genEditParentDuration();
+        const tlDur = this._genEditTimelineDuration(clipDur, st.draft);
         const fps = this.getFps();
         const tl = new Timeline(this.genEditTlHost, {
-            duration: clipDur,
+            duration: tlDur,
+            playEndTime: clipDur,
             fps,
             timeFormat: "frames",
             zoom: 1.4,
             addTrackTypes: [],
         });
-        // Hide chrome that would expand/alter the fixed clip window.
         tl.toolbarEl?.querySelector(".tl-btn-add-track")?.remove();
-        const undoBtn = tl.toolbarEl?.querySelector(".tl-btn-history");
-        undoBtn?.remove();
+        tl.toolbarEl?.querySelector(".tl-btn-history")?.remove();
+        if (tl._durEl) {
+            tl._durEl.textContent = `/ ${tl.formatTime(clipDur)}`;
+            tl._durEl.title = T("gen_edit_playable_duration_title");
+        }
         st.timeline = tl;
         st.clipMap = new Map();
+        st.clipDur = clipDur;
 
-        // Chronological draft (oldest first): first track is Main; later
-        // overlays prepend so newest stays on top.
-        for (let i = 0; i < st.draft.length; i++) {
+        const n = st.draft.length;
+        for (let i = 0; i < n; i++) {
             const gen = st.draft[i];
-            const track = tl.addTrack({
+            const track = tl.addTrackAt({
                 type: "image",
                 name: (gen.file || "").split(/[\\/]/).pop() || T("gen_video_label"),
-                isMain: i === 0,
-            });
+                isMain: i === n - 1,
+            }, i);
             track.height = TRACK_HEIGHT;
             track.el.style.height = `${TRACK_HEIGHT}px`;
             track.headerEl.style.height = `${TRACK_HEIGHT}px`;
@@ -6367,14 +6433,16 @@ export class CapTimelineEditorApp {
             let eff = this._genEffectiveDurationSec(gen);
             if (!(eff > 0)) {
                 const full = Number(gen.duration_sec);
-                eff = Number.isFinite(full) && full > tin ? full - tin : Math.max(0.05, clipDur - (Number(gen.edit_start_sec) || 0));
+                eff = Number.isFinite(full) && full > tin
+                    ? full - tin
+                    : Math.max(0.05, clipDur);
             }
-            const start = Math.max(0, Math.min(clipDur - 0.05, Number(gen.edit_start_sec) || 0));
-            const dur = Math.max(0.05, Math.min(eff, clipDur - start));
+            const startSec = Math.max(0, Number(gen.edit_start_sec) || 0);
+            const dur = Math.max(0.05, eff);
             const src = this._outputVideoUrl(gen.file);
             const c = track.addClip({
                 name: (gen.file || "").split(/[\\/]/).pop() || T("gen_video_label"),
-                startTime: start,
+                startTime: startSec,
                 duration: dur,
                 sourceOffset: tin,
                 sourceDuration: Number.isFinite(Number(gen.duration_sec)) && gen.duration_sec > 0
@@ -6387,10 +6455,29 @@ export class CapTimelineEditorApp {
             if (c) {
                 st.clipMap.set(c.id, gen.id);
                 c.el.dataset.genId = gen.id;
+                this._syncGenEditClipDisabled(c, gen.enabled !== false);
             }
         }
-        tl.duration = clipDur;
+        tl.duration = Math.max(tlDur, this._genEditTimelineDuration(clipDur, st.draft));
+        tl.setPlayEndTime(clipDur);
+        this._syncGenEditOutOfBoundsUI(tl, clipDur);
         tl._refresh?.();
+
+        const refreshBound = () => {
+            const cd = this._genEditParentDuration();
+            st.clipDur = cd;
+            tl.setPlayEndTime(cd);
+            let maxEnd = this._genEditTimelineDuration(cd, st.draft);
+            for (const track of tl.tracks) {
+                for (const c of track.clips || []) maxEnd = Math.max(maxEnd, c.endTime);
+            }
+            if (maxEnd > tl.duration + 1e-3) {
+                tl.duration = maxEnd + Math.max(0.5, cd * 0.1);
+                tl._refresh?.();
+            }
+            this._syncGenEditOutOfBoundsUI(tl, cd);
+            if (tl._durEl) tl._durEl.textContent = `/ ${tl.formatTime(cd)}`;
+        };
 
         tl.on("clip:select", ({ clip: c }) => {
             const gid = st.clipMap.get(c?.id) || c?.el?.dataset?.genId;
@@ -6401,21 +6488,24 @@ export class CapTimelineEditorApp {
         });
         tl.on("clip:moveend", () => {
             this._pullGenEditDraftFromTimeline();
+            refreshBound();
             this._scheduleGenEditPreview();
         });
         tl.on("clip:resizeend", () => {
             this._pullGenEditDraftFromTimeline();
+            refreshBound();
             this._scheduleGenEditPreview();
         });
         tl.on("clip:trackchange", () => {
             this._pullGenEditDraftFromTimeline();
+            refreshBound();
         });
         tl.on("timechange", () => this._scheduleGenEditPreview());
         tl.on("seek", () => this._scheduleGenEditPreview());
         tl.on("play", () => this._scheduleGenEditPreview());
         tl.on("pause", () => this._scheduleGenEditPreview());
+        tl.on("zoomchange", () => requestAnimationFrame(refreshBound));
 
-        // Context menu: split / delete for modal clips.
         tl.scrollEl?.addEventListener("contextmenu", (e) => {
             const clipEl = e.target?.closest?.(".tl-clip");
             if (!clipEl) return;
@@ -6428,7 +6518,8 @@ export class CapTimelineEditorApp {
             if (gid) st.selectedId = gid;
             this._syncGenEditInspector();
             const t = tl.currentTime;
-            const canSplit = t > c.startTime + 1e-3 && t < c.endTime - 1e-3;
+            const cd = st.clipDur ?? clipDur;
+            const canSplit = t > c.startTime + 1e-3 && t < c.endTime - 1e-3 && t < cd - 1e-3;
             const items = [
                 ...(canSplit ? [{ label: T("menu_split"), fn: () => this._splitGenEditClip(c) }] : []),
                 {
@@ -6475,6 +6566,9 @@ export class CapTimelineEditorApp {
                     if (!row) return;
                     row.enabled = !(row.enabled !== false);
                     track.setVisible(row.enabled !== false);
+                    for (const c of track.clips || []) {
+                        this._syncGenEditClipDisabled(c, row.enabled !== false);
+                    }
                     render();
                     this._scheduleGenEditPreview();
                 });
@@ -6508,10 +6602,7 @@ export class CapTimelineEditorApp {
         const st = this._genEditState;
         const tl = st?.timeline;
         if (!st || !tl) return;
-        const clipDur = this._genEditParentDuration();
-        tl.duration = clipDur;
-        // tracks[] = overlays (newest) first, then main (oldest). Collect
-        // top→bottom then reverse to chronological append order.
+        // Preserve placements past the parent clip window; playback ignores them.
         const next = [];
         for (const track of tl.tracks) {
             for (const c of [...track.clips].sort((a, b) => a.startTime - b.startTime)) {
@@ -6520,22 +6611,26 @@ export class CapTimelineEditorApp {
                 if (!prev) continue;
                 const tin = Math.max(0, Number(c.sourceOffset) || 0);
                 const dur = Math.max(0.05, Number(c.duration) || 0.05);
-                const start = Math.max(0, Math.min(clipDur - 0.05, Number(c.startTime) || 0));
-                const capped = Math.min(dur, clipDur - start);
+                const start = Math.max(0, Number(c.startTime) || 0);
                 next.push({
                     ...prev,
                     enabled: track.visible !== false,
                     muted: track.muted === true,
                     edit_start_sec: start,
                     trim_in_sec: tin,
-                    trim_out_sec: tin + capped,
+                    trim_out_sec: tin + dur,
                     duration_sec: Number.isFinite(Number(c.sourceDuration)) && c.sourceDuration > 0
                         ? c.sourceDuration
                         : prev.duration_sec,
                 });
             }
         }
-        st.draft = next.reverse();
+        st.draft = next;
+    }
+
+    _syncGenEditClipDisabled(clip, enabled) {
+        if (!clip?.el) return;
+        clip.el.classList.toggle("cat-te-clip-disabled", enabled === false);
     }
 
     _splitGenEditClip(clip) {
@@ -6655,11 +6750,32 @@ export class CapTimelineEditorApp {
 
         const t = st.timeline?.currentTime ?? 0;
         const clipDur = this._genEditParentDuration();
+        // Outside the parent clip window: no playback / no render.
+        if (t >= clipDur - 1e-9) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, w, h);
+            if (this.genEditPreviewEmpty) {
+                this.genEditPreviewEmpty.hidden = false;
+                this.genEditPreviewEmpty.textContent = T("gen_edit_oob_preview");
+            }
+            st.previewHadFrame = false;
+            if (st.timeline?._playing) st.timeline.pause?.();
+            return;
+        }
+        if (this.genEditPreviewEmpty && this.genEditPreviewEmpty.dataset.oobRestored !== "1") {
+            this.genEditPreviewEmpty.dataset.defaultText = this.genEditPreviewEmpty.textContent;
+            this.genEditPreviewEmpty.dataset.oobRestored = "1";
+        }
+        if (this.genEditPreviewEmpty?.dataset.defaultText) {
+            this.genEditPreviewEmpty.textContent = this.genEditPreviewEmpty.dataset.defaultText;
+        }
         const playing = !!st.timeline?._playing;
         let drew = false;
         let pending = false;
         let covered = false;
-        for (const gen of st.draft) {
+        // draft is newest-first; paint older layers first so newer sit on top.
+        for (const gen of [...st.draft].reverse()) {
             if (gen.enabled === false) continue;
             const start = Math.max(0, Number(gen.edit_start_sec) || 0);
             let eff = this._genEffectiveDurationSec(gen);
@@ -10195,6 +10311,8 @@ export class CapTimelineEditorApp {
                 tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
                 generatePreviewVideo: !!c.generate_preview_video,
                 secondSample: !!c.second_sample,
+                h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
+                saveLatent: !!c.save_latent,
                 generatedVideos: this._generatedVideosFromJson(c),
                 previewMode: this._previewModeFromJson(c),
                 resourceDurationSec: Math.max(
@@ -10289,6 +10407,8 @@ export class CapTimelineEditorApp {
                     0,
                     Number(c.resource_start_sec) || startTime,
                 ),
+                h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
+                saveLatent: !!c.save_latent,
             });
             this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
             this._decorateClip(clip);
@@ -10343,6 +10463,8 @@ export class CapTimelineEditorApp {
                 0,
                 Number(c.resource_start_sec) || startTime,
             ),
+            h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
+            saveLatent: !!c.save_latent,
         });
         this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
         this._decorateClip(clip);
@@ -12673,16 +12795,16 @@ export class CapTimelineEditorApp {
                 if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
                 const m = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (m.disabled || m.visible === false) continue;
-                const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
-                if (this._isGeneratedEditMode()) {
-                    if (!gens.length) {
-                        layers.push({ kind: "package", clip, meta: m });
-                        continue;
-                    }
-                    const localT = Math.max(0, t - clip.startTime);
-                    // Older first → paint bottom; newest (array end) on top.
-                    for (const gen of gens) {
-                        const start = Math.max(0, Number(gen.edit_start_sec) || 0);
+                    const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
+                    if (this._isGeneratedEditMode()) {
+                        if (!gens.length) {
+                            layers.push({ kind: "package", clip, meta: m });
+                            continue;
+                        }
+                        const localT = Math.max(0, t - clip.startTime);
+                        // generatedVideos is newest-first; paint older first so newest ends on top.
+                        for (const gen of [...gens].reverse()) {
+                            const start = Math.max(0, Number(gen.edit_start_sec) || 0);
                         let eff = this._genEffectiveDurationSec(gen);
                         if (!(eff > 0)) {
                             const full = Number(gen.duration_sec);
@@ -13413,6 +13535,8 @@ export class CapTimelineEditorApp {
         const tail = el.querySelector(".cat-te-tail-extend");
         const gen = el.querySelector(".cat-te-gen-preview-video");
         const secondSample = el.querySelector(".cat-te-second-sample");
+        const h3Motion = el.querySelector(".cat-te-h3-motion-context");
+        const saveLatent = el.querySelector(".cat-te-save-latent");
         const role = el.querySelector(".cat-te-clip-role");
         const agent = el.querySelector(".cat-te-clip-agent");
         if (!head) return;
@@ -13420,6 +13544,8 @@ export class CapTimelineEditorApp {
         this.tailExtendInput = tail;
         this.genPreviewVideoCb = gen;
         this.secondSampleCb = secondSample;
+        this.h3MotionContextInput = h3Motion;
+        this.saveLatentCb = saveLatent;
         this.clipRoleSelect = role;
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
@@ -13432,6 +13558,8 @@ export class CapTimelineEditorApp {
             tail?.addEventListener("change", () => this._onTailExtendChange());
             gen?.addEventListener("change", () => this._onGenPreviewVideoChange());
             secondSample?.addEventListener("change", () => this._onSecondSampleChange());
+            h3Motion?.addEventListener("change", () => this._onH3MotionContextChange());
+            saveLatent?.addEventListener("change", () => this._onSaveLatentChange());
         }
     }
 
@@ -13456,6 +13584,21 @@ export class CapTimelineEditorApp {
         if (this.secondSampleCb) {
             this.secondSampleCb.disabled = disabled;
             this.secondSampleCb.checked = enabled && !!m?.secondSample;
+        }
+        if (this.h3MotionContextInput) {
+            const fps = Math.max(1, Math.round(Number(this.getFps?.() || 24) || 24));
+            const max = 3 * fps;
+            this.h3MotionContextInput.disabled = disabled;
+            this.h3MotionContextInput.min = "0";
+            this.h3MotionContextInput.step = String(fps);
+            this.h3MotionContextInput.max = String(max);
+            this.h3MotionContextInput.value = enabled
+                ? String(this._clampH3MotionContextLength(m?.h3MotionContextLength))
+                : "0";
+        }
+        if (this.saveLatentCb) {
+            this.saveLatentCb.disabled = disabled;
+            this.saveLatentCb.checked = enabled && !!m?.saveLatent;
         }
         if (this.clipRoleSelect) {
             this.clipRoleSelect.disabled = disabled;
@@ -14572,6 +14715,31 @@ export class CapTimelineEditorApp {
         this._meta.set(this._selClip.id, m);
     }
 
+    _clampH3MotionContextLength(frames) {
+        const fps = Math.max(1, Math.round(Number(this.getFps?.() || 24) || 24));
+        const max = 3 * fps;
+        let n = Math.max(0, Math.round(Number(frames) || 0));
+        n = Math.min(max, n);
+        return Math.round(n / fps) * fps;
+    }
+
+    _onH3MotionContextChange() {
+        if (!this._selClip || this.h3MotionContextInput?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.h3MotionContextLength = this._clampH3MotionContextLength(this.h3MotionContextInput.value);
+        this.h3MotionContextInput.value = String(m.h3MotionContextLength);
+        this._meta.set(this._selClip.id, m);
+    }
+
+    _onSaveLatentChange() {
+        if (!this._selClip || this.saveLatentCb?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.saveLatent = !!this.saveLatentCb.checked;
+        this._meta.set(this._selClip.id, m);
+    }
+
     /** Persist audio fade seconds from the Clip onto clip meta (ms). */
     _syncAudioFadeMeta(clip) {
         if (!clip || clip.track?.type !== "audio") return;
@@ -14730,6 +14898,8 @@ export class CapTimelineEditorApp {
                     row.tail_extend_sec = Math.max(0, Math.round(Number(m.tailExtendSec) || 0));
                     row.generate_preview_video = !!m.generatePreviewVideo;
                     row.second_sample = !!m.secondSample;
+                    row.h3_motion_context_length = this._clampH3MotionContextLength(m.h3MotionContextLength);
+                    row.save_latent = !!m.saveLatent;
                     row.clip_role = m.clipRole || "multi_ref";
                     row.clip_role_custom = m.clipRole === "other" ? (m.clipRoleCustom || "") : "";
                     row.agent = m.agent || "MiniMaxH3";

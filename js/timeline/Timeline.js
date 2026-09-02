@@ -38,6 +38,9 @@ export class Timeline extends EventEmitter {
     this._selected    = null;
     this._selectedIds = new Set();
     this.addTrackTypes = options.addTrackTypes ?? null; // e.g. ['image','audio']
+    this.playEndTime = Number.isFinite(Number(options.playEndTime)) && Number(options.playEndTime) > 0
+      ? Number(options.playEndTime)
+      : null;
     this._playing   = false;
     this._rafId     = null;
     this._lastTs    = null;
@@ -68,8 +71,22 @@ export class Timeline extends EventEmitter {
     return maxEnd;
   }
 
-  /** Playhead / seek cannot move past the last clip end (or full duration if empty). */
+  /**
+   * Optional soft play/seek end (seconds). When set, playback and seeking
+   * clamp here while the visual timeline may still extend further (e.g.
+   * gen-edit out-of-bounds region past the parent clip duration).
+   */
+  setPlayEndTime(secs) {
+    const n = Number(secs);
+    this.playEndTime = Number.isFinite(n) && n > 0 ? n : null;
+    this._clampCurrentTime();
+  }
+
+  /** Playhead / seek cannot move past playEndTime (if set), else last clip end. */
   _seekMaxTime() {
+    if (Number.isFinite(this.playEndTime) && this.playEndTime > 0) {
+      return Math.min(this.playEndTime, Math.max(this.duration, this.playEndTime));
+    }
     const end = this._contentEndTime();
     return end > 0 ? end : this.duration;
   }
@@ -93,6 +110,9 @@ export class Timeline extends EventEmitter {
       }
     }
     times.push(this._seekSnapTime());
+    if (Number.isFinite(this.playEndTime) && this.playEndTime > 0) {
+      times.push(this.playEndTime);
+    }
     return times;
   }
 
