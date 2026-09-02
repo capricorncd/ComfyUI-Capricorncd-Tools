@@ -9,7 +9,7 @@ import { t as T } from "./i18n/timeline_editor.js";
 
 /** Right-side empty margin as a fraction of the timeline viewport width. */
 const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
-/** All tracks (main/overlay/audio) share one row height; subtitle tracks are half. */
+/** Media / audio / voiceover tracks share full row height; subtitle tracks are half. */
 const TRACK_HEIGHT = 78;
 const SUBTITLE_TRACK_HEIGHT = TRACK_HEIGHT / 2;
 const STORAGE_MEDIA_STARS = "capricorncd.timeline.media_stars";
@@ -305,6 +305,16 @@ function defaultAudioMeta(trackIndex = 2) {
     };
 }
 
+function defaultVoiceoverMeta(trackIndex = 2) {
+    return {
+        clipType: "voiceover",
+        muted: false,
+        visible: true,
+        disabled: false,
+        trackIndex,
+    };
+}
+
 function defaultSubtitleMeta(trackIndex = 0) {
     return {
         clipType: "subtitle",
@@ -356,6 +366,10 @@ function isSubtitleTrackType(type) {
     return t === "text" || t === "subtitle";
 }
 
+function isVoiceoverTrackType(type) {
+    return String(type || "").toLowerCase() === "voiceover";
+}
+
 function trackHeightFor(type) {
     return isSubtitleTrackType(type) ? SUBTITLE_TRACK_HEIGHT : TRACK_HEIGHT;
 }
@@ -363,6 +377,11 @@ function trackHeightFor(type) {
 function isSubtitleClipMeta(meta, track) {
     if (isSubtitleTrackType(track?.type)) return true;
     return String(meta?.clipType || "").toLowerCase() === "subtitle";
+}
+
+function isVoiceoverClipMeta(meta, track) {
+    if (isVoiceoverTrackType(track?.type)) return true;
+    return String(meta?.clipType || "").toLowerCase() === "voiceover";
 }
 
 const BODY_UI_CLASSES = [
@@ -1129,6 +1148,7 @@ export class CapTimelineEditorApp {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
             { label: T("media_track_menu"), fn: () => this._addUserTrack("image") },
+            { label: T("voiceover_track_menu"), fn: () => this._addUserTrack("voiceover") },
             { label: T("audio_track_menu"), fn: () => this._addUserTrack("audio") },
             { label: T("subtitle_track_menu"), fn: () => this._addUserTrack("text") },
         ], r.left, r.bottom + 4);
@@ -1138,9 +1158,11 @@ export class CapTimelineEditorApp {
         if (!this._timeline) return;
         const name = type === "audio"
             ? T("audio_track_name")
-            : isSubtitleTrackType(type)
-                ? T("subtitle_track_name")
-                : T("overlay_track_name");
+            : isVoiceoverTrackType(type)
+                ? T("voiceover_track_name")
+                : isSubtitleTrackType(type)
+                    ? T("subtitle_track_name")
+                    : T("overlay_track_name");
         const track = this._timeline.addTrack({
             type,
             name,
@@ -1150,7 +1172,13 @@ export class CapTimelineEditorApp {
         this._trackInfo.set(track.id, {
             trackIndex: this._nextTrackIndex(),
             enabled: true,
-            role: type === "audio" ? "audio" : isSubtitleTrackType(type) ? "subtitle" : "overlay",
+            role: type === "audio"
+                ? "audio"
+                : isVoiceoverTrackType(type)
+                    ? "voiceover"
+                    : isSubtitleTrackType(type)
+                        ? "subtitle"
+                        : "overlay",
         });
         this._setupTrackControls(track);
         this._saveToWidgets();
@@ -1165,7 +1193,7 @@ export class CapTimelineEditorApp {
             if (info.enabled === false) continue;
             for (const clip of track.clips) {
                 const meta = this._meta.get(clip.id) ?? defaultImageMeta();
-                if (meta.disabled || meta.clipType === "audio" || meta.clipType === "subtitle") continue;
+                if (meta.disabled || meta.clipType === "audio" || meta.clipType === "subtitle" || meta.clipType === "voiceover") continue;
                 if (isSubtitleClipMeta(meta, track)) continue;
                 // Empty package clips have nothing to generate.
                 if (this._isEmptyGroupClip(meta)) continue;
@@ -3969,6 +3997,10 @@ export class CapTimelineEditorApp {
         return (this._timeline?.tracks ?? []).filter(t => t.type === "audio");
     }
 
+    _allVoiceoverTracks() {
+        return (this._timeline?.tracks ?? []).filter(t => isVoiceoverTrackType(t.type));
+    }
+
     _allTextTracks() {
         return (this._timeline?.tracks ?? []).filter(t => isSubtitleTrackType(t.type));
     }
@@ -4063,10 +4095,11 @@ export class CapTimelineEditorApp {
             track,
             (track.type === "image" || isSubtitleTrackType(track.type)) ? "visible" : null,
         ));
-        // Audio slot: real mute for media/audio; disabled placeholder for subtitle tracks.
+        // Audio / voiceover: mute; image/video: mute (embedded audio); subtitle: placeholder.
         actions.appendChild(this._makeTrackSlot(
             track,
-            (track.type === "audio" || track.type === "image" || track.type === "video") ? "mute" : null,
+            (track.type === "audio" || isVoiceoverTrackType(track.type)
+                || track.type === "image" || track.type === "video") ? "mute" : null,
         ));
     }
 
@@ -4425,7 +4458,10 @@ export class CapTimelineEditorApp {
                 const source = clip.source && typeof clip.source === "object" ? clip.source : {};
                 const mediaRows = this._jsonClipMediaRows(clip);
                 const isAudio = clip.type === "audio" || trackType === "audio";
-                const isSubtitle = !isAudio && (
+                const isVoiceover = !isAudio && (
+                    clip.type === "voiceover" || trackType === "voiceover"
+                );
+                const isSubtitle = !isAudio && !isVoiceover && (
                     clip.type === "subtitle"
                     || trackType === "subtitle"
                     || trackType === "text"
@@ -4444,17 +4480,23 @@ export class CapTimelineEditorApp {
                 const durationMsOut = Math.max(1, Math.round(duration * 1000));
                 clips.push({
                     ...clip,
-                    clip_type: isAudio ? "audio" : isSubtitle ? "subtitle" : "clip",
+                    clip_type: isAudio
+                        ? "audio"
+                        : isVoiceover
+                            ? "voiceover"
+                            : isSubtitle
+                                ? "subtitle"
+                                : "clip",
                     track: trackIndex,
                     start_ms: startMsOut,
                     duration_ms: durationMsOut,
                     end_ms: startMsOut + durationMsOut,
-                    items: isAudio || isSubtitle
+                    items: isAudio || isVoiceover || isSubtitle
                         ? []
                         : mediaRows
                             .filter((row) => row.kind !== "audio")
                             .map((row) => ({ id: row.id, kind: row.kind, file: row.file })),
-                    start_image: isAudio || isSubtitle ? null : (first?.file || null),
+                    start_image: isAudio || isVoiceover || isSubtitle ? null : (first?.file || null),
                     audio_file: isAudio ? (first?.file || null) : null,
                     text: isSubtitle ? String(clip.text ?? clip.name ?? "") : undefined,
                     source_duration: (
@@ -4774,7 +4816,11 @@ export class CapTimelineEditorApp {
     }
 
     _restoreLinkedTrackResourceStarts() {
-        const linked = [...this._allAudioTracks(), ...this._allTextTracks()];
+        const linked = [
+            ...this._allAudioTracks(),
+            ...this._allVoiceoverTracks(),
+            ...this._allTextTracks(),
+        ];
         for (const track of linked) {
             for (const clip of track.clips) {
                 const m = this._meta.get(clip.id);
@@ -4828,7 +4874,11 @@ export class CapTimelineEditorApp {
             return t + shift;
         };
 
-        const linked = [...this._allAudioTracks(), ...this._allTextTracks()];
+        const linked = [
+            ...this._allAudioTracks(),
+            ...this._allVoiceoverTracks(),
+            ...this._allTextTracks(),
+        ];
         for (const track of linked) {
             for (const clip of track.clips) {
                 const m = this._meta.get(clip.id);
@@ -4872,16 +4922,12 @@ export class CapTimelineEditorApp {
     _updateEditModeToolbar() {
         const genMode = this._isGeneratedEditMode();
         if (this.insertClipBtn) {
-            this.insertClipBtn.disabled = genMode;
-            this.insertClipBtn.title = genMode
-                ? T("insert_clip_disabled_in_gen_edit_title")
-                : T("insert_empty_clip_title");
+            this.insertClipBtn.disabled = false;
+            this.insertClipBtn.title = T("insert_empty_clip_title");
         }
         if (this.runMenuBtn) {
-            this.runMenuBtn.disabled = genMode;
-            this.runMenuBtn.title = genMode
-                ? T("run_disabled_in_gen_edit_title")
-                : T("run_menu_title");
+            this.runMenuBtn.disabled = false;
+            this.runMenuBtn.title = T("run_menu_title");
         }
         const modeBtn = this.editModeBtn;
         if (modeBtn) {
@@ -6443,7 +6489,7 @@ export class CapTimelineEditorApp {
     _allLinkedGeneratedVideoFiles() {
         const have = new Set();
         for (const track of this._timeline?.tracks ?? []) {
-            if (track.type === "audio" || isSubtitleTrackType(track.type)) continue;
+            if (track.type === "audio" || isVoiceoverTrackType(track.type) || isSubtitleTrackType(track.type)) continue;
             for (const clip of track.clips) {
                 for (const row of this._clipGeneratedVideos(this._meta.get(clip.id))) {
                     const n = normalizeOutputVideoPath(row.file) || row.file;
@@ -7852,15 +7898,23 @@ export class CapTimelineEditorApp {
     }
 
     _createInsertTrack(kind) {
-        const type = kind === "audio" ? "audio" : "image";
+        const type = kind === "audio"
+            ? "audio"
+            : kind === "voiceover"
+                ? "voiceover"
+                : "image";
         const track = this._timeline.addTrack({
             type,
-            name: type === "audio" ? T("media_kind_audio") : T("overlay_track_name"),
-            height: TRACK_HEIGHT,
+            name: type === "audio"
+                ? T("audio_track_name")
+                : type === "voiceover"
+                    ? T("voiceover_track_name")
+                    : T("overlay_track_name"),
+            height: trackHeightFor(type),
         });
         this._trackInfo.set(track.id, {
             trackIndex: this._nextTrackIndex(), enabled: true,
-            role: type === "audio" ? "audio" : "overlay",
+            role: type === "audio" ? "audio" : type === "voiceover" ? "voiceover" : "overlay",
         });
         this._setupTrackControls(track);
         return track;
@@ -7900,6 +7954,7 @@ export class CapTimelineEditorApp {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
             { label: T("insert_media_clip_menu"), fn: () => this._insertPackageAtTime(this._timeline?.currentTime ?? 0) },
+            { label: T("insert_voiceover_clip_menu"), fn: () => this._insertVoiceoverAtTime(this._timeline?.currentTime ?? 0) },
             { label: T("insert_subtitle_clip_menu"), fn: () => this._insertSubtitleAtTime(this._timeline?.currentTime ?? 0) },
         ], r.left, r.bottom + 4);
     }
@@ -7911,6 +7966,41 @@ export class CapTimelineEditorApp {
     _insertPackageAtPlayhead() {
         if (!this._timeline) return;
         this._insertPackageAtTime(this._timeline.currentTime);
+    }
+
+    _insertVoiceoverAtTime(atSec, preferredTrack = null) {
+        if (!this._timeline) return;
+        let track = preferredTrack && isVoiceoverTrackType(preferredTrack.type) ? preferredTrack : null;
+        if (track?.locked) track = null;
+        const dur = Math.min(2, this._timeline.duration / 4) || 1;
+        if (!track) {
+            track = this._allVoiceoverTracks().find((t) => !t.locked && this._trackHasRoom(t, atSec, dur));
+        }
+        this._recordUndo();
+        if (!track) {
+            track = this._addUserTrack("voiceover") || this._createInsertTrack("voiceover");
+        }
+        if (!track || track.locked) return;
+        this._ensureTimelineLength(atSec + dur);
+        const clip = this._timeline.addClip(track.id, {
+            name: T("voiceover_clip_default_name"),
+            startTime: atSec,
+            duration: dur,
+            sourceDuration: Infinity,
+            sourceOffset: 0,
+            src: "",
+            color: track.color || "#5bc0de",
+        });
+        this._meta.set(clip.id, {
+            ...defaultVoiceoverMeta(this._trackIndex(track)),
+            resourceStartSec: atSec,
+            resourceDurationSec: dur,
+        });
+        this._timeline.selectClip(clip);
+        this._timeline.setCurrentTime(atSec);
+        this._decorateClip(clip);
+        this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
     }
 
     _insertSubtitleAtTime(atSec, preferredTrack = null) {
@@ -8566,7 +8656,7 @@ export class CapTimelineEditorApp {
             fps,
             timeFormat: "frames",
             zoom: 1.2,
-            addTrackTypes: ["image", "audio", "text"],
+            addTrackTypes: ["image", "voiceover", "audio", "text"],
         });
 
         let project = projectOverride;
@@ -8627,9 +8717,11 @@ export class CapTimelineEditorApp {
             const rawType = String(track.type || "visual").toLowerCase();
             const type = rawType === "audio"
                 ? "audio"
-                : (rawType === "subtitle" || rawType === "text")
-                    ? "text"
-                    : "image";
+                : rawType === "voiceover"
+                    ? "voiceover"
+                    : (rawType === "subtitle" || rawType === "text")
+                        ? "text"
+                        : "image";
             return {
                 ...track,
                 type,
@@ -8676,7 +8768,7 @@ export class CapTimelineEditorApp {
             type: "image", name: T("overlay_track_name"), height: TRACK_HEIGHT, color: "#8b4ec8",
         });
         this._audioTrack = tl.addTrack({
-            type: "audio", name: T("audio_track_name"), height: TRACK_HEIGHT, color: "#3dd68c",
+            type: "audio", name: T("audio_track_name"), height: trackHeightFor("audio"), color: "#3dd68c",
         });
         this._trackInfo.set(this._mainTrack.id, { trackIndex: 0, enabled: true, role: "main" });
         this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1, enabled: true, role: "overlay" });
@@ -8698,9 +8790,11 @@ export class CapTimelineEditorApp {
                 name: row.name || (
                     row.type === "audio"
                         ? T("audio_track_name")
-                        : isSubtitleTrackType(row.type)
-                            ? T("subtitle_track_name")
-                            : T("generic_track_name")
+                        : isVoiceoverTrackType(row.type)
+                            ? T("voiceover_track_name")
+                            : isSubtitleTrackType(row.type)
+                                ? T("subtitle_track_name")
+                                : T("generic_track_name")
                 ),
                 isMain,
                 height: trackHeightFor(row.type),
@@ -8720,9 +8814,11 @@ export class CapTimelineEditorApp {
                         ? "main"
                         : row.type === "audio"
                             ? "audio"
-                            : isSubtitleTrackType(row.type)
-                                ? "subtitle"
-                                : "overlay"
+                            : isVoiceoverTrackType(row.type)
+                                ? "voiceover"
+                                : isSubtitleTrackType(row.type)
+                                    ? "subtitle"
+                                    : "overlay"
                 ),
             });
             this._setupTrackControls(track);
@@ -8758,6 +8854,7 @@ export class CapTimelineEditorApp {
         const direct = this._trackByIndex(trackIdx);
         if (direct) return direct;
         if (clipType === "audio") return this._audioTrack;
+        if (clipType === "voiceover") return this._allVoiceoverTracks()[0] ?? null;
         if (trackIdx === 1) return this._overlayTrack ?? this._mainTrack;
         return this._mainTrack;
     }
@@ -8828,6 +8925,30 @@ export class CapTimelineEditorApp {
                 fadeInMs,
                 fadeOutMs,
                 mediaId: audioMedia?.id || "",
+                resourceStartSec: Math.max(0, Number(c.resource_start_sec) || startTime),
+                resourceDurationSec: Math.max(0.05, Number(c.resource_duration_sec) || dur),
+            });
+            this._decorateClip(clip);
+            return;
+        }
+
+        if (clipType === "voiceover" || isVoiceoverTrackType(track.type)) {
+            const name = String(c.name || T("voiceover_clip_default_name"));
+            const clip = this._timeline.addClip(track.id, {
+                id: c.id || uid(),
+                name: name.slice(0, 40) || T("voiceover_clip_default_name"),
+                startTime,
+                duration: dur,
+                sourceDuration: Infinity,
+                sourceOffset: 0,
+                src: "",
+                color: track.color || "#5bc0de",
+            });
+            this._meta.set(clip.id, {
+                ...defaultVoiceoverMeta(trackIdx),
+                muted: !!c.muted,
+                visible: c.visible !== false,
+                disabled: !!c.disabled || c.enabled === false,
                 resourceStartSec: Math.max(0, Number(c.resource_start_sec) || startTime),
                 resourceDurationSec: Math.max(0.05, Number(c.resource_duration_sec) || dur),
             });
@@ -9141,6 +9262,7 @@ export class CapTimelineEditorApp {
         if (!tl?.scrollEl) return null;
         const track = tl._findTrackAtY(clientY, "image")
             || tl._findTrackAtY(clientY, "text")
+            || tl._findTrackAtY(clientY, "voiceover")
             || tl._findTrackAtY(clientY, "audio")
             || tl._findTrackAtY(clientY, "video");
         if (!track) return null;
@@ -9155,14 +9277,16 @@ export class CapTimelineEditorApp {
         const m = this._ensureClipMeta(clip);
         const track = clip.track;
         const trackHidden = (track.type === "image" || isSubtitleTrackType(track.type)) && track.visible === false;
-        const trackMuted = track.type === "audio" && track.muted;
+        const trackMuted = (track.type === "audio" || isVoiceoverTrackType(track.type)) && track.muted;
         const isAudio = m.clipType === "audio" || track.type === "audio";
+        const isVoiceover = isVoiceoverClipMeta(m, track);
         const isSubtitle = isSubtitleClipMeta(m, track);
         const disabled = !isAudio && (!!m.disabled || trackHidden);
         clip.el.classList.toggle("cat-te-clip-disabled", disabled);
-        clip.el.classList.toggle("cat-te-clip-muted", isAudio && (!!m.muted || trackMuted));
-        clip.el.classList.toggle("cat-te-clip-package", !isAudio && !isSubtitle && this._isEmptyGroupClip(m));
-        const runState = (!isAudio && !isSubtitle) ? this._clipRunState(clip.id) : null;
+        clip.el.classList.toggle("cat-te-clip-muted", (isAudio || isVoiceover) && (!!m.muted || trackMuted));
+        clip.el.classList.toggle("cat-te-clip-package", !isAudio && !isSubtitle && !isVoiceover && this._isEmptyGroupClip(m));
+        clip.el.classList.toggle("cat-te-clip-voiceover", isVoiceover);
+        const runState = (!isAudio && !isSubtitle && !isVoiceover) ? this._clipRunState(clip.id) : null;
         clip.el.classList.toggle("cat-te-clip-queued", runState === "queued");
         clip.el.classList.toggle("cat-te-clip-running", runState === "running");
         let runBar = clip.el.querySelector(".cat-te-clip-run-progress");
@@ -9197,10 +9321,15 @@ export class CapTimelineEditorApp {
             clip.name = label.slice(0, 40);
             const labelEl = clip.el.querySelector(".tl-clip-label");
             if (labelEl) labelEl.textContent = clip.name;
+        } else if (isVoiceover) {
+            const label = (clip.name || T("voiceover_clip_default_name")).trim() || T("voiceover_clip_default_name");
+            clip.name = label.slice(0, 40);
+            const labelEl = clip.el.querySelector(".tl-clip-label");
+            if (labelEl) labelEl.textContent = clip.name;
         }
 
         let muteBadge = clip.el.querySelector(".cat-te-mute-badge");
-        if (isAudio) {
+        if (isAudio || isVoiceover) {
             if (!muteBadge) {
                 muteBadge = document.createElement("button");
                 muteBadge.type = "button";
@@ -9225,10 +9354,10 @@ export class CapTimelineEditorApp {
         let badge = clip.el.querySelector(".cat-te-end-badge");
         if (badge && !badge.classList.contains("cat-te-clip-preview-badge")) badge.remove();
         let previewBadge = clip.el.querySelector(".cat-te-clip-preview-badge");
-        const enabledGen = !isAudio && !isSubtitle && track.type === "image"
+        const enabledGen = !isAudio && !isSubtitle && !isVoiceover && track.type === "image"
             ? this._firstEnabledGeneratedVideo(m)
             : null;
-        const genEditEmpty = this._isGeneratedEditMode() && !isAudio && !isSubtitle && !enabledGen;
+        const genEditEmpty = this._isGeneratedEditMode() && !isAudio && !isSubtitle && !isVoiceover && !enabledGen;
         clip.el.classList.toggle("cat-te-clip-gen-empty", genEditEmpty);
         // Video badge only in resource edit mode. Hover plays the generated
         // video in the program monitor (playhead / timeline time stay put).
@@ -10306,10 +10435,13 @@ export class CapTimelineEditorApp {
         const m = this._meta.get(clip.id)
             ?? (clip.track.type === "audio"
                 ? defaultAudioMeta()
-                : isSubtitleTrackType(clip.track.type)
-                    ? defaultSubtitleMeta()
-                    : defaultImageMeta());
+                : isVoiceoverTrackType(clip.track.type)
+                    ? defaultVoiceoverMeta()
+                    : isSubtitleTrackType(clip.track.type)
+                        ? defaultSubtitleMeta()
+                        : defaultImageMeta());
         const isAudio = clip.track.type === "audio" || m.clipType === "audio";
+        const isVoiceover = isVoiceoverClipMeta(m, clip.track);
         const isSubtitle = isSubtitleClipMeta(m, clip.track);
         const t = this._timeline.currentTime;
         const canSplit = t > clip.startTime && t < clip.endTime;
@@ -10325,6 +10457,19 @@ export class CapTimelineEditorApp {
                     this._decorateClip(clip);
                 },
             });
+        } else if (isVoiceover) {
+            items.push(
+                {
+                    label: m.muted ? T("unmute_label") : T("mute_label"),
+                    fn: () => {
+                        m.muted = !m.muted;
+                        this._meta.set(clip.id, m);
+                        this._decorateClip(clip);
+                    },
+                },
+                { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
+                { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
+            );
         } else if (isSubtitle) {
             items.push(
                 { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
@@ -10382,23 +10527,32 @@ export class CapTimelineEditorApp {
 
     _snapshotClip(clip) {
         const isAudio = clip.track?.type === "audio";
+        const isVoiceover = isVoiceoverTrackType(clip.track?.type);
         const isSubtitle = isSubtitleTrackType(clip.track?.type);
         const meta = this._meta.get(clip.id)
             ?? (isAudio
                 ? defaultAudioMeta()
-                : isSubtitle
-                    ? defaultSubtitleMeta()
-                    : defaultImageMeta());
+                : isVoiceover
+                    ? defaultVoiceoverMeta()
+                    : isSubtitle
+                        ? defaultSubtitleMeta()
+                        : defaultImageMeta());
         return {
             trackId: clip.track.id,
-            trackType: isAudio ? "audio" : isSubtitle ? "text" : "image",
+            trackType: isAudio
+                ? "audio"
+                : isVoiceover
+                    ? "voiceover"
+                    : isSubtitle
+                        ? "text"
+                        : "image",
             startTime: clip.startTime,
             duration: clip.duration,
             name: clip.name,
             src: clip.src,
             thumbnail: clip.thumbnail,
             color: clip.color,
-            sourceDuration: clip.sourceDuration,
+            sourceDuration: isVoiceover ? Infinity : clip.sourceDuration,
             sourceOffset: clip.sourceOffset || 0,
             fadeIn: isAudio ? Math.max(0, clip.fadeIn || 0) : 0,
             fadeOut: isAudio ? Math.max(0, clip.fadeOut || 0) : 0,
@@ -10426,19 +10580,27 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!tl || !snap) return null;
         const wantAudio = snap.trackType === "audio";
+        const wantVoiceover = isVoiceoverTrackType(snap.trackType);
         const wantSub = isSubtitleTrackType(snap.trackType);
         const orig = tl.getTrack(snap.trackId);
         if (orig && !orig.locked && orig.visible !== false) {
             const ok = wantAudio
                 ? orig.type === "audio"
-                : wantSub
-                    ? isSubtitleTrackType(orig.type)
-                    : (orig.type === "image" || orig.type === "video");
+                : wantVoiceover
+                    ? isVoiceoverTrackType(orig.type)
+                    : wantSub
+                        ? isSubtitleTrackType(orig.type)
+                        : (orig.type === "image" || orig.type === "video");
             if (ok) return orig;
         }
         if (wantAudio) {
             return this._allAudioTracks().find(t => !t.locked && t.visible !== false)
                 ?? this._createInsertTrack("audio");
+        }
+        if (wantVoiceover) {
+            return this._allVoiceoverTracks().find(t => !t.locked && t.visible !== false)
+                ?? this._addUserTrack("voiceover")
+                ?? this._createInsertTrack("voiceover");
         }
         if (wantSub) {
             return this._allTextTracks().find(t => !t.locked && t.visible !== false)
@@ -11147,7 +11309,7 @@ export class CapTimelineEditorApp {
         v.muted = true;
         v.playsInline = true;
         v.preload = "auto";
-        entry = { el: v, ready: false, seeking: false, wantTime: 0, _seekTimer: 0 };
+        entry = { el: v, ready: false, seeking: false, wantTime: 0, _seekTimer: 0, _hasDrawn: false };
         const kick = () => {
             entry.ready = v.readyState >= 2;
             this._scheduleProgramPreview();
@@ -11190,7 +11352,7 @@ export class CapTimelineEditorApp {
         return entry;
     }
 
-    _seekPreviewVideo(entry, mediaTime) {
+    _seekPreviewVideo(entry, mediaTime, { force = false } = {}) {
         if (!entry?.el) return;
         const v = entry.el;
         const t = Math.max(0, Number(mediaTime) || 0);
@@ -11201,7 +11363,9 @@ export class CapTimelineEditorApp {
         if (entry.seeking) return;
         const playing = !!this._timeline?._playing
             || !!(this._genEditState?.timeline?._playing);
-        const eps = playing ? 0.25 : 0.04;
+        // First activation / warm prefetch: tighter tolerance so we don't paint
+        // a wrong near-zero frame before the real in-point seek settles.
+        const eps = force || !entry._hasDrawn ? 0.04 : (playing ? 0.25 : 0.04);
         if (Math.abs((v.currentTime || 0) - clamped) <= eps) return;
         entry.seeking = true;
         this._armPreviewSeekWatch(entry);
@@ -11227,14 +11391,15 @@ export class CapTimelineEditorApp {
         v.muted = !(isPlaying && audible);
         if (isPlaying) {
             const drift = Math.abs((v.currentTime || 0) - clamped);
-            if (drift > 0.25) this._seekPreviewVideo(entry, clamped);
+            const eps = entry._hasDrawn ? 0.25 : 0.04;
+            if (drift > eps) this._seekPreviewVideo(entry, clamped, { force: !entry._hasDrawn });
             if (v.paused && (entry.ready || v.readyState >= 2)) {
                 void v.play().catch(() => {});
             }
             return;
         }
         if (!v.paused) v.pause();
-        this._seekPreviewVideo(entry, clamped);
+        this._seekPreviewVideo(entry, clamped, { force: !entry._hasDrawn });
     }
 
     _previewVideoCanDraw(entry) {
@@ -11256,6 +11421,53 @@ export class CapTimelineEditorApp {
             if (usedKeys.has(key)) continue;
             if (!entry.el.paused) entry.el.pause();
             entry.el.muted = true;
+        }
+    }
+
+    /** Opening media-time for a generated row when the parent clip local time is 0. */
+    _genPreviewStartMediaTime(gen) {
+        const tin = Math.max(0, Number(gen?.trim_in_sec) || 0);
+        const editStart = Math.max(0, Number(gen?.edit_start_sec) || 0);
+        return tin + Math.max(0, 0 - editStart);
+    }
+
+    /**
+     * Warm-load + preseek upcoming generated videos so clip boundaries do not
+     * flash while the next file buffers / seeks to its in-point.
+     */
+    _prefetchUpcomingGeneratedVideos(t, lookaheadSec = 2.5) {
+        const now = Math.max(0, Number(t) || 0);
+        const horizon = now + Math.max(0.5, Number(lookaheadSec) || 2.5);
+        const genMode = this._isGeneratedEditMode();
+        for (const track of this._allImageTracks()) {
+            if (track.visible === false) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                const start = Math.max(0, Number(clip.startTime) || 0);
+                const end = Math.max(start, Number(clip.endTime) || start);
+                // Current clip and anything starting within the lookahead window.
+                if (end < now - 0.05 || start > horizon) continue;
+                const m = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (m.disabled || m.visible === false) continue;
+                const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
+                if (!gens.length) continue;
+                const rows = genMode ? gens : (this._firstEnabledGeneratedVideo(m) ? [this._firstEnabledGeneratedVideo(m)] : []);
+                for (const gen of rows) {
+                    if (!gen?.file) continue;
+                    const entry = this._ensurePreviewVideo(gen.file, "output");
+                    if (!entry) continue;
+                    // Still upcoming: park decoder at the opening frame, stay paused.
+                    if (start > now + 0.02) {
+                        const mediaTime = this._genPreviewStartMediaTime(gen);
+                        if (!entry.el.paused) {
+                            try { entry.el.pause(); } catch { /* ignore */ }
+                        }
+                        entry.el.muted = true;
+                        this._seekPreviewVideo(entry, mediaTime, { force: true });
+                    }
+                }
+            }
         }
     }
 
@@ -11418,6 +11630,7 @@ export class CapTimelineEditorApp {
                     audible: layer.kind === "generated" && layer.muted !== true,
                 });
                 if (this._previewVideoCanDraw(entry) && this._drawCover(ctx, entry.el, cw, ch)) {
+                    entry._hasDrawn = true;
                     drew = true;
                 }
                 continue;
@@ -11468,15 +11681,26 @@ export class CapTimelineEditorApp {
         this._programCanvasKey = sizeKey;
 
         const t = this._timeline?.currentTime ?? 0;
+        const playing = !!this._timeline?._playing;
+        // Warm the next generated clip(s) before the playhead arrives so the
+        // boundary does not flash while the decoder loads / seeks.
+        this._prefetchUpcomingGeneratedVideos(t, playing ? 2.5 : 0.75);
         const layers = this._collectPreviewLayers(t);
         const hasSub = this._hasVisibleSubtitleAt(t);
         const usedVideoKeys = new Set();
 
         if (!layers.length && !hasSub) {
+            this._pauseUnusedPreviewVideos(usedVideoKeys);
+            // During playback, keep the last good frame across tiny gaps / load
+            // holes between abutting clips instead of flashing black.
+            if (playing && this._programHadFrame) {
+                this._scheduleProgramPreview();
+                if (this.programEmpty) this.programEmpty.hidden = true;
+                return;
+            }
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = "#000";
             ctx.fillRect(0, 0, cw, ch);
-            this._pauseUnusedPreviewVideos(usedVideoKeys);
             this._programHadFrame = false;
             if (this.programEmpty) this.programEmpty.hidden = false;
             return;
@@ -11503,16 +11727,18 @@ export class CapTimelineEditorApp {
         const drew = drewVisual || hasSub;
         this._pauseUnusedPreviewVideos(usedVideoKeys);
 
-        if (drew || sizeChanged || !this._programHadFrame) {
+        if (drew) {
             ctx.setTransform(1, 0, 0, 1, 0, 0);
-            if (drew) {
-                ctx.drawImage(off, 0, 0);
-                this._programHadFrame = true;
-            } else {
-                ctx.fillStyle = "#000";
-                ctx.fillRect(0, 0, cw, ch);
-                this._programHadFrame = false;
-            }
+            ctx.drawImage(off, 0, 0);
+            this._programHadFrame = true;
+        } else if (playing && this._programHadFrame) {
+            // Next clip still seeking/buffering — hold previous pixels.
+            this._scheduleProgramPreview();
+        } else if (sizeChanged || !this._programHadFrame) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, cw, ch);
+            this._programHadFrame = false;
         }
         if (this.programEmpty) this.programEmpty.hidden = this._programHadFrame;
     }
@@ -11528,7 +11754,6 @@ export class CapTimelineEditorApp {
         packageBtn.title = T("insert_empty_clip_title");
         packageBtn.textContent = T("insert_clip_btn");
         packageBtn.addEventListener("click", (e) => {
-            if (this._isGeneratedEditMode()) return;
             this._showInsertClipMenu(e);
         });
         tl.toolbarEl.appendChild(packageBtn);
@@ -11551,7 +11776,6 @@ export class CapTimelineEditorApp {
         this.runMenuBtn.textContent = T("run_btn_caret");
         this.runMenuBtn.title = T("run_menu_title");
         this.runMenuBtn.addEventListener("click", (e) => {
-            if (this._isGeneratedEditMode()) return;
             this._showRunMenu(e);
         });
         tl.toolbarEl.appendChild(this.runMenuBtn);
@@ -11596,6 +11820,7 @@ export class CapTimelineEditorApp {
                 if (!clip) return;
                 const meta = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (clip.track?.type === "audio" || meta.clipType === "audio") return;
+                if (isVoiceoverTrackType(clip.track?.type) || isVoiceoverClipMeta(meta, clip.track)) return;
                 if (isSubtitleTrackType(clip.track?.type) || isSubtitleClipMeta(meta, clip.track)) return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -11718,7 +11943,11 @@ export class CapTimelineEditorApp {
         tl.on("clip:movestart", () => this._beginPendingUndo());
         tl.on("clip:moveend", ({ clip, moved }) => {
             if (moved && clip?.track?.type === "image") this._rememberResourceTiming(clip);
-            else if (moved && clip && (clip.track?.type === "audio" || isSubtitleTrackType(clip.track?.type))) {
+            else if (moved && clip && (
+                clip.track?.type === "audio"
+                || isVoiceoverTrackType(clip.track?.type)
+                || isSubtitleTrackType(clip.track?.type)
+            )) {
                 if (!this._isGeneratedEditMode()) {
                     const m = this._ensureClipMeta(clip);
                     m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
@@ -11745,6 +11974,12 @@ export class CapTimelineEditorApp {
                 this._rememberResourceTiming(clip);
                 this._commitPendingUndo(moved);
             } else {
+                if (moved && clip && isVoiceoverTrackType(clip.track?.type) && !this._isGeneratedEditMode()) {
+                    const m = this._ensureClipMeta(clip);
+                    m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
+                    m.resourceDurationSec = Math.max(0.05, Number(clip.duration) || 0.05);
+                    this._meta.set(clip.id, m);
+                }
                 this._commitPendingUndo(moved);
             }
             this._refreshTimelineDuration();
@@ -11861,6 +12096,7 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         const track = clip.track;
         const isAudio = track.type === "audio";
+        const isVoiceover = isVoiceoverTrackType(track.type);
         const isSubtitle = isSubtitleTrackType(track.type);
         // Reset thumb overlays before any meta work that might throw.
         if (this.clipThumbVideo) {
@@ -11876,12 +12112,12 @@ export class CapTimelineEditorApp {
         }
 
         const m = this._ensureClipMeta(clip);
-        const items = (isAudio || isSubtitle) ? [] : this._clipItems(m);
+        const items = (isAudio || isVoiceover || isSubtitle) ? [] : this._clipItems(m);
         const idx = this._clipPreviewItemIndex(clip, m);
         const current = items[idx] || null;
         if (this.clipInfoDetail) this.clipInfoDetail.hidden = false;
 
-        if (isAudio) {
+        if (isAudio || isVoiceover) {
             if (this.clipThumb) {
                 this.clipThumb.removeAttribute("src");
                 this.clipThumb.style.display = "none";
@@ -11915,7 +12151,7 @@ export class CapTimelineEditorApp {
             this.clipThumb.src = this._imgUrl(current.file);
         }
 
-        const canPreview = isAudio ? !!clip.src : isSubtitle ? false : !!current;
+        const canPreview = isAudio ? !!clip.src : (isSubtitle || isVoiceover) ? false : !!current;
         if (this.clipThumbWrap) {
             this.clipThumbWrap.classList.toggle("cat-te-clip-thumb-clickable", canPreview);
             this.clipThumbWrap.title = canPreview ? T("click_to_preview_asset_title") : "";
@@ -12003,11 +12239,16 @@ export class CapTimelineEditorApp {
         if (!m) {
             const ti = this._trackIndex(clip.track);
             if (clip.track?.type === "audio") m = defaultAudioMeta(ti);
+            else if (isVoiceoverTrackType(clip.track?.type)) m = defaultVoiceoverMeta(ti);
             else if (isSubtitleTrackType(clip.track?.type)) m = defaultSubtitleMeta(ti);
             else m = defaultImageMeta(ti);
             this._meta.set(clip.id, m);
         }
-        if (clip.track?.type !== "audio" && !isSubtitleClipMeta(m, clip.track)) {
+        if (
+            clip.track?.type !== "audio"
+            && !isVoiceoverClipMeta(m, clip.track)
+            && !isSubtitleClipMeta(m, clip.track)
+        ) {
             this._normalizeVisualMeta(clip, m);
         }
         return m;
@@ -12132,14 +12373,15 @@ export class CapTimelineEditorApp {
         this._syncClipSettingRefs();
         this._syncSidebarMode(!!clip);
         const isAudio = clip?.track?.type === "audio";
+        const isVoiceover = isVoiceoverTrackType(clip?.track?.type);
         const isSubtitle = isSubtitleTrackType(clip?.track?.type);
-        const isVisual = !!clip && !isAudio && !isSubtitle;
+        const isVisual = !!clip && !isAudio && !isVoiceover && !isSubtitle;
         // Unlock / show panels before any meta / info work. Controls ship as
         // HTML `disabled`; a throw in _ensureClipMeta or info view used to
         // leave the sidebar looking interactive but dead.
         if (this.visualClipBody) this.visualClipBody.hidden = !isVisual;
         if (this.subtitlePanel) this.subtitlePanel.hidden = !clip || !isSubtitle;
-        if (!clip || isAudio || isSubtitle) {
+        if (!clip || isAudio || isVoiceover || isSubtitle) {
             this._disableVisualPromptControls();
             if (!clip) {
                 if (this.useAiPromptCb) this.useAiPromptCb.checked = true;
@@ -12693,7 +12935,7 @@ export class CapTimelineEditorApp {
     _aiOptimizeEligibleClips() {
         const out = [];
         for (const track of this._timeline?.tracks ?? []) {
-            if (track.type === "audio" || isSubtitleTrackType(track.type)) continue;
+            if (track.type === "audio" || isVoiceoverTrackType(track.type) || isSubtitleTrackType(track.type)) continue;
             const clips = [...track.clips].sort((a, b) => a.startTime - b.startTime || String(a.id).localeCompare(String(b.id)));
             out.push(...clips);
         }
@@ -13132,16 +13374,40 @@ export class CapTimelineEditorApp {
         const tracks = (this._timeline?.tracks ?? []).map((track, order) => {
             const ti = this._trackIndex(track);
             const isSubTrack = isSubtitleTrackType(track.type);
+            const isVoiceoverTrack = isVoiceoverTrackType(track.type);
             const clips = track.clips.map(clip => {
                 const m = this._meta.get(clip.id)
                     ?? (track.type === "audio"
                         ? defaultAudioMeta(ti)
-                        : isSubTrack
-                            ? defaultSubtitleMeta(ti)
-                            : defaultImageMeta(ti));
-                if (track.type !== "audio" && !isSubTrack) this._normalizeVisualMeta(clip, m);
+                        : isVoiceoverTrack
+                            ? defaultVoiceoverMeta(ti)
+                            : isSubTrack
+                                ? defaultSubtitleMeta(ti)
+                                : defaultImageMeta(ti));
+                if (track.type !== "audio" && !isVoiceoverTrack && !isSubTrack) {
+                    this._normalizeVisualMeta(clip, m);
+                }
                 // Frame-grid ms so abutting clips share boundaries on reload.
                 const { startMs, durationMs } = encodeClipTimingMs(clip.startTime, clip.duration, fps);
+                if (isVoiceoverTrack) {
+                    const voRow = {
+                        id: clip.id,
+                        type: "voiceover",
+                        enabled: !m.disabled,
+                        visible: m.visible !== false,
+                        muted: !!m.muted,
+                        start_ms: startMs,
+                        duration_ms: durationMs,
+                        name: clip.name || T("voiceover_clip_default_name"),
+                    };
+                    if (Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0) {
+                        voRow.resource_start_sec = Number(m.resourceStartSec);
+                    }
+                    if (Number.isFinite(Number(m.resourceDurationSec)) && m.resourceDurationSec > 0) {
+                        voRow.resource_duration_sec = Number(m.resourceDurationSec);
+                    }
+                    return voRow;
+                }
                 if (isSubTrack) {
                     const style = pickSubtitleStyle(m);
                     const subRow = {
@@ -13296,12 +13562,22 @@ export class CapTimelineEditorApp {
                 id: track.id,
                 type: track.type === "audio"
                     ? "audio"
-                    : isSubTrack
-                        ? "subtitle"
-                        : "visual",
+                    : isVoiceoverTrack
+                        ? "voiceover"
+                        : isSubTrack
+                            ? "subtitle"
+                            : "visual",
                 role: track.isMain
                     ? "main"
-                    : (trackInfo.role || (track.type === "audio" ? "audio" : isSubTrack ? "subtitle" : "overlay")),
+                    : (trackInfo.role || (
+                        track.type === "audio"
+                            ? "audio"
+                            : isVoiceoverTrack
+                                ? "voiceover"
+                                : isSubTrack
+                                    ? "subtitle"
+                                    : "overlay"
+                    )),
                 name: track.name,
                 order,
                 enabled: trackInfo.enabled !== false,

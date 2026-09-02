@@ -1411,6 +1411,11 @@ body.cat-te-media-dnd-over-tl {
     opacity: 0.85;
 }
 
+.cat-te-timeline-host .tl-clip.cat-te-clip-voiceover {
+    border-style: dashed;
+    border-color: rgba(91, 192, 222, 0.55);
+}
+
 .cat-te-timeline-host.is-gen-edit-mode .tl-track-image .tl-clip-handle,
 .cat-te-timeline-host.is-gen-edit-mode .tl-track-video .tl-clip-handle {
     pointer-events: none;

@@ -30,9 +30,10 @@ export const formatTime = (secs, fps = null) => {
 // trackTypeLabel(type) below instead of TRACK_TYPES[type].label.
 export const TRACK_TYPES = {
   video: { color: '#4a9eff', icon: '▶', height: 76 },
-  audio: { color: '#3dd68c', icon: '♫', height: 60 },
+  audio: { color: '#3dd68c', icon: '♫', height: 76 },
   image: { color: '#c86aff', icon: '⬛', height: 76 },
   text:  { color: '#ff9e4a', icon: 'T',  height: 39 },
+  voiceover: { color: '#5bc0de', icon: '🎙', height: 76 },
 };
 
 const TRACK_TYPE_LABEL_KEYS = {
@@ -40,9 +41,10 @@ const TRACK_TYPE_LABEL_KEYS = {
   audio: 'audio_track',
   image: 'image_track',
   text: 'text_track',
+  voiceover: 'voiceover_track',
 };
 
-/** Localized display label for a track type ('video' | 'audio' | 'image' | 'text'). */
+/** Localized display label for a track type. */
 export function trackTypeLabel(type) {
   return i18nT(TRACK_TYPE_LABEL_KEYS[type] || TRACK_TYPE_LABEL_KEYS.video);
 }

@@ -27,13 +27,26 @@ export class Clip extends EventEmitter {
     // Only image/video clips with an embedded audio track show the
     // waveform row; plain images never do.
     this.hasAudio = !!data.hasAudio;
+    // Full-source peak overview; draw shows the trim window only.
     this._waveform = data.waveformPeaks?.length
       ? data.waveformPeaks
       : generateWaveform(this.id.charCodeAt(5) || 42);
+    this._waveSvg = null;
     this.el = this._build();
   }
 
   get endTime() { return this.startTime + this.duration; }
+
+  get waveformPeaks() {
+    return this._waveform;
+  }
+
+  set waveformPeaks(peaks) {
+    this._waveform = peaks?.length
+      ? peaks
+      : generateWaveform(this.id.charCodeAt(5) || 42);
+    this._syncWaveformView();
+  }
 
   _snap(secs) {
     const fps = Math.max(1, this.track.timeline.fps || 24);
@@ -293,28 +306,124 @@ export class Clip extends EventEmitter {
   _refreshWaveRow() {
     if (!this._waveRow) return;
     this._waveRow.replaceChildren();
+    this._waveSvg = null;
     this._waveRow.classList.toggle('has-audio', this.hasAudio);
     if (this.hasAudio) {
       this._waveRow.appendChild(this._buildWaveform());
     }
   }
 
+  /**
+   * Peaks for the audible trim window [sourceOffset, sourceOffset+duration],
+   * downsampled with max-pooling so loud hits stay visible.
+   */
+  _visibleWavePeaks(targetBars = 0) {
+    const full = this._waveform;
+    if (!full?.length) return [];
+    const n = full.length;
+    let i0 = 0;
+    let i1 = n;
+    const srcDur = Number(this.sourceDuration);
+    if (Number.isFinite(srcDur) && srcDur > 0) {
+      const start = clamp(this.sourceOffset / srcDur, 0, 1);
+      const end = clamp(
+        (this.sourceOffset + Math.max(MIN_DURATION, this.duration)) / srcDur,
+        start + 1e-6,
+        1,
+      );
+      i0 = Math.floor(start * n);
+      i1 = Math.max(i0 + 1, Math.ceil(end * n));
+    }
+    const sliceLen = i1 - i0;
+    const bars = Math.max(
+      2,
+      Math.min(
+        sliceLen,
+        targetBars > 0 ? targetBars : Math.min(320, Math.max(48, Math.round(sliceLen))),
+      ),
+    );
+    if (bars >= sliceLen) return full.slice(i0, i1);
+
+    const out = new Array(bars);
+    for (let b = 0; b < bars; b++) {
+      const a = i0 + Math.floor((b * sliceLen) / bars);
+      const z = i0 + Math.floor(((b + 1) * sliceLen) / bars);
+      let m = 0;
+      for (let i = a; i < z; i++) {
+        const v = full[i];
+        if (v > m) m = v;
+      }
+      out[b] = m;
+    }
+    return out;
+  }
+
+  _waveBarCount() {
+    const pps = this.track?.timeline?.pixelsPerSecond || 40;
+    const px = Math.max(8, this.duration * pps);
+    // ~1.5px per bar — dense enough to read dynamics, light enough to redraw while trimming.
+    return Math.max(24, Math.min(400, Math.round(px / 1.5)));
+  }
+
   _buildWaveform() {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'tl-clip-waveform');
-    svg.setAttribute('viewBox', `0 0 ${this._waveform.length} 1`);
     svg.setAttribute('preserveAspectRatio', 'none');
-
-    const top = this._waveform.map((v, i) => `${i},${0.5 - v * 0.45}`).join(' ');
-    const bot = [...this._waveform].reverse().map((v, i) =>
-      `${this._waveform.length - 1 - i},${0.5 + v * 0.45}`).join(' ');
-
-    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    poly.setAttribute('points', `${top} ${bot}`);
-    poly.setAttribute('fill', 'rgba(255,255,255,0.35)');
-    poly.setAttribute('stroke', 'none');
-    svg.appendChild(poly);
+    this._waveSvg = svg;
+    this._paintWaveform(svg);
     return svg;
+  }
+
+  /** Vertical peak bars — loud = tall, quiet = flat, trim window only. */
+  _paintWaveform(svg = this._waveSvg) {
+    if (!svg) return;
+    const peaks = this._visibleWavePeaks(this._waveBarCount());
+    const n = Math.max(1, peaks.length);
+    svg.setAttribute('viewBox', `0 0 ${n} 1`);
+    svg.replaceChildren();
+
+    // Absolute scale from full-source peaks so quiet stays quiet after trim.
+    let fullMax = 0;
+    for (const v of this._waveform || []) {
+      if (v > fullMax) fullMax = v;
+    }
+    if (!(fullMax > 1e-6)) fullMax = 1;
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class', 'tl-clip-waveform-bars');
+    const gap = 0.18;
+    for (let i = 0; i < n; i++) {
+      // Mild lift for mid levels; silence stays near-zero.
+      const raw = Math.min(1, Math.max(0, peaks[i] / fullMax));
+      const amp = raw <= 0.02 ? raw * 0.35 : Math.pow(raw, 0.72);
+      const h = Math.max(0.03, amp * 0.92);
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', String(i + gap / 2));
+      rect.setAttribute('y', String(0.5 - h / 2));
+      rect.setAttribute('width', String(Math.max(0.05, 1 - gap)));
+      rect.setAttribute('height', String(h));
+      rect.setAttribute('rx', '0.08');
+      g.appendChild(rect);
+    }
+    svg.appendChild(g);
+  }
+
+  _syncWaveformView() {
+    if (this.track?.type === 'audio') {
+      if (this._waveSvg?.isConnected) {
+        this._paintWaveform(this._waveSvg);
+      } else {
+        const body = this.el?.querySelector('.tl-clip-body');
+        const old = body?.querySelector('.tl-clip-waveform');
+        if (body) {
+          const next = this._buildWaveform();
+          if (old) old.replaceWith(next);
+          else body.appendChild(next);
+        }
+      }
+      return;
+    }
+    if (this.hasAudio && this._waveRow) this._refreshWaveRow();
   }
 
   _setupDrag(el, body, lh, rh) {
@@ -537,6 +646,8 @@ export class Clip extends EventEmitter {
     if (this._durEl) this._durEl.textContent = this.track.timeline.formatTime(this.duration);
     this._clampFades();
     this._updateFadeUI();
+    // Trim/move changes the audible window — keep bars in sync with source.
+    if (this.track.type === 'audio' || this.hasAudio) this._syncWaveformView();
   }
 
   setSelected(sel) {
