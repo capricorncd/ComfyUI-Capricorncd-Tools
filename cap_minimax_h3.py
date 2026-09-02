@@ -140,6 +140,10 @@ class CAP_MiniMaxH3ReferenceToVideo:
         data = {
             "fps": clip.get("fps", 24.0),
             "global_prompt": clip.get("global_prompt", ""),
+            "style_prompt": clip.get("style_prompt", ""),
+            "non_diegetic_music": clip.get("non_diegetic_music", ""),
+            "negative_prompt": clip.get("negative_prompt", ""),
+            "prompt_concat_order": clip.get("prompt_concat_order"),
         }
         return data, clip, materials, parser
 
@@ -177,25 +181,26 @@ class CAP_MiniMaxH3ReferenceToVideo:
         return f"{label}: {body}"
 
     def _compose_prompt(self, parser: CAP_DataJsonClipParser, clip: dict, global_prompt: str,
-                        media_lines: list[str], *, style_prompt: str = "") -> str:
-        if parser._clip_use_ai_prompt(clip):
-            ai_prompt = parser._strip_comment_lines(clip.get("ai_prompt") or "").strip()
-            if ai_prompt:
-                return ai_prompt
-        includes = parser._clip_prompt_includes(clip)
-        parts = [line for line in (media_lines or []) if line]
-        if "global" in includes:
-            text = parser._strip_comment_lines(global_prompt or "").strip()
-            if text:
-                parts.append(text)
-        if "style" in includes:
-            text = parser._strip_comment_lines(style_prompt or "").strip()
-            if text:
-                parts.append(text)
-        clip_prompt = parser._strip_comment_lines(clip.get("prompt") or "").strip()
-        if clip_prompt:
-            parts.append(clip_prompt)
-        return "\n".join(parts)
+                        media_lines: list[str], *, style_prompt: str = "",
+                        non_diegetic_music: str = "", negative_prompt: str = "",
+                        prompt_concat_order=None) -> str:
+        # Media ref tags stay MiniMax-specific; text parts follow project order.
+        base = parser._compose_prompt(
+            clip,
+            global_prompt,
+            materials=None,
+            style_prompt=style_prompt,
+            non_diegetic_music=non_diegetic_music,
+            negative_prompt=negative_prompt,
+            prompt_concat_order=prompt_concat_order,
+        )
+        media = [line for line in (media_lines or []) if line]
+        parts = []
+        if media:
+            parts.append("\n".join(media))
+        if base:
+            parts.append(base)
+        return "\n\n".join(parts)
 
     def _load_video_ref(self, path: str):
         try:
@@ -352,6 +357,9 @@ class CAP_MiniMaxH3ReferenceToVideo:
             parser, clip_row, data.get("global_prompt", ""),
             picture_lines + video_lines + audio_lines,
             style_prompt=data.get("style_prompt", ""),
+            non_diegetic_music=data.get("non_diegetic_music", ""),
+            negative_prompt=data.get("negative_prompt", ""),
+            prompt_concat_order=data.get("prompt_concat_order"),
         )
 
         if parser._uses_master_audio(data, clip_row):

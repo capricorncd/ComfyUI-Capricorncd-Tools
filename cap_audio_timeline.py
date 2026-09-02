@@ -12,39 +12,73 @@ def _strip_comment_lines(text: str) -> str:
     )
 
 
-_PROMPT_INCLUDE_KEYS = ("global", "style", "non_diegetic_music", "negative")
-_PROMPT_INCLUDE_KEY_SET = set(_PROMPT_INCLUDE_KEYS)
+_PROMPT_PART_KEYS = ("global", "style", "clip", "ai", "non_diegetic_music", "negative")
+_PROMPT_PART_KEY_SET = set(_PROMPT_PART_KEYS)
+_DEFAULT_PROMPT_CONCAT_ORDER = list(_PROMPT_PART_KEYS)
+_DEFAULT_PROMPT_INCLUDES = ["global", "clip", "ai"]
+# Back-compat alias
+_PROMPT_INCLUDE_KEYS = _PROMPT_PART_KEYS
+_PROMPT_INCLUDE_KEY_SET = _PROMPT_PART_KEY_SET
 
 
-def _clip_prompt_includes(clip: dict) -> list[str]:
-    """Normalize clip.prompt_includes; fall back to legacy use_global_prompt."""
-    if not isinstance(clip, dict):
-        return ["global"]
-    raw = clip.get("prompt_includes")
+def _normalize_prompt_concat_order(raw) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
     if isinstance(raw, list):
-        out: list[str] = []
-        seen: set[str] = set()
         for value in raw:
             key = str(value or "").strip()
-            if key not in _PROMPT_INCLUDE_KEY_SET or key in seen:
+            if key not in _PROMPT_PART_KEY_SET or key in seen:
                 continue
             seen.add(key)
             out.append(key)
-        return [k for k in _PROMPT_INCLUDE_KEYS if k in seen]
-    if "use_global_prompt" in clip:
-        return ["global"] if bool(clip["use_global_prompt"]) else []
-    # Legacy: empty clip prompt implied using the global prompt.
-    if not bool(_strip_comment_lines(clip.get("prompt") or "").strip()):
-        return ["global"]
-    return []
+    for key in _DEFAULT_PROMPT_CONCAT_ORDER:
+        if key not in seen:
+            out.append(key)
+    return out
+
+
+def _clip_prompt_includes(clip: dict) -> list[str]:
+    """Normalize clip.prompt_includes; migrate legacy use_global_prompt / use_ai_prompt."""
+    if not isinstance(clip, dict):
+        return list(_DEFAULT_PROMPT_INCLUDES)
+    raw = clip.get("prompt_includes")
+    migrate = ("use_ai_prompt" in clip) or ("use_global_prompt" in clip)
+    if isinstance(raw, list):
+        seen: set[str] = set()
+        for value in raw:
+            key = str(value or "").strip()
+            if key not in _PROMPT_PART_KEY_SET or key in seen:
+                continue
+            seen.add(key)
+        if migrate:
+            has_new = ("clip" in seen) or ("ai" in seen)
+            if not has_new:
+                seen.add("clip")
+                if clip.get("use_ai_prompt", True) is not False:
+                    seen.add("ai")
+            else:
+                if "use_ai_prompt" in clip:
+                    if clip.get("use_ai_prompt") is False:
+                        seen.discard("ai")
+                    else:
+                        seen.add("ai")
+            if "use_global_prompt" in clip:
+                if clip.get("use_global_prompt"):
+                    seen.add("global")
+                else:
+                    seen.discard("global")
+        return [k for k in _PROMPT_PART_KEYS if k in seen]
+    out: list[str] = []
+    if clip.get("use_global_prompt", True) is not False:
+        out.append("global")
+    out.append("clip")
+    if clip.get("use_ai_prompt", True) is not False:
+        out.append("ai")
+    return out
 
 
 def _clip_use_global_prompt(clip: dict) -> bool:
-    if isinstance(clip, dict) and isinstance(clip.get("prompt_includes"), list):
-        return "global" in _clip_prompt_includes(clip)
-    if "use_global_prompt" in clip:
-        return bool(clip["use_global_prompt"])
-    return not bool(_strip_comment_lines(clip.get("prompt") or "").strip())
+    return "global" in _clip_prompt_includes(clip)
 
 
 def _subtract_intervals(start: int, end: int, cuts: list[tuple[int, int]]):

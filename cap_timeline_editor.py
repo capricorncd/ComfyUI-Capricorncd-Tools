@@ -10,7 +10,12 @@ import re
 
 import torch
 
-from .cap_audio_timeline import CAP_AudioTimeline, _clip_prompt_includes, _strip_comment_lines
+from .cap_audio_timeline import (
+    CAP_AudioTimeline,
+    _clip_prompt_includes,
+    _normalize_prompt_concat_order,
+    _strip_comment_lines,
+)
 from .cap_clip_prompt_vl import clear_clip_prompt_vl
 from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_project, resolve_clip_media
 from .timecode import resolve_media_path
@@ -615,6 +620,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         style_prompt = _strip_comment_lines(settings.get("style_prompt") or "")
         non_diegetic_music = _strip_comment_lines(settings.get("non_diegetic_music") or "")
         negative_prompt = _strip_comment_lines(settings.get("negative_prompt") or "")
+        prompt_concat_order = _normalize_prompt_concat_order(settings.get("prompt_concat_order"))
         use_clip_video_name = settings.get("use_clip_specified_video_filename", True) is not False
         gen_video_stamp = str(settings.get("gen_video_stamp") or "").strip()
         if not gen_video_stamp:
@@ -736,8 +742,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
                 "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),
                 "prompt_includes": prompt_includes,
-                "use_global_prompt": "global" in prompt_includes,
-                "use_ai_prompt": clip.get("use_ai_prompt", True) is not False,
                 "z_index": z_index,
                 "audios": self._audio_slices(
                     ext_start, ext_end, audio_clips, resolve_media, project, materials, seen_materials,
@@ -771,6 +775,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "style_prompt": style_prompt,
             "non_diegetic_music": non_diegetic_music,
             "negative_prompt": negative_prompt,
+            "prompt_concat_order": prompt_concat_order,
             "total_frame_count": total_frame_count,
             "run_timestamp": run_timestamp,
             "materials": materials,

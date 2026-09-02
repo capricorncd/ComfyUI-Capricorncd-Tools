@@ -51,9 +51,17 @@ const SETTING_PROMPT_KEYS = [
     "non_diegetic_music",
     "negative_prompt",
 ];
-/** Clip multi-select keys written to prompt_includes (string array). */
-const PROMPT_INCLUDE_KEYS = ["global", "style", "non_diegetic_music", "negative"];
-const PROMPT_INCLUDE_KEY_SET = new Set(PROMPT_INCLUDE_KEYS);
+/**
+ * Prompt parts for clip.prompt_includes and settings.prompt_concat_order.
+ * Order of this constant is the default concatenation order.
+ */
+const PROMPT_PART_KEYS = ["global", "style", "clip", "ai", "non_diegetic_music", "negative"];
+const PROMPT_PART_KEY_SET = new Set(PROMPT_PART_KEYS);
+const DEFAULT_PROMPT_CONCAT_ORDER = [...PROMPT_PART_KEYS];
+const DEFAULT_PROMPT_INCLUDES = ["global", "clip", "ai"];
+/** @deprecated alias — prefer PROMPT_PART_KEYS */
+const PROMPT_INCLUDE_KEYS = PROMPT_PART_KEYS;
+const PROMPT_INCLUDE_KEY_SET = PROMPT_PART_KEY_SET;
 const WATERMARK_FIXED_POSITIONS = [
     "top-left", "top-center", "top-right",
     "bottom-left", "bottom-center", "bottom-right",
@@ -165,6 +173,86 @@ function normalizeGeneratedVideo(row) {
 }
 
 const OUTPUT_VIDEO_EXT = /\.(mp4|webm|mov|mkv|avi|m4v)$/i;
+const OUTPUT_AUDIO_EXT = /\.(wav|mp3|flac|ogg|m4a|aac|wma)$/i;
+
+function genAudioUid() {
+    return `ga_${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function normalizeGeneratedAudio(row) {
+    if (typeof row === "string") {
+        const raw = row.trim().replace(/\\/g, "/");
+        const file = normalizeOutputVideoPath(raw) || raw;
+        if (!file) return null;
+        return {
+            id: genAudioUid(),
+            file,
+            enabled: true,
+            muted: false,
+            note: "",
+            prompt: "",
+            duration_sec: null,
+            trim_in_sec: 0,
+            trim_out_sec: null,
+            edit_start_sec: 0,
+            fade_in_sec: 0,
+            fade_out_sec: 0,
+        };
+    }
+    if (!row || typeof row !== "object") return null;
+    const raw = String(row.file || row.src || "").trim().replace(/\\/g, "/");
+    if (!raw) return null;
+    const file = normalizeOutputVideoPath(raw) || raw;
+    const durationSec = Number(row.duration_sec ?? row.durationSec);
+    const trimIn = Number(row.trim_in_sec ?? row.trimInSec ?? row.trim_in ?? 0);
+    const trimOutRaw = row.trim_out_sec ?? row.trimOutSec ?? row.trim_out;
+    const trimOut = trimOutRaw == null || trimOutRaw === "" ? null : Number(trimOutRaw);
+    const fadeIn = Number(row.fade_in_sec ?? row.fadeInSec ?? row.fade_in_ms ?? row.fadeInMs);
+    const fadeOut = Number(row.fade_out_sec ?? row.fadeOutSec ?? row.fade_out_ms ?? row.fadeOutMs);
+    const fadeInSec = Number.isFinite(fadeIn)
+        ? (row.fade_in_ms != null || row.fadeInMs != null ? fadeIn / 1000 : fadeIn)
+        : 0;
+    const fadeOutSec = Number.isFinite(fadeOut)
+        ? (row.fade_out_ms != null || row.fadeOutMs != null ? fadeOut / 1000 : fadeOut)
+        : 0;
+    return {
+        id: String(row.id || "").trim() || genAudioUid(),
+        file,
+        enabled: row.enabled !== false,
+        muted: row.muted === true,
+        note: String(row.note || row.remark || ""),
+        prompt: String(row.prompt || ""),
+        duration_sec: Number.isFinite(durationSec) && durationSec > 0 ? durationSec : null,
+        trim_in_sec: Number.isFinite(trimIn) && trimIn > 0 ? trimIn : 0,
+        trim_out_sec: Number.isFinite(trimOut) && trimOut > 0 ? trimOut : null,
+        edit_start_sec: (() => {
+            const s = Number(row.edit_start_sec ?? row.editStartSec ?? 0);
+            return Number.isFinite(s) && s > 0 ? s : 0;
+        })(),
+        fade_in_sec: Math.max(0, fadeInSec || 0),
+        fade_out_sec: Math.max(0, fadeOutSec || 0),
+    };
+}
+
+function serializeGeneratedAudio(row) {
+    const n = normalizeGeneratedAudio(row);
+    if (!n) return null;
+    const out = {
+        id: n.id,
+        file: n.file,
+        enabled: n.enabled !== false,
+        muted: n.muted === true,
+        note: n.note || "",
+    };
+    if (n.prompt) out.prompt = n.prompt;
+    if (Number.isFinite(n.duration_sec) && n.duration_sec > 0) out.duration_sec = n.duration_sec;
+    if (n.trim_in_sec > 0) out.trim_in_sec = n.trim_in_sec;
+    if (n.trim_out_sec != null && Number.isFinite(n.trim_out_sec)) out.trim_out_sec = n.trim_out_sec;
+    if (n.edit_start_sec > 0) out.edit_start_sec = n.edit_start_sec;
+    if (n.fade_in_sec > 0) out.fade_in_sec = n.fade_in_sec;
+    if (n.fade_out_sec > 0) out.fade_out_sec = n.fade_out_sec;
+    return out;
+}
 
 function normalizeOutputVideoPath(value) {
     let s = String(value || "").trim().replace(/\\/g, "/");
@@ -192,28 +280,72 @@ function mediaUid() {
     return `md_${Math.random().toString(36).slice(2, 11)}`;
 }
 
-function normalizePromptIncludes(raw, { useGlobalPrompt } = {}) {
+function normalizePromptConcatOrder(raw) {
+    const out = [];
+    const seen = new Set();
     if (Array.isArray(raw)) {
-        const out = [];
-        const seen = new Set();
         for (const value of raw) {
             const key = String(value || "").trim();
-            if (!PROMPT_INCLUDE_KEY_SET.has(key) || seen.has(key)) continue;
+            if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
             seen.add(key);
             out.push(key);
         }
+    }
+    for (const key of DEFAULT_PROMPT_CONCAT_ORDER) {
+        if (!seen.has(key)) out.push(key);
+    }
+    return out;
+}
+
+function normalizePromptIncludes(raw, { useGlobalPrompt, useAiPrompt, migrateLegacyFlags = false } = {}) {
+    if (Array.isArray(raw)) {
+        const seen = new Set();
+        for (const value of raw) {
+            const key = String(value || "").trim();
+            if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
+            seen.add(key);
+        }
+        // Old projects wrote prompt_includes without clip/ai, plus separate use_* flags.
+        if (migrateLegacyFlags) {
+            const hasNewKeys = seen.has("clip") || seen.has("ai");
+            if (!hasNewKeys) {
+                seen.add("clip");
+                if (useAiPrompt !== false) seen.add("ai");
+            } else if (useAiPrompt === true) {
+                seen.add("ai");
+            } else if (useAiPrompt === false) {
+                seen.delete("ai");
+            }
+            if (useGlobalPrompt === true) seen.add("global");
+            if (useGlobalPrompt === false) seen.delete("global");
+        }
+        return PROMPT_PART_KEYS.filter((k) => seen.has(k));
+    }
+    if (migrateLegacyFlags || useGlobalPrompt !== undefined || useAiPrompt !== undefined) {
+        const out = [];
+        if (useGlobalPrompt !== false) out.push("global");
+        out.push("clip");
+        if (useAiPrompt !== false) out.push("ai");
         return out;
     }
-    if (useGlobalPrompt === false) return [];
-    return ["global"];
+    return [...DEFAULT_PROMPT_INCLUDES];
 }
 
 function promptIncludesFromClipJson(c) {
-    if (!c || typeof c !== "object") return ["global"];
+    if (!c || typeof c !== "object") return [...DEFAULT_PROMPT_INCLUDES];
+    const migrateLegacyFlags = ("use_ai_prompt" in c) || ("use_global_prompt" in c);
     if (Array.isArray(c.prompt_includes)) {
-        return normalizePromptIncludes(c.prompt_includes);
+        return normalizePromptIncludes(c.prompt_includes, {
+            useGlobalPrompt: c.use_global_prompt,
+            useAiPrompt: c.use_ai_prompt,
+            migrateLegacyFlags,
+        });
     }
-    return normalizePromptIncludes(null, { useGlobalPrompt: c.use_global_prompt !== false });
+    return normalizePromptIncludes(null, {
+        useGlobalPrompt: c.use_global_prompt,
+        useAiPrompt: c.use_ai_prompt,
+        migrateLegacyFlags: true,
+    });
 }
 
 function syncUseGlobalFromIncludes(includes) {
@@ -221,15 +353,14 @@ function syncUseGlobalFromIncludes(includes) {
 }
 
 function defaultImageMeta(trackIndex = 0) {
-    const promptIncludes = ["global"];
+    const promptIncludes = [...DEFAULT_PROMPT_INCLUDES];
     return {
         clipType: "image",
         mediaKind: "clip",
         prompt: "",
         aiPrompt: "",
         endImage: null,
-        promptIncludes: [...promptIncludes],
-        useGlobalPrompt: true,
+        promptIncludes,
         disabled: false,
         visible: true,
         muted: false,
@@ -245,7 +376,6 @@ function defaultImageMeta(trackIndex = 0) {
         items: [],
         generatedVideos: [],
         previewMode: "media",
-        useAiPrompt: true,
     };
 }
 
@@ -311,6 +441,9 @@ function defaultVoiceoverMeta(trackIndex = 2) {
         muted: false,
         visible: true,
         disabled: false,
+        prompt: "",
+        stylePrompt: "",
+        generatedAudios: [],
         trackIndex,
     };
 }
@@ -544,6 +677,7 @@ export class CapTimelineEditorApp {
         this._genEditState = null;
         this._outputVideosClipId = null;
         this._outputVideosCache = [];
+        this._outputPickerKind = "video";
         this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
         this._outputVideosThumbIo = null;
         this._outputVideoHoverEl = null;
@@ -561,6 +695,7 @@ export class CapTimelineEditorApp {
         this._resourceGenPreviewStopTimer = 0;
         this._composeBusy = false;
         this._watermark = this._defaultWatermark();
+        this._promptConcatOrder = [...DEFAULT_PROMPT_CONCAT_ORDER];
         /** When true, Run associates CapTimelineEditor/..._{clipId}.mp4 by specified name. */
         this._useClipSpecifiedVideoFilename = true;
         /**
@@ -932,6 +1067,7 @@ export class CapTimelineEditorApp {
             try { this._closeMediaPreview(); } catch { /* ignore */ }
             try { this._closeGenVideoModal(); } catch { /* ignore */ }
             try { this._closeGenEditModal(false); } catch { /* ignore */ }
+        try { this._closeVoiceoverEditModal(false); } catch { /* ignore */ }
             try { this._closeOutputVideosPicker(); } catch { /* ignore */ }
             try { this._closeComposeModal(true); } catch { /* ignore */ }
             try { this._closeAddMaterial(); } catch { /* ignore */ }
@@ -1859,48 +1995,106 @@ export class CapTimelineEditorApp {
         });
         select.addEventListener("keydown", (e) => {
             if (select.disabled) return;
-            if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+            if (document.querySelector(".cat-te-font-picker")) return;
+            if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
-                this._openFontPicker(select);
+                this._openFontPicker(select, { startDelta: e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0 });
             }
         });
     }
 
-    _openFontPicker(select) {
+    _openFontPicker(select, { startDelta = 0 } = {}) {
         if (!select) return;
         this._removeCtxMenu();
         const fonts = [...select.options]
             .map((o) => ({
                 family: o.value,
                 label: o.textContent || o.value,
+                path: o.dataset?.path || "",
             }))
             .filter((f) => f.family);
         if (!fonts.length) return;
 
+        const prevFamily = String(select.value || "");
+        const prevPath = String(select.selectedOptions?.[0]?.dataset?.path || "");
+        let activeIndex = Math.max(0, fonts.findIndex((f) => f.family === prevFamily));
+        if (startDelta) {
+            activeIndex = Math.max(0, Math.min(fonts.length - 1, activeIndex + startDelta));
+        }
+
         const menu = document.createElement("div");
         menu.className = "cat-te-font-picker";
+        menu.tabIndex = -1;
         const r = select.getBoundingClientRect();
         menu.style.left = `${r.left}px`;
         menu.style.top = `${r.bottom + 2}px`;
         menu.style.minWidth = `${Math.max(r.width, 200)}px`;
 
-        for (const f of fonts) {
+        const items = [];
+        const applyFontAt = (index, { commit = false } = {}) => {
+            activeIndex = Math.max(0, Math.min(fonts.length - 1, index));
+            items.forEach((row, i) => row.classList.toggle("is-active", i === activeIndex));
+            const row = items[activeIndex];
+            row?.scrollIntoView({ block: "nearest" });
+            const f = fonts[activeIndex];
+            if (!f) return;
+            select.value = f.family;
+            this._syncFontSelectPreview(select);
+            // Subtitle panel listens to `input`; watermark listens to `change`.
+            select.dispatchEvent(new Event("input", { bubbles: true }));
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+            if (commit) this._removeCtxMenu();
+        };
+
+        fonts.forEach((f, index) => {
             const row = document.createElement("button");
             row.type = "button";
             row.className = "cat-te-font-picker-item";
-            if (f.family === select.value) row.classList.add("is-active");
+            if (index === activeIndex) row.classList.add("is-active");
             row.style.fontFamily = this._cssFontFamily(f.family);
             row.textContent = f.label;
             row.title = f.family;
+            row.addEventListener("mouseenter", () => applyFontAt(index));
             row.addEventListener("click", (e) => {
                 e.stopPropagation();
-                select.value = f.family;
-                this._syncFontSelectPreview(select);
-                select.dispatchEvent(new Event("change", { bubbles: true }));
-                this._removeCtxMenu();
+                applyFontAt(index, { commit: true });
             });
             menu.appendChild(row);
-        }
+            items.push(row);
+        });
+
+        const onKey = (e) => {
+            if (!menu.isConnected) return;
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                e.stopPropagation();
+                applyFontAt(activeIndex + 1);
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                e.stopPropagation();
+                applyFontAt(activeIndex - 1);
+            } else if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                applyFontAt(activeIndex, { commit: true });
+            } else if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                select.value = prevFamily;
+                this._syncFontSelectPreview(select);
+                select.dispatchEvent(new Event("input", { bubbles: true }));
+                select.dispatchEvent(new Event("change", { bubbles: true }));
+                this._removeCtxMenu();
+            } else if (e.key === "Home") {
+                e.preventDefault();
+                applyFontAt(0);
+            } else if (e.key === "End") {
+                e.preventDefault();
+                applyFontAt(fonts.length - 1);
+            }
+        };
+        menu._capFontKeyHandler = onKey;
+        window.addEventListener("keydown", onKey, true);
 
         (this._overlay || document.body).appendChild(menu);
         this._ignoreCtxCloseOnce = true;
@@ -1911,7 +2105,8 @@ export class CapTimelineEditorApp {
         if (mr.bottom > window.innerHeight) {
             menu.style.top = `${Math.max(8, r.top - mr.height - 2)}px`;
         }
-        menu.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
+        applyFontAt(activeIndex);
+        try { menu.focus({ preventScroll: true }); } catch { /* ignore */ }
     }
 
     /** Fill a <select> with system fonts; keep `preferred` if present (or as custom option). */
@@ -2518,6 +2713,11 @@ export class CapTimelineEditorApp {
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="negative_prompt" placeholder="${T("negative_prompt_placeholder")}"></textarea>
                       </div>
                     </div>
+                    <div class="cat-te-prompt-order" aria-label="${T("prompt_concat_order_label")}">
+                      <div class="cat-te-prompt-order-label">${T("prompt_concat_order_label")}</div>
+                      <div class="cat-te-prompt-order-hint">${T("prompt_concat_order_hint")}</div>
+                      <div class="cat-te-prompt-order-list"></div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2617,6 +2817,8 @@ export class CapTimelineEditorApp {
                   <div class="cat-te-prompt-includes-chips" role="group">
                     <button type="button" class="cat-te-prompt-include-chip" data-include="global" disabled title="${T("prompt_include_global_title")}">${T("prompt_include_global")}</button>
                     <button type="button" class="cat-te-prompt-include-chip" data-include="style" disabled title="${T("prompt_include_style_title")}">${T("prompt_include_style")}</button>
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="clip" disabled title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="ai" disabled title="${T("prompt_include_ai_title")}">${T("prompt_include_ai")}</button>
                     <button type="button" class="cat-te-prompt-include-chip" data-include="non_diegetic_music" disabled title="${T("prompt_include_music_title")}">${T("prompt_include_music")}</button>
                     <button type="button" class="cat-te-prompt-include-chip" data-include="negative" disabled title="${T("prompt_include_negative_title")}">${T("prompt_include_negative")}</button>
                   </div>
@@ -2637,10 +2839,6 @@ export class CapTimelineEditorApp {
                   <textarea class="cat-te-ai-prompt-input" placeholder="${T("ai_prompt_placeholder")}" disabled></textarea>
                 </div>
               </div>
-              <label class="cat-te-clip-setting-check cat-te-use-ai-prompt">
-                <input class="cat-te-use-ai-prompt-cb" type="checkbox" checked disabled />
-                <span>${T("use_ai_prompt_label")}</span>
-              </label>
               <div class="cat-te-clip-videos" hidden>
                 <div class="cat-te-clip-videos-header">
                   <span>${T("gen_video_label")}</span>
@@ -2732,6 +2930,26 @@ export class CapTimelineEditorApp {
                 <div class="cat-te-sub-apply-row">
                   <button type="button" class="cat-te-btn cat-te-sub-apply-track">${T("subtitle_apply_track_btn")}</button>
                   <button type="button" class="cat-te-btn cat-te-sub-apply-all">${T("subtitle_apply_all_btn")}</button>
+                </div>
+              </div>
+              <div class="cat-te-voiceover-panel" hidden>
+                <label class="cat-te-clip-setting-row cat-te-vo-prompt-row">
+                  <span>${T("desc_prompt_label")}</span>
+                  <textarea class="cat-te-vo-prompt" rows="4" placeholder="${T("voiceover_prompt_placeholder")}"></textarea>
+                </label>
+                <label class="cat-te-clip-setting-row cat-te-vo-prompt-row">
+                  <span>${T("style_prompt_label")}</span>
+                  <textarea class="cat-te-vo-style-prompt" rows="3" placeholder="${T("style_prompt_placeholder")}"></textarea>
+                </label>
+                <div class="cat-te-clip-videos cat-te-vo-audios">
+                  <div class="cat-te-clip-videos-header">
+                    <span>${T("gen_audio_label")}</span>
+                    <div class="cat-te-vo-audios-actions">
+                      <button type="button" class="cat-te-btn cat-te-vo-audio-add" title="${T("linked_generated_audios_title")}">${T("voiceover_add_audio_btn")}</button>
+                      <button type="button" class="cat-te-clip-videos-open cat-te-vo-audio-edit" title="${T("voiceover_edit_title")}">${iconHtml("squareArrowOutUpRight", 12)}</button>
+                    </div>
+                  </div>
+                  <div class="cat-te-vo-audios-list"></div>
                 </div>
               </div>
               </div>
@@ -2859,6 +3077,36 @@ export class CapTimelineEditorApp {
               <div class="cat-te-gen-edit-footer">
                 <button type="button" class="cat-te-btn cat-te-gen-edit-cancel">${T("cancel_btn")}</button>
                 <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-gen-edit-save">${T("save_btn")}</button>
+              </div>
+            </div>
+          </div>
+          <div class="cat-te-modal-backdrop cat-te-vo-edit-modal" hidden>
+            <div class="cat-te-modal cat-te-gen-edit-dialog cat-te-vo-edit-dialog">
+              <div class="cat-te-modal-header">
+                <span class="cat-te-vo-edit-title">${T("voiceover_edit_modal_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-vo-edit-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
+              </div>
+              <div class="cat-te-gen-edit-body">
+                <div class="cat-te-gen-edit-left cat-te-vo-edit-left">
+                  <div class="cat-te-vo-edit-preview">
+                    <audio class="cat-te-vo-edit-audio" controls preload="metadata"></audio>
+                    <div class="cat-te-vo-edit-preview-empty">${T("voiceover_edit_preview_empty")}</div>
+                  </div>
+                  <div class="cat-te-gen-edit-tl-host cat-te-vo-edit-tl-host"></div>
+                </div>
+                <div class="cat-te-gen-edit-right">
+                  <div class="cat-te-vo-edit-name" title=""></div>
+                  <div class="cat-te-vo-edit-file" title=""></div>
+                  <label class="cat-te-gen-edit-field">
+                    <span>${T("desc_prompt_label")}</span>
+                    <textarea class="cat-te-vo-edit-prompt" rows="8" placeholder="${T("voiceover_item_prompt_placeholder")}"></textarea>
+                  </label>
+                  <p class="cat-te-gen-edit-hint">${T("voiceover_edit_hint")}</p>
+                </div>
+              </div>
+              <div class="cat-te-gen-edit-footer">
+                <button type="button" class="cat-te-btn cat-te-vo-edit-cancel">${T("cancel_btn")}</button>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-vo-edit-save">${T("save_btn")}</button>
               </div>
             </div>
           </div>
@@ -3180,6 +3428,12 @@ export class CapTimelineEditorApp {
         this.clipPanel = el.querySelector(".cat-te-clip-panel");
         this.visualClipBody = el.querySelector(".cat-te-visual-clip-body");
         this.subtitlePanel = el.querySelector(".cat-te-subtitle-panel");
+        this.voiceoverPanel = el.querySelector(".cat-te-voiceover-panel");
+        this.voPromptInput = el.querySelector(".cat-te-vo-prompt");
+        this.voStylePromptInput = el.querySelector(".cat-te-vo-style-prompt");
+        this.voAudiosList = el.querySelector(".cat-te-vo-audios-list");
+        this.voAudioAddBtn = el.querySelector(".cat-te-vo-audio-add");
+        this.voAudioEditBtn = el.querySelector(".cat-te-vo-audio-edit");
         this.globalPromptInput = el.querySelector('[data-setting-prompt-input="global_prompt"]');
         this.globalPromptCommentBtn = el.querySelector('[data-setting-prompt-comment="global_prompt"]');
         this._settingPromptInputs = Object.fromEntries(
@@ -3203,18 +3457,19 @@ export class CapTimelineEditorApp {
         this.programEmpty = el.querySelector(".cat-te-program-empty");
         this.programMeta = el.querySelector(".cat-te-program-meta");
         this.promptInput = el.querySelector(".cat-te-clip-panel .cat-te-prompt-input");
-        attachRichPromptHandler(this.promptInput, { mode: "widget" });
         this.aiPromptInput = el.querySelector(".cat-te-clip-panel .cat-te-ai-prompt-input");
-        attachRichPromptHandler(this.aiPromptInput, { mode: "widget" });
         this.aiOptimizeBtn = el.querySelector(".cat-te-ai-optimize-btn");
         this.clipPromptTabs = el.querySelectorAll(".cat-te-clip-panel .cat-te-prompt-tab");
+        this._attachPromptCopyButtons(el);
+        attachRichPromptHandler(this.promptInput, { mode: "widget" });
+        attachRichPromptHandler(this.aiPromptInput, { mode: "widget" });
         for (const key of SETTING_PROMPT_KEYS) {
             const input = this._settingPromptInputs[key];
             if (input) attachRichPromptHandler(input, { mode: "widget" });
         }
         this.promptIncludesHost = el.querySelector(".cat-te-prompt-includes");
         this.promptIncludeChips = el.querySelectorAll(".cat-te-prompt-include-chip");
-        this.useAiPromptCb = el.querySelector(".cat-te-use-ai-prompt-cb");
+        this.promptOrderList = el.querySelector(".cat-te-prompt-order-list");
         this.useMediaPromptCb = el.querySelector(".cat-te-use-media-prompt-cb");
         this.headExtendInput = el.querySelector(".cat-te-head-extend");
         this.tailExtendInput = el.querySelector(".cat-te-tail-extend");
@@ -3322,6 +3577,14 @@ export class CapTimelineEditorApp {
         this.genEditFileEl = el.querySelector(".cat-te-gen-edit-file");
         this.genEditPrompt = el.querySelector(".cat-te-gen-edit-prompt");
         this.genEditDubBtn = el.querySelector(".cat-te-gen-edit-dub");
+        this.voEditModal = el.querySelector(".cat-te-vo-edit-modal");
+        this.voEditTitle = el.querySelector(".cat-te-vo-edit-title");
+        this.voEditTlHost = el.querySelector(".cat-te-vo-edit-tl-host");
+        this.voEditAudio = el.querySelector(".cat-te-vo-edit-audio");
+        this.voEditPreviewEmpty = el.querySelector(".cat-te-vo-edit-preview-empty");
+        this.voEditNameEl = el.querySelector(".cat-te-vo-edit-name");
+        this.voEditFileEl = el.querySelector(".cat-te-vo-edit-file");
+        this.voEditPrompt = el.querySelector(".cat-te-vo-edit-prompt");
         this.outputVideosModal = el.querySelector(".cat-te-output-videos-modal");
         this.outputVideosBody = el.querySelector(".cat-te-output-videos-body");
         this.outputVideosFilter = el.querySelector(".cat-te-output-videos-filter");
@@ -3508,7 +3771,7 @@ export class CapTimelineEditorApp {
                 this._onPromptIncludeToggle(chip.dataset.include);
             });
         });
-        this.useAiPromptCb?.addEventListener("change", () => this._onUseAiPromptChange());
+        this._renderPromptConcatOrderList();
         this.useMediaPromptCb?.addEventListener("change", () => this._onUseMediaPromptChange());
         if (this.headExtendInput && !this.headExtendInput._catTeBound) {
             this.headExtendInput._catTeBound = true;
@@ -3567,9 +3830,29 @@ export class CapTimelineEditorApp {
         el.querySelector(".cat-te-gen-edit-save")?.addEventListener("click", () => this._closeGenEditModal(true));
         this.genEditPrompt?.addEventListener("input", () => this._onGenEditPromptInput());
         this._bindGenEditPreviewResize();
+        el.querySelector(".cat-te-vo-edit-close")?.addEventListener("click", () => this._closeVoiceoverEditModal(false));
+        el.querySelector(".cat-te-vo-edit-cancel")?.addEventListener("click", () => this._closeVoiceoverEditModal(false));
+        el.querySelector(".cat-te-vo-edit-save")?.addEventListener("click", () => this._closeVoiceoverEditModal(true));
+        this.voEditPrompt?.addEventListener("input", () => this._onVoiceoverEditPromptInput());
+        this.voAudioAddBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const clip = this._selClip;
+            if (clip && isVoiceoverTrackType(clip.track?.type)) void this._openOutputAudiosPicker(clip);
+        });
+        this.voAudioEditBtn?.addEventListener("click", () => {
+            const clip = this._selClip;
+            if (clip && isVoiceoverTrackType(clip.track?.type)) void this._openVoiceoverEditModal(clip);
+        });
+        for (const input of [this.voPromptInput, this.voStylePromptInput]) {
+            if (!input) continue;
+            attachRichPromptHandler(input, { mode: "widget" });
+            input.addEventListener("focus", () => { this._voPromptUndoArmed = true; });
+            input.addEventListener("blur", () => { this._voPromptUndoArmed = false; });
+            input.addEventListener("input", () => this._onVoiceoverPromptInput());
+        }
         el.querySelector(".cat-te-output-videos-close")?.addEventListener("click", () => this._closeOutputVideosPicker());
         this.outputVideosFilter?.addEventListener("input", () => this._renderOutputVideosPicker());
-        this.outputVideosAutoLinkBtn?.addEventListener("click", () => void this._autoAssociateOutputVideos());
+        this.outputVideosAutoLinkBtn?.addEventListener("click", () => void this._autoAssociateOutputMedia());
         this.outputVideosTimeButtons?.forEach((btn) => {
             btn.addEventListener("click", () => {
                 this._outputVideosTimeRange = btn.dataset.range;
@@ -3667,6 +3950,11 @@ export class CapTimelineEditorApp {
                 }
                 if (this.genEditModal && !this.genEditModal.hidden) {
                     this._closeGenEditModal(false);
+                    e.stopPropagation();
+                    return;
+                }
+                if (this.voEditModal && !this.voEditModal.hidden) {
+                    this._closeVoiceoverEditModal(false);
                     e.stopPropagation();
                     return;
                 }
@@ -5624,7 +5912,7 @@ export class CapTimelineEditorApp {
     }
 
     _addGeneratedVideosToClip(clip, files, { recordUndo = true } = {}) {
-        if (!clip || clip.track?.type === "audio") return false;
+        if (!clip || !this._isOutputPickerClip(clip, "video")) return false;
         const m = this._ensureClipMeta(clip);
         const rows = this._clipGeneratedVideos(m);
         const have = new Set(rows.map((row) => row.file));
@@ -6475,20 +6763,685 @@ export class CapTimelineEditorApp {
         if (this.genEditModal) this.genEditModal.hidden = true;
     }
 
-    async _openOutputVideosPicker(clip) {
-        if (!this.outputVideosModal || !clip || clip.track?.type === "audio") return;
+    _clipGeneratedAudios(meta) {
+        const rows = Array.isArray(meta?.generatedAudios) ? meta.generatedAudios : [];
+        return rows.map((row) => normalizeGeneratedAudio(row)).filter(Boolean);
+    }
+
+    _firstEnabledGeneratedAudio(meta) {
+        return this._clipGeneratedAudios(meta).find((row) => row.enabled !== false) || null;
+    }
+
+    _generatedAudioUrl(file) {
+        const rel = String(file || "").replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!rel) return "";
+        if (rel.includes("/")) return this._outputVideoUrl(rel) || this._audioUrl(rel);
+        return this._audioUrl(rel) || this._outputVideoUrl(rel);
+    }
+
+    _attachPromptCopyButtons(root) {
+        if (!root) return;
+        const selector = [
+            ".cat-te-settings-prompt-input",
+            ".cat-te-prompt-input",
+            ".cat-te-ai-prompt-input",
+            ".cat-te-vo-prompt",
+            ".cat-te-vo-style-prompt",
+            ".cat-te-vo-edit-prompt",
+            ".cat-te-media-preview-desc",
+            ".cat-te-gen-edit-prompt",
+            ".cat-te-ai-src-text",
+            ".cat-te-ai-system",
+            ".cat-te-ai-skill",
+            ".cat-te-ai-result",
+        ].join(",");
+        for (const ta of root.querySelectorAll(selector)) {
+            if (!(ta instanceof HTMLTextAreaElement) || ta.dataset.promptCopyAttached === "1") continue;
+            ta.dataset.promptCopyAttached = "1";
+
+            let host = ta.parentElement;
+            const reuseHost = host && (
+                host.classList.contains("cat-te-prompt-input-wrap")
+                || host.classList.contains("cat-te-media-preview-desc-wrap")
+                || host.classList.contains("cat-te-prompt-copy-host")
+            );
+            if (!reuseHost) {
+                host = document.createElement("div");
+                host.className = "cat-te-prompt-copy-host";
+                ta.parentNode.insertBefore(host, ta);
+                host.appendChild(ta);
+            } else {
+                host.classList.add("cat-te-prompt-copy-host");
+            }
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cat-te-prompt-copy-btn";
+            btn.title = T("copy_prompt_title");
+            btn.setAttribute("aria-label", T("copy_prompt_title"));
+            btn.innerHTML = iconHtml("copy", 12);
+            btn.addEventListener("mousedown", (e) => e.preventDefault());
+            btn.addEventListener("click", async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const text = ta.value ?? "";
+                let ok = false;
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(text);
+                        ok = true;
+                    }
+                } catch {
+                    ok = false;
+                }
+                if (!ok) {
+                    const prev = ta.selectionStart;
+                    const prevEnd = ta.selectionEnd;
+                    ta.focus();
+                    ta.select();
+                    try {
+                        ok = document.execCommand("copy");
+                    } catch {
+                        ok = false;
+                    }
+                    try {
+                        ta.setSelectionRange(prev, prevEnd);
+                    } catch {
+                        /* ignore */
+                    }
+                }
+                if (!ok) return;
+                btn.classList.add("is-copied");
+                btn.title = T("copy_prompt_done_title");
+                btn.innerHTML = iconHtml("check", 12);
+                clearTimeout(btn._copyResetTimer);
+                btn._copyResetTimer = setTimeout(() => {
+                    btn.classList.remove("is-copied");
+                    btn.title = T("copy_prompt_title");
+                    btn.innerHTML = iconHtml("copy", 12);
+                }, 1200);
+            });
+            host.appendChild(btn);
+        }
+    }
+
+    _onVoiceoverPromptInput() {
+        const clip = this._selClip;
+        if (!clip || !isVoiceoverTrackType(clip.track?.type)) return;
+        if (this._voPromptUndoArmed) {
+            this._recordUndo();
+            this._voPromptUndoArmed = false;
+        }
+        const m = this._ensureClipMeta(clip);
+        m.prompt = this.voPromptInput?.value ?? "";
+        m.stylePrompt = this.voStylePromptInput?.value ?? "";
+        this._meta.set(clip.id, m);
+    }
+
+    _fillVoiceoverPanel(meta) {
+        if (!meta) return;
+        if (this.voPromptInput) setRichPromptValue(this.voPromptInput, meta.prompt ?? "", true);
+        if (this.voStylePromptInput) setRichPromptValue(this.voStylePromptInput, meta.stylePrompt ?? "", true);
+        this._renderVoiceoverAudiosList(this._selClip, meta);
+    }
+
+    _renderVoiceoverAudiosList(clip, meta) {
+        if (!this.voAudiosList) return;
+        const rows = this._clipGeneratedAudios(meta);
+        this.voAudiosList.replaceChildren();
+        for (const [index, row] of rows.entries()) {
+            const item = document.createElement("div");
+            item.className = "cat-te-clip-video-row cat-te-vo-audio-row";
+            if (!row.enabled) item.classList.add("is-disabled");
+
+            const enable = document.createElement("input");
+            enable.type = "checkbox";
+            enable.className = "cat-te-clip-video-enabled";
+            enable.checked = row.enabled !== false;
+            enable.title = row.enabled ? T("disable_label") : T("enable_label");
+            enable.addEventListener("click", (e) => e.stopPropagation());
+            enable.addEventListener("change", () => {
+                this._setGeneratedAudioEnabled(clip, row.id, !!enable.checked);
+            });
+
+            const icon = document.createElement("div");
+            icon.className = "cat-te-vo-audio-icon";
+            icon.innerHTML = iconHtml("micVocal", 16) || "♫";
+
+            const name = document.createElement("button");
+            name.type = "button";
+            name.className = "cat-te-clip-video-name";
+            name.textContent = String(row.file || "").split(/[\\/]/).pop() || T("asset_fallback_name");
+            name.title = row.file || "";
+            name.addEventListener("click", () => this._previewGeneratedAudio(clip, index));
+
+            const up = document.createElement("button");
+            up.type = "button";
+            up.className = "cat-te-vo-audio-move";
+            up.title = T("move_up_title");
+            up.innerHTML = iconHtml("arrowUp", 12);
+            up.disabled = index === 0;
+            up.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._moveGeneratedAudio(clip, row.id, -1);
+            });
+
+            const down = document.createElement("button");
+            down.type = "button";
+            down.className = "cat-te-vo-audio-move";
+            down.title = T("move_down_title");
+            down.innerHTML = iconHtml("arrowDown", 12);
+            down.disabled = index >= rows.length - 1;
+            down.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._moveGeneratedAudio(clip, row.id, 1);
+            });
+
+            const mute = document.createElement("button");
+            mute.type = "button";
+            mute.className = "cat-te-clip-video-mute";
+            const muted = row.muted === true;
+            mute.innerHTML = muted ? ICONS.volumeOff : ICONS.volume;
+            mute.classList.toggle("active", muted);
+            mute.title = muted ? T("unmute_label") : T("mute_label");
+            mute.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._setGeneratedAudioMuted(clip, row.id, !muted);
+            });
+
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "cat-te-clip-video-del";
+            del.title = T("delete_btn");
+            del.textContent = "×";
+            del.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._deleteGeneratedAudio(clip, row.id);
+            });
+
+            item.append(enable, icon, name, up, down, mute, del);
+            this.voAudiosList.appendChild(item);
+        }
+    }
+
+    _setGeneratedAudioEnabled(clip, audioId, enabled) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        m.generatedAudios = this._clipGeneratedAudios(m);
+        const row = m.generatedAudios.find((item) => item.id === audioId);
+        if (!row || row.enabled === enabled) return;
+        this._recordUndo();
+        row.enabled = enabled;
+        this._meta.set(clip.id, m);
+        this._decorateClip(clip);
+        this._scheduleProgramPreview();
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _setGeneratedAudioMuted(clip, audioId, muted) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        m.generatedAudios = this._clipGeneratedAudios(m);
+        const row = m.generatedAudios.find((item) => item.id === audioId);
+        if (!row || row.muted === muted) return;
+        this._recordUndo();
+        row.muted = muted === true;
+        this._meta.set(clip.id, m);
+        this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _deleteGeneratedAudio(clip, audioId) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        const before = this._clipGeneratedAudios(m);
+        const next = before.filter((item) => item.id !== audioId);
+        if (next.length === before.length) return;
+        this._recordUndo();
+        m.generatedAudios = next;
+        this._meta.set(clip.id, m);
+        this._decorateClip(clip);
+        this._scheduleProgramPreview();
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _moveGeneratedAudio(clip, audioId, delta) {
+        if (!clip || !delta) return;
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedAudios(m);
+        const i = rows.findIndex((item) => item.id === audioId);
+        const j = i + delta;
+        if (i < 0 || j < 0 || j >= rows.length) return;
+        this._recordUndo();
+        const [row] = rows.splice(i, 1);
+        rows.splice(j, 0, row);
+        m.generatedAudios = rows;
+        this._meta.set(clip.id, m);
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _addGeneratedAudiosToClip(clip, files, { recordUndo = true } = {}) {
+        if (!clip || !isVoiceoverTrackType(clip.track?.type)) return false;
+        const list = (Array.isArray(files) ? files : [files])
+            .map((f) => normalizeGeneratedAudio(f))
+            .filter(Boolean);
+        if (!list.length) return false;
+        const m = this._ensureClipMeta(clip);
+        const existing = this._clipGeneratedAudios(m);
+        const have = new Set(existing.map((r) => normalizeOutputVideoPath(r.file) || r.file));
+        const added = [];
+        for (const row of list) {
+            const key = normalizeOutputVideoPath(row.file) || row.file;
+            if (!key || have.has(key)) continue;
+            have.add(key);
+            added.push(row);
+        }
+        if (!added.length) return false;
+        if (recordUndo) this._recordUndo();
+        m.generatedAudios = [...existing, ...added];
+        this._meta.set(clip.id, m);
+        this._decorateClip(clip);
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+        return true;
+    }
+
+    _previewGeneratedAudio(clip, index) {
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedAudios(m);
+        const row = rows[index];
+        if (!row?.file) return;
+        const url = this._generatedAudioUrl(row.file);
+        if (!url) return;
+        // Reuse media preview stage as a simple audio player.
+        if (!this.mediaPreviewModal || !this.mediaPreviewStage) {
+            const a = new Audio(url);
+            void a.play().catch(() => {});
+            return;
+        }
+        this.mediaPreviewModal.hidden = false;
+        if (this.mediaPreviewTitle) {
+            this.mediaPreviewTitle.textContent = String(row.file).split(/[\\/]/).pop() || T("gen_audio_label");
+        }
+        this.mediaPreviewStage.replaceChildren();
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        audio.preload = "metadata";
+        audio.src = url;
+        audio.style.maxWidth = "100%";
+        this.mediaPreviewStage.appendChild(audio);
+        void audio.play().catch(() => {});
+    }
+
+    _voiceoverParentDuration(clip) {
+        const m = this._ensureClipMeta(clip);
+        return Math.max(0.05, Number(m.resourceDurationSec) || Number(clip.duration) || 0.05);
+    }
+
+    async _ensureGeneratedAudioDuration(row) {
+        if (!row || (Number.isFinite(Number(row.duration_sec)) && row.duration_sec > 0)) return;
+        const url = this._generatedAudioUrl(row.file);
+        if (!url) return;
+        try {
+            const dur = await this._probeAudioDuration(url);
+            if (Number.isFinite(dur) && dur > 0) row.duration_sec = dur;
+        } catch { /* keep null */ }
+    }
+
+    async _openVoiceoverEditModal(clip) {
+        if (!this.voEditModal || !clip || !isVoiceoverTrackType(clip.track?.type)) return;
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedAudios(m);
+        if (!rows.length) {
+            alert(T("voiceover_edit_no_audio"));
+            return;
+        }
+        this._closeVoiceoverEditModal(false);
+        const draft = rows.map((r) => normalizeGeneratedAudio(r)).filter(Boolean);
+        await Promise.all(draft.map((g) => this._ensureGeneratedAudioDuration(g)));
+        const clipDur = this._voiceoverParentDuration(clip);
+        for (const g of draft) {
+            const tin = Math.max(0, Number(g.trim_in_sec) || 0);
+            const full = Number(g.duration_sec);
+            let eff = Number.isFinite(full) && full > tin
+                ? (g.trim_out_sec != null && Number(g.trim_out_sec) > tin
+                    ? Number(g.trim_out_sec) - tin
+                    : full - tin)
+                : clipDur;
+            let start = Math.max(0, Number(g.edit_start_sec) || 0);
+            if (start >= clipDur) start = 0;
+            const maxDur = Math.max(0.05, clipDur - start);
+            if (eff > maxDur) {
+                eff = maxDur;
+                g.trim_out_sec = tin + eff;
+            }
+            g.edit_start_sec = start;
+        }
+        this._voEditState = {
+            clipId: clip.id,
+            draft,
+            selectedId: draft[0]?.id || null,
+            clipMap: new Map(),
+        };
+        if (this.voEditTitle) {
+            this.voEditTitle.textContent = T("voiceover_edit_modal_title_named", {
+                name: clip.name || T("voiceover_clip_default_name"),
+            });
+        }
+        this.voEditModal.hidden = false;
+        try { this._timeline?.pause?.(); } catch { /* ignore */ }
+        if (this._timeline) this._timeline._keyboardSuspended = true;
+        await this._buildVoiceoverEditTimeline();
+        this._syncVoiceoverEditInspector();
+    }
+
+    async _buildVoiceoverEditTimeline() {
+        const st = this._voEditState;
+        if (!st || !this.voEditTlHost) return;
+        this._destroyVoiceoverEditTimeline();
+        const parent = this._findClipById(st.clipId);
+        const clipDur = parent ? this._voiceoverParentDuration(parent) : 1;
+        const fps = this.getFps();
+        const tl = new Timeline(this.voEditTlHost, {
+            duration: clipDur,
+            fps,
+            timeFormat: "frames",
+            zoom: 1.4,
+            addTrackTypes: [],
+        });
+        tl.toolbarEl?.querySelector(".tl-btn-add-track")?.remove();
+        tl.toolbarEl?.querySelector(".tl-btn-history")?.remove();
+        st.timeline = tl;
+        st.clipMap = new Map();
+
+        for (let i = 0; i < st.draft.length; i++) {
+            const gen = st.draft[i];
+            const track = tl.addTrack({
+                type: "audio",
+                name: (gen.file || "").split(/[\\/]/).pop() || T("gen_audio_label"),
+                isMain: false,
+                height: trackHeightFor("audio"),
+                color: "#5bc0de",
+            });
+            track.setMuted(gen.muted === true);
+            track.setVisible(gen.enabled !== false);
+            this._setupVoiceoverEditTrackControls(track, gen.id);
+
+            const tin = Math.max(0, Number(gen.trim_in_sec) || 0);
+            const full = Number(gen.duration_sec);
+            let eff = Number.isFinite(full) && full > tin
+                ? (gen.trim_out_sec != null && Number(gen.trim_out_sec) > tin
+                    ? Number(gen.trim_out_sec) - tin
+                    : full - tin)
+                : Math.max(0.05, clipDur - (Number(gen.edit_start_sec) || 0));
+            const start = Math.max(0, Math.min(clipDur - 0.05, Number(gen.edit_start_sec) || 0));
+            const dur = Math.max(0.05, Math.min(eff, clipDur - start));
+            const url = this._generatedAudioUrl(gen.file);
+            let peaks = null;
+            if (url) {
+                try {
+                    const r = await this._fetchPeaks(url);
+                    peaks = r.peaks[0];
+                    if (!(Number.isFinite(full) && full > 0) && Number.isFinite(r.duration)) {
+                        gen.duration_sec = r.duration;
+                    }
+                } catch { /* placeholder wave */ }
+            }
+            const c = track.addClip({
+                name: (gen.file || "").split(/[\\/]/).pop() || T("gen_audio_label"),
+                startTime: start,
+                duration: dur,
+                sourceOffset: tin,
+                sourceDuration: Number.isFinite(Number(gen.duration_sec)) && gen.duration_sec > 0
+                    ? gen.duration_sec
+                    : Infinity,
+                src: gen.file || "",
+                waveformPeaks: peaks || undefined,
+                fadeIn: Math.max(0, Number(gen.fade_in_sec) || 0),
+                fadeOut: Math.max(0, Number(gen.fade_out_sec) || 0),
+                color: "#5bc0de",
+            });
+            if (c) {
+                st.clipMap.set(c.id, gen.id);
+                c.el.dataset.genId = gen.id;
+                c._clampFades?.();
+                c._updateFadeUI?.();
+            }
+        }
+        tl.duration = clipDur;
+        tl._refresh?.();
+
+        tl.on("clip:select", ({ clip: c }) => {
+            const gid = st.clipMap.get(c?.id) || c?.el?.dataset?.genId;
+            if (gid) {
+                st.selectedId = gid;
+                this._syncVoiceoverEditInspector();
+            }
+        });
+        tl.on("clip:moveend", () => this._pullVoiceoverEditDraftFromTimeline());
+        tl.on("clip:resizeend", () => this._pullVoiceoverEditDraftFromTimeline());
+        tl.on("clip:fadeend", () => this._pullVoiceoverEditDraftFromTimeline());
+        if (st.draft[0]) {
+            const first = [...st.clipMap.entries()].find(([, gid]) => gid === st.selectedId)
+                || [...st.clipMap.entries()][0];
+            if (first) {
+                const c = tl.tracks.flatMap((t) => t.clips).find((x) => x.id === first[0]);
+                if (c) tl.selectClip(c);
+            }
+        }
+    }
+
+    _setupVoiceoverEditTrackControls(track, genId) {
+        const actions = track.actionsEl;
+        if (!actions) return;
+        actions.replaceChildren();
+        const makeBtn = (kind) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cat-te-track-btn";
+            if (kind === "lock") {
+                const render = () => {
+                    btn.innerHTML = track.locked ? ICONS.lock : ICONS.lockOpen;
+                    btn.classList.toggle("active", track.locked);
+                    btn.title = track.locked ? T("unlock_track_title") : T("lock_track_title");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    track.setLocked(!track.locked);
+                    render();
+                });
+                render();
+            } else if (kind === "visible") {
+                const render = () => {
+                    btn.innerHTML = track.visible ? ICONS.eye : ICONS.eyeOff;
+                    btn.classList.toggle("active", !track.visible);
+                    btn.title = T("track_visibility_title");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const st = this._voEditState;
+                    const row = st?.draft?.find((g) => g.id === genId);
+                    if (!row) return;
+                    row.enabled = !(row.enabled !== false);
+                    track.setVisible(row.enabled !== false);
+                    render();
+                });
+                render();
+            } else if (kind === "mute") {
+                const render = () => {
+                    btn.innerHTML = track.muted ? ICONS.volumeOff : ICONS.volume;
+                    btn.classList.toggle("active", track.muted);
+                    btn.title = track.muted ? T("unmute_label") : T("mute_label");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const st = this._voEditState;
+                    const row = st?.draft?.find((g) => g.id === genId);
+                    if (!row) return;
+                    row.muted = !row.muted;
+                    track.setMuted(!!row.muted);
+                    render();
+                });
+                render();
+            }
+            return btn;
+        };
+        actions.append(makeBtn("lock"), makeBtn("visible"), makeBtn("mute"));
+    }
+
+    _pullVoiceoverEditDraftFromTimeline() {
+        const st = this._voEditState;
+        const tl = st?.timeline;
+        if (!st || !tl) return;
+        const parent = this._findClipById(st.clipId);
+        const clipDur = parent ? this._voiceoverParentDuration(parent) : tl.duration;
+        tl.duration = clipDur;
+        const next = [];
+        for (const track of tl.tracks) {
+            for (const c of [...track.clips].sort((a, b) => a.startTime - b.startTime)) {
+                const gid = st.clipMap.get(c.id) || c.el?.dataset?.genId;
+                const prev = st.draft.find((g) => g.id === gid);
+                if (!prev) continue;
+                const tin = Math.max(0, Number(c.sourceOffset) || 0);
+                const dur = Math.max(0.05, Number(c.duration) || 0.05);
+                next.push({
+                    ...prev,
+                    edit_start_sec: Math.max(0, Number(c.startTime) || 0),
+                    trim_in_sec: tin,
+                    trim_out_sec: tin + dur,
+                    fade_in_sec: Math.max(0, Number(c.fadeIn) || 0),
+                    fade_out_sec: Math.max(0, Number(c.fadeOut) || 0),
+                    enabled: track.visible !== false,
+                    muted: !!track.muted,
+                    duration_sec: Number.isFinite(Number(c.sourceDuration)) && c.sourceDuration > 0
+                        ? c.sourceDuration
+                        : prev.duration_sec,
+                });
+            }
+        }
+        if (next.length) st.draft = next;
+        this._syncVoiceoverEditInspector();
+    }
+
+    _syncVoiceoverEditInspector() {
+        const st = this._voEditState;
+        const row = st?.draft?.find((g) => g.id === st.selectedId) || st?.draft?.[0];
+        if (this.voEditNameEl) {
+            this.voEditNameEl.textContent = row
+                ? (String(row.file || "").split(/[\\/]/).pop() || T("gen_audio_label"))
+                : "";
+            this.voEditNameEl.title = row?.file || "";
+        }
+        if (this.voEditFileEl) {
+            this.voEditFileEl.textContent = row?.file || "";
+            this.voEditFileEl.title = row?.file || "";
+        }
+        if (this.voEditPrompt) {
+            this.voEditPrompt.value = row?.prompt || "";
+            this.voEditPrompt.disabled = !row;
+        }
+        if (this.voEditAudio) {
+            const url = row?.file ? this._generatedAudioUrl(row.file) : "";
+            if (url) {
+                if (this.voEditAudio.src !== url) this.voEditAudio.src = url;
+                this.voEditAudio.hidden = false;
+                if (this.voEditPreviewEmpty) this.voEditPreviewEmpty.hidden = true;
+            } else {
+                this.voEditAudio.removeAttribute("src");
+                this.voEditAudio.hidden = true;
+                if (this.voEditPreviewEmpty) this.voEditPreviewEmpty.hidden = false;
+            }
+        }
+    }
+
+    _onVoiceoverEditPromptInput() {
+        const st = this._voEditState;
+        if (!st) return;
+        const row = st.draft.find((g) => g.id === st.selectedId);
+        if (!row) return;
+        row.prompt = this.voEditPrompt?.value ?? "";
+    }
+
+    _destroyVoiceoverEditTimeline() {
+        const st = this._voEditState;
+        try { st?.timeline?.destroy?.(); } catch { /* ignore */ }
+        if (st) st.timeline = null;
+        this.voEditTlHost?.replaceChildren();
+        if (this.voEditAudio) {
+            try { this.voEditAudio.pause(); } catch { /* ignore */ }
+            this.voEditAudio.removeAttribute("src");
+        }
+    }
+
+    _closeVoiceoverEditModal(save) {
+        const st = this._voEditState;
+        if (!st) {
+            if (this._timeline) this._timeline._keyboardSuspended = false;
+            if (this.voEditModal) this.voEditModal.hidden = true;
+            return;
+        }
+        if (save) {
+            this._pullVoiceoverEditDraftFromTimeline();
+            const clip = this._findClipById(st.clipId);
+            if (clip) {
+                this._recordUndo();
+                const m = this._ensureClipMeta(clip);
+                m.generatedAudios = st.draft.map((g) => normalizeGeneratedAudio(g)).filter(Boolean);
+                this._meta.set(clip.id, m);
+                this._decorateClip(clip);
+                if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+                this._saveToWidgets();
+                this._scheduleProgramPreview();
+            }
+        }
+        this._destroyVoiceoverEditTimeline();
+        this._voEditState = null;
+        if (this._timeline) this._timeline._keyboardSuspended = false;
+        if (this.voEditModal) this.voEditModal.hidden = true;
+    }
+
+    _isOutputPickerClip(clip, kind = this._outputPickerKind) {
+        if (!clip) return false;
+        if (kind === "audio") return isVoiceoverTrackType(clip.track?.type);
+        return clip.track?.type !== "audio"
+            && !isVoiceoverTrackType(clip.track?.type)
+            && !isSubtitleTrackType(clip.track?.type);
+    }
+
+    _openOutputVideosPicker(clip) {
+        return this._openOutputMediaPicker(clip, "video");
+    }
+
+    _openOutputAudiosPicker(clip) {
+        return this._openOutputMediaPicker(clip, "audio");
+    }
+
+    async _openOutputMediaPicker(clip, kind = "video") {
+        if (!this.outputVideosModal || !this._isOutputPickerClip(clip, kind)) return;
         const alreadyOpen = !this.outputVideosModal.hidden;
+        const kindChanged = this._outputPickerKind !== kind;
+        this._outputPickerKind = kind;
         this._outputVideosClipId = clip.id;
+        this._syncOutputPickerChrome();
         this._syncOutputVideosPickerTitle(clip);
-        if (!alreadyOpen) {
+        if (!alreadyOpen || kindChanged) {
             this._ensureOutputVideosPanelPos();
             this.outputVideosModal.hidden = false;
             if (this.outputVideosFilter) this.outputVideosFilter.value = "";
             this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
             this.outputVideosTimeButtons?.forEach((b) => b.classList.toggle("is-active", b.dataset.range === this._outputVideosTimeRange));
             if (this.outputVideosBody) this.outputVideosBody.textContent = T("loading_ellipsis");
+            const endpoint = kind === "audio"
+                ? "/audio_keyframe_timeline/output_audios"
+                : "/audio_keyframe_timeline/output_videos";
             try {
-                const response = await fetch(api.apiURL("/audio_keyframe_timeline/output_videos"));
+                const response = await fetch(api.apiURL(endpoint));
                 const data = await response.json();
                 this._outputVideosCache = Array.isArray(data.files) ? data.files : [];
             } catch {
@@ -6496,14 +7449,14 @@ export class CapTimelineEditorApp {
             }
         }
         // Drop stale target if the open request finished after a newer selection.
-        if (this._outputVideosClipId !== clip.id) return;
+        if (this._outputVideosClipId !== clip.id || this._outputPickerKind !== kind) return;
         this._renderOutputVideosPicker();
     }
 
     _retargetOutputVideosPickerFromSelection() {
         if (!this.outputVideosModal || this.outputVideosModal.hidden) return;
         const clip = this._selClip;
-        if (!clip || clip.track?.type === "audio") return;
+        if (!this._isOutputPickerClip(clip)) return;
         if (this._outputVideosClipId === clip.id) {
             this._syncOutputVideosPickerTitle(clip);
             return;
@@ -6513,13 +7466,27 @@ export class CapTimelineEditorApp {
         this._renderOutputVideosPicker();
     }
 
+    _syncOutputPickerChrome() {
+        const isAudio = this._outputPickerKind === "audio";
+        this.outputVideosModal?.classList.toggle("is-audio-picker", isAudio);
+        if (this.outputVideosAutoLinkBtn) {
+            this.outputVideosAutoLinkBtn.textContent = isAudio
+                ? T("auto_associate_audios_btn")
+                : T("auto_associate_videos_btn");
+            this.outputVideosAutoLinkBtn.title = isAudio
+                ? T("auto_associate_audios_title")
+                : T("auto_associate_videos_title");
+        }
+    }
+
     _syncOutputVideosPickerTitle(clip = null) {
         if (!this.outputVideosTitle) return;
         const target = clip || this._findClipById(this._outputVideosClipId);
         const name = String(target?.name || "").trim();
-        this.outputVideosTitle.textContent = name
-            ? `${T("linked_generated_videos_title")} · ${name}`
+        const base = this._outputPickerKind === "audio"
+            ? T("linked_generated_audios_title")
             : T("linked_generated_videos_title");
+        this.outputVideosTitle.textContent = name ? `${base} · ${name}` : base;
     }
 
     _ensureOutputVideosPanelPos() {
@@ -6564,10 +7531,15 @@ export class CapTimelineEditorApp {
     _closeOutputVideosPicker() {
         this._hideOutputVideoHoverPreview();
         this._outputVideosClipId = null;
+        this._outputPickerKind = "video";
         this._outputVideosThumbIo?.disconnect();
         this._outputVideosThumbIo = null;
-        if (this.outputVideosModal) this.outputVideosModal.hidden = true;
+        if (this.outputVideosModal) {
+            this.outputVideosModal.hidden = true;
+            this.outputVideosModal.classList.remove("is-audio-picker");
+        }
         this.outputVideosBody?.replaceChildren();
+        this._syncOutputPickerChrome();
         this._syncOutputVideosPickerTitle(null);
     }
 
@@ -6586,13 +7558,36 @@ export class CapTimelineEditorApp {
         return have;
     }
 
+    /** Files already linked on any voiceover clip (normalized output paths). */
+    _allLinkedGeneratedAudioFiles() {
+        const have = new Set();
+        for (const track of this._timeline?.tracks ?? []) {
+            if (!isVoiceoverTrackType(track.type)) continue;
+            for (const clip of track.clips) {
+                for (const row of this._clipGeneratedAudios(this._meta.get(clip.id))) {
+                    const n = normalizeOutputVideoPath(row.file) || row.file;
+                    if (n) have.add(n);
+                }
+            }
+        }
+        return have;
+    }
+
+    _clipIdFromSpecifiedAudioPath(file) {
+        const n = normalizeOutputVideoPath(file);
+        if (!n) return null;
+        const m = n.match(/^CapTimelineEditor\/[^/]+\/(\d{8}-\d{6})_(.+)\.(wav|mp3|flac|ogg|m4a|aac|wma)$/i);
+        return m ? String(m[2]).trim() || null : null;
+    }
+
     /**
-     * Scan output videos under CapTimelineEditor/{project}/…_{clipId}.mp4 and
+     * Scan output media under CapTimelineEditor/{project}/…_{clipId}.* and
      * link each file to the matching timeline clip. Used when live WS attach
      * was missed (e.g. switched workflows while generating).
      */
-    async _autoAssociateOutputVideos() {
+    async _autoAssociateOutputMedia() {
         if (!this.outputVideosModal || this.outputVideosModal.hidden) return;
+        const isAudio = this._outputPickerKind === "audio";
         const btn = this.outputVideosAutoLinkBtn;
         if (btn?.disabled) return;
         if (btn) {
@@ -6600,15 +7595,20 @@ export class CapTimelineEditorApp {
             btn.classList.add("is-loading");
         }
         try {
+            const endpoint = isAudio
+                ? "/audio_keyframe_timeline/output_audios"
+                : "/audio_keyframe_timeline/output_videos";
             try {
-                const response = await fetch(api.apiURL("/audio_keyframe_timeline/output_videos"));
+                const response = await fetch(api.apiURL(endpoint));
                 const data = await response.json();
                 this._outputVideosCache = Array.isArray(data.files) ? data.files : [];
             } catch {
                 /* keep existing cache */
             }
             const projectPrefix = `CapTimelineEditor/${this._safeProjectFilename()}/`.toLowerCase();
-            const already = this._allLinkedGeneratedVideoFiles();
+            const already = isAudio
+                ? this._allLinkedGeneratedAudioFiles()
+                : this._allLinkedGeneratedVideoFiles();
             /** @type {Map<string, string[]>} */
             const byClip = new Map();
             for (const row of this._outputVideosCache || []) {
@@ -6617,8 +7617,12 @@ export class CapTimelineEditorApp {
                 const key = normalizeOutputVideoPath(file) || file;
                 if (already.has(key)) continue;
                 if (!key.toLowerCase().startsWith(projectPrefix)) continue;
-                const clipId = this._clipIdFromSpecifiedVideoPath(key);
+                const clipId = isAudio
+                    ? this._clipIdFromSpecifiedAudioPath(key)
+                    : this._clipIdFromSpecifiedVideoPath(key);
                 if (!clipId || !this._findClipById(clipId)) continue;
+                if (isAudio && !isVoiceoverTrackType(this._findClipById(clipId)?.track?.type)) continue;
+                if (!isAudio && !this._isOutputPickerClip(this._findClipById(clipId), "video")) continue;
                 const list = byClip.get(clipId) || [];
                 list.push(key);
                 byClip.set(clipId, list);
@@ -6629,7 +7633,10 @@ export class CapTimelineEditorApp {
                 for (const [clipId, files] of byClip) {
                     const clip = this._findClipById(clipId);
                     if (!clip) continue;
-                    if (this._addGeneratedVideosToClip(clip, files, { recordUndo: false })) {
+                    const ok = isAudio
+                        ? this._addGeneratedAudiosToClip(clip, files, { recordUndo: false })
+                        : this._addGeneratedVideosToClip(clip, files, { recordUndo: false });
+                    if (ok) {
                         linked += files.length;
                         for (const f of files) already.add(f);
                     }
@@ -6637,9 +7644,9 @@ export class CapTimelineEditorApp {
             }
             this._renderOutputVideosPicker();
             if (linked > 0) {
-                alert(T("auto_associate_videos_done", { count: linked }));
+                alert(T(isAudio ? "auto_associate_audios_done" : "auto_associate_videos_done", { count: linked }));
             } else {
-                alert(T("auto_associate_videos_none"));
+                alert(T(isAudio ? "auto_associate_audios_none" : "auto_associate_videos_none"));
             }
         } finally {
             if (btn) {
@@ -6647,6 +7654,11 @@ export class CapTimelineEditorApp {
                 btn.classList.remove("is-loading");
             }
         }
+    }
+
+    async _autoAssociateOutputVideos() {
+        this._outputPickerKind = "video";
+        return this._autoAssociateOutputMedia();
     }
 
     _cancelOutputVideoHoverHide() {
@@ -6917,10 +7929,13 @@ export class CapTimelineEditorApp {
         this._hideOutputVideoHoverPreview();
         this._outputVideosThumbIo?.disconnect();
         this._outputVideosThumbIo = null;
+        const isAudio = this._outputPickerKind === "audio";
         const clip = this._findClipById(this._outputVideosClipId);
         this._syncOutputVideosPickerTitle(clip);
         const have = new Set(
-            this._clipGeneratedVideos(clip ? this._ensureClipMeta(clip) : null)
+            (isAudio
+                ? this._clipGeneratedAudios(clip ? this._ensureClipMeta(clip) : null)
+                : this._clipGeneratedVideos(clip ? this._ensureClipMeta(clip) : null))
                 .map((row) => normalizeOutputVideoPath(row.file) || row.file),
         );
         const q = String(this.outputVideosFilter?.value || "").trim().toLowerCase();
@@ -6934,11 +7949,13 @@ export class CapTimelineEditorApp {
         if (!rows.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-output-videos-empty";
-            empty.textContent = this._outputVideosCache.length ? T("no_matching_videos") : T("no_videos_in_output_dir");
+            empty.textContent = this._outputVideosCache.length
+                ? T(isAudio ? "no_matching_audios" : "no_matching_videos")
+                : T(isAudio ? "no_audios_in_output_dir" : "no_videos_in_output_dir");
             this.outputVideosBody.appendChild(empty);
             return;
         }
-        const io = new IntersectionObserver((entries) => {
+        const io = isAudio ? null : new IntersectionObserver((entries) => {
             for (const entry of entries) {
                 if (!entry.isIntersecting) continue;
                 const thumb = entry.target;
@@ -6956,22 +7973,34 @@ export class CapTimelineEditorApp {
             const key = normalizeOutputVideoPath(file) || file;
             const item = document.createElement("div");
             item.className = "cat-te-output-video-row";
+            if (isAudio) item.classList.add("is-audio");
             const added = have.has(key);
             if (added) item.classList.add("is-added");
             const thumbWrap = document.createElement("span");
             thumbWrap.className = "cat-te-output-video-thumb-wrap";
-            const thumb = document.createElement("img");
-            thumb.className = "cat-te-output-video-thumb";
-            thumb.alt = "";
-            thumb.dataset.file = file;
-            const playHint = document.createElement("span");
-            playHint.className = "cat-te-output-video-thumb-play";
-            playHint.innerHTML = iconHtml("play", 12);
-            playHint.setAttribute("aria-hidden", "true");
-            thumbWrap.append(thumb, playHint);
-            thumbWrap.title = T("hover_preview_video_title");
-            thumbWrap.addEventListener("mouseenter", () => this._showOutputVideoHoverPreview(thumbWrap, file));
-            thumbWrap.addEventListener("mouseleave", () => this._scheduleOutputVideoHoverHide());
+            if (isAudio) {
+                thumbWrap.classList.add("is-audio");
+                thumbWrap.innerHTML = iconHtml("audio", 16);
+                thumbWrap.title = T("preview_audio_title");
+                thumbWrap.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this._previewOutputAudioFile(file);
+                });
+            } else {
+                const thumb = document.createElement("img");
+                thumb.className = "cat-te-output-video-thumb";
+                thumb.alt = "";
+                thumb.dataset.file = file;
+                const playHint = document.createElement("span");
+                playHint.className = "cat-te-output-video-thumb-play";
+                playHint.innerHTML = iconHtml("play", 12);
+                playHint.setAttribute("aria-hidden", "true");
+                thumbWrap.append(thumb, playHint);
+                thumbWrap.title = T("hover_preview_video_title");
+                thumbWrap.addEventListener("mouseenter", () => this._showOutputVideoHoverPreview(thumbWrap, file));
+                thumbWrap.addEventListener("mouseleave", () => this._scheduleOutputVideoHoverHide());
+                if (io) io.observe(thumb);
+            }
             const name = document.createElement("button");
             name.type = "button";
             name.className = "cat-te-output-video-name";
@@ -6985,8 +8014,11 @@ export class CapTimelineEditorApp {
             if (!added) {
                 const add = () => {
                     const target = this._findClipById(this._outputVideosClipId);
-                    if (!target || target.track?.type === "audio") return;
-                    if (!this._addGeneratedVideosToClip(target, [file])) return;
+                    if (!this._isOutputPickerClip(target, isAudio ? "audio" : "video")) return;
+                    const ok = isAudio
+                        ? this._addGeneratedAudiosToClip(target, [file])
+                        : this._addGeneratedVideosToClip(target, [file]);
+                    if (!ok) return;
                     item.classList.add("is-added");
                     name.disabled = true;
                     tag.textContent = T("added_tag");
@@ -6995,8 +8027,29 @@ export class CapTimelineEditorApp {
                 tag.addEventListener("click", add);
             }
             this.outputVideosBody.appendChild(item);
-            io.observe(thumb);
         }
+    }
+
+    _previewOutputAudioFile(file) {
+        const url = this._generatedAudioUrl(file);
+        if (!url) return;
+        if (!this.mediaPreviewModal || !this.mediaPreviewStage) {
+            const a = new Audio(url);
+            void a.play().catch(() => {});
+            return;
+        }
+        this.mediaPreviewModal.hidden = false;
+        if (this.mediaPreviewTitle) {
+            this.mediaPreviewTitle.textContent = String(file).split(/[\\/]/).pop() || T("gen_audio_label");
+        }
+        this.mediaPreviewStage.replaceChildren();
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        audio.preload = "metadata";
+        audio.src = url;
+        audio.style.maxWidth = "100%";
+        this.mediaPreviewStage.appendChild(audio);
+        void audio.play().catch(() => {});
     }
 
     _isEmptyGroupClip(meta) {
@@ -7052,11 +8105,7 @@ export class CapTimelineEditorApp {
         meta.agent = meta.agent === "other" ? "other" : this._knownClipAgent(meta.agent);
         if (meta.agent !== "other") meta.agentCustom = "";
         else meta.agentCustom = String(meta.agentCustom || "").trim();
-        meta.promptIncludes = normalizePromptIncludes(
-            meta.promptIncludes,
-            { useGlobalPrompt: meta.useGlobalPrompt },
-        );
-        meta.useGlobalPrompt = syncUseGlobalFromIncludes(meta.promptIncludes);
+        meta.promptIncludes = normalizePromptIncludes(meta.promptIncludes);
         if (!items.length) {
             clip.thumbnail = null;
             clip.hasAudio = false;
@@ -8723,6 +9772,7 @@ export class CapTimelineEditorApp {
         for (const key of SETTING_PROMPT_KEYS) {
             project.settings[key] = this._readSettingPrompt(key);
         }
+        project.settings.prompt_concat_order = this._getPromptConcatOrder();
         delete project.settings.ignore_occluded;
         this._writeProjectJson(JSON.stringify(project));
         this._syncProjectScalarDisplay();
@@ -8765,6 +9815,8 @@ export class CapTimelineEditorApp {
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
         this._applyScalarSettings(settings, { applySettingsFromProject });
         this._watermark = this._normalizeWatermark(settings.watermark);
+        this._promptConcatOrder = normalizePromptConcatOrder(settings.prompt_concat_order);
+        this._renderPromptConcatOrderList();
         this._useClipSpecifiedVideoFilename = settings.use_clip_specified_video_filename !== false;
         this._timelineEditMode = settings.timeline_edit_mode === "generated" ? "generated" : "resource";
         project.settings = {
@@ -8776,6 +9828,7 @@ export class CapTimelineEditorApp {
                 key,
                 String(settings[key] ?? this._readSettingPrompt(key) ?? ""),
             ])),
+            prompt_concat_order: this._getPromptConcatOrder(),
             use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
             timeline_edit_mode: this._timelineEditMode,
         };
@@ -9035,6 +10088,11 @@ export class CapTimelineEditorApp {
                 muted: !!c.muted,
                 visible: c.visible !== false,
                 disabled: !!c.disabled || c.enabled === false,
+                prompt: String(c.prompt ?? ""),
+                stylePrompt: String(c.style_prompt ?? c.stylePrompt ?? ""),
+                generatedAudios: (Array.isArray(c.generated_audios) ? c.generated_audios : [])
+                    .map((row) => normalizeGeneratedAudio(row))
+                    .filter(Boolean),
                 resourceStartSec: Math.max(0, Number(c.resource_start_sec) || startTime),
                 resourceDurationSec: Math.max(0.05, Number(c.resource_duration_sec) || dur),
             });
@@ -9125,8 +10183,6 @@ export class CapTimelineEditorApp {
                 prompt: c.prompt ?? "",
                 aiPrompt: c.ai_prompt ?? "",
                 promptIncludes,
-                useGlobalPrompt: syncUseGlobalFromIncludes(promptIncludes),
-                useAiPrompt: c.use_ai_prompt !== false,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
                 items,
@@ -9207,8 +10263,6 @@ export class CapTimelineEditorApp {
                 aiPrompt: c.ai_prompt ?? "",
                 endImage: c.end_image ?? null,
                 promptIncludes,
-                useGlobalPrompt: syncUseGlobalFromIncludes(promptIncludes),
-                useAiPrompt: c.use_ai_prompt !== false,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
                 sourceDuration: sourceDur,
@@ -9265,8 +10319,6 @@ export class CapTimelineEditorApp {
             aiPrompt: c.ai_prompt ?? "",
             endImage: c.end_image ?? null,
             promptIncludes,
-            useGlobalPrompt: syncUseGlobalFromIncludes(promptIncludes),
-            useAiPrompt: c.use_ai_prompt !== false,
             disabled: !!c.disabled,
             visible: c.visible !== false,
             headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
@@ -10025,6 +11077,7 @@ export class CapTimelineEditorApp {
             || (this.clipItemsModal && !this.clipItemsModal.hidden)
             || (this.genVideoModal && !this.genVideoModal.hidden)
             || (this.genEditModal && !this.genEditModal.hidden)
+            || (this.voEditModal && !this.voEditModal.hidden)
             || (this.settingsModal && !this.settingsModal.hidden)
             || (this.aiOptimizeModal && !this.aiOptimizeModal.hidden)
             || (this.skillPickerModal && !this.skillPickerModal.hidden),
@@ -10486,7 +11539,14 @@ export class CapTimelineEditorApp {
         const m = document.querySelector(".cat-te-ctx-menu");
         if (m) { m.remove(); removed = true; }
         const fp = document.querySelector(".cat-te-font-picker");
-        if (fp) { fp.remove(); removed = true; }
+        if (fp) {
+            if (typeof fp._capFontKeyHandler === "function") {
+                window.removeEventListener("keydown", fp._capFontKeyHandler, true);
+                fp._capFontKeyHandler = null;
+            }
+            fp.remove();
+            removed = true;
+        }
         return removed;
     }
 
@@ -10556,6 +11616,8 @@ export class CapTimelineEditorApp {
                         this._decorateClip(clip);
                     },
                 },
+                { label: T("linked_generated_audios_title"), fn: () => void this._openOutputAudiosPicker(clip) },
+                { label: T("voiceover_edit_menu"), fn: () => void this._openVoiceoverEditModal(clip) },
                 { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
                 { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
             );
@@ -12423,7 +13485,6 @@ export class CapTimelineEditorApp {
         if (this.promptInput) this.promptInput.disabled = true;
         if (this.aiPromptInput) this.aiPromptInput.disabled = true;
         this._setPromptIncludesEnabled(false);
-        if (this.useAiPromptCb) this.useAiPromptCb.disabled = true;
         if (this.useMediaPromptCb) {
             this.useMediaPromptCb.disabled = true;
             this.useMediaPromptCb.checked = true;
@@ -12437,10 +13498,7 @@ export class CapTimelineEditorApp {
     }
 
     _setPromptIncludesEnabled(enabled, includes = null) {
-        const selected = normalizePromptIncludes(
-            includes,
-            { useGlobalPrompt: true },
-        );
+        const selected = normalizePromptIncludes(includes);
         this.promptIncludeChips?.forEach((chip) => {
             chip.disabled = !enabled;
             const key = chip.dataset.include;
@@ -12450,11 +13508,7 @@ export class CapTimelineEditorApp {
     }
 
     _syncPromptIncludesUi(meta) {
-        const includes = normalizePromptIncludes(
-            meta?.promptIncludes,
-            { useGlobalPrompt: meta?.useGlobalPrompt },
-        );
-        this._setPromptIncludesEnabled(true, includes);
+        this._setPromptIncludesEnabled(true, normalizePromptIncludes(meta?.promptIncludes));
     }
 
     _updatePromptPanel() {
@@ -12470,11 +13524,19 @@ export class CapTimelineEditorApp {
         // leave the sidebar looking interactive but dead.
         if (this.visualClipBody) this.visualClipBody.hidden = !isVisual;
         if (this.subtitlePanel) this.subtitlePanel.hidden = !clip || !isSubtitle;
-        if (!clip || isAudio || isVoiceover || isSubtitle) {
+        if (this.voiceoverPanel) this.voiceoverPanel.hidden = !clip || !isVoiceover;
+        if (!clip || isAudio || isSubtitle) {
             this._disableVisualPromptControls();
             if (!clip) {
-                if (this.useAiPromptCb) this.useAiPromptCb.checked = true;
                 this._setClipPromptTab("clip");
+            }
+        } else if (isVoiceover) {
+            this._disableVisualPromptControls();
+            try {
+                const m = this._ensureClipMeta(clip);
+                this._fillVoiceoverPanel(m);
+            } catch (err) {
+                console.error("[CapTE] voiceover panel fill failed", err);
             }
         } else {
             // Enable immediately with whatever meta we already have (or defaults).
@@ -12484,15 +13546,10 @@ export class CapTimelineEditorApp {
             if (this.promptInput) this.promptInput.disabled = false;
             if (this.aiPromptInput) this.aiPromptInput.disabled = false;
             this._syncPromptIncludesUi(m);
-            if (this.useAiPromptCb) {
-                this.useAiPromptCb.disabled = false;
-                this.useAiPromptCb.checked = m.useAiPrompt !== false;
-            }
             try {
                 m = this._ensureClipMeta(clip) || m;
                 this._setVisualSettingsEnabled(true, m);
                 this._syncPromptIncludesUi(m);
-                if (this.useAiPromptCb) this.useAiPromptCb.checked = m.useAiPrompt !== false;
                 setRichPromptValue(this.promptInput, m.prompt ?? "", true);
                 setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
             } catch (err) {
@@ -12544,10 +13601,13 @@ export class CapTimelineEditorApp {
             [this.subOffsetXInput, "offsetX", "num"],
             [this.subOffsetYInput, "offsetY", "num"],
         ]) {
-            const ev = el?.type === "checkbox" || el?.type === "range" || el?.tagName === "SELECT" || el?.type === "color"
+            const isSelect = el?.tagName === "SELECT";
+            const ev = el?.type === "checkbox" || el?.type === "range" || isSelect || el?.type === "color"
                 ? "input"
                 : "change";
             bind(el, ev === "input" ? "input" : "change", () => this._onSubtitleFieldChange({ [key]: cast }));
+            // Custom font picker dispatches both; native select needs change too.
+            if (isSelect) bind(el, "change", () => this._onSubtitleFieldChange({ [key]: cast }));
             if (ev === "input" && (el?.type === "number")) {
                 bind(el, "change", () => this._onSubtitleFieldChange({ [key]: cast }));
             }
@@ -12971,7 +14031,7 @@ export class CapTimelineEditorApp {
         if (globalTab) {
             const clip = this._findClipById(this._aiOptimizeClipId);
             const meta = clip ? this._ensureClipMeta(clip) : null;
-            globalTab.hidden = !clip || meta?.useGlobalPrompt === false;
+            globalTab.hidden = !clip || !normalizePromptIncludes(meta?.promptIncludes).includes("global");
             if (globalTab.hidden && next === "global") {
                 this._aiOptimizeSrc = "media";
                 this.aiSrcTabs?.forEach((btn) => {
@@ -13207,7 +14267,9 @@ export class CapTimelineEditorApp {
                 lyrics: "",
                 duration_sec: Number(clip.duration) || 0,
                 clip_prompt: String(meta.prompt || ""),
-                global_prompt: meta.useGlobalPrompt === false ? "" : this._readGlobalPrompt(),
+                global_prompt: normalizePromptIncludes(meta.promptIncludes).includes("global")
+                    ? this._readGlobalPrompt()
+                    : "",
                 files: this._clipAiOptimizeFiles(clip),
                 keep_loaded: false,
             };
@@ -13350,29 +14412,91 @@ export class CapTimelineEditorApp {
     }
 
     _onPromptIncludeToggle(key) {
-        if (!this._selClip || !PROMPT_INCLUDE_KEY_SET.has(key)) return;
+        if (!this._selClip || !PROMPT_PART_KEY_SET.has(key)) return;
         this._recordUndo();
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
-        const current = normalizePromptIncludes(
-            m.promptIncludes,
-            { useGlobalPrompt: m.useGlobalPrompt },
-        );
+        const current = normalizePromptIncludes(m.promptIncludes);
         const next = current.includes(key)
             ? current.filter((k) => k !== key)
             : [...current, key];
-        // Keep stable order matching PROMPT_INCLUDE_KEYS.
-        m.promptIncludes = PROMPT_INCLUDE_KEYS.filter((k) => next.includes(k));
-        m.useGlobalPrompt = syncUseGlobalFromIncludes(m.promptIncludes);
+        m.promptIncludes = PROMPT_PART_KEYS.filter((k) => next.includes(k));
         this._meta.set(this._selClip.id, m);
         this._syncPromptIncludesUi(m);
     }
 
-    _onUseAiPromptChange() {
-        if (!this._selClip) return;
-        this._recordUndo();
-        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
-        m.useAiPrompt = !!this.useAiPromptCb?.checked;
-        this._meta.set(this._selClip.id, m);
+    _promptPartLabel(key) {
+        switch (key) {
+            case "global": return T("prompt_include_global");
+            case "style": return T("prompt_include_style");
+            case "clip": return T("prompt_include_clip");
+            case "ai": return T("prompt_include_ai");
+            case "non_diegetic_music": return T("prompt_include_music");
+            case "negative": return T("prompt_include_negative");
+            default: return key;
+        }
+    }
+
+    _getPromptConcatOrder() {
+        return normalizePromptConcatOrder(this._promptConcatOrder);
+    }
+
+    _setPromptConcatOrder(order, { recordUndo = true } = {}) {
+        const next = normalizePromptConcatOrder(order);
+        const prev = this._getPromptConcatOrder().join(",");
+        if (next.join(",") === prev) return;
+        if (recordUndo) this._recordUndo();
+        this._promptConcatOrder = next;
+        this._renderPromptConcatOrderList();
+        this._saveToWidgets();
+    }
+
+    _movePromptConcatOrder(index, delta) {
+        const order = this._getPromptConcatOrder();
+        const to = index + delta;
+        if (to < 0 || to >= order.length) return;
+        const next = order.slice();
+        const [row] = next.splice(index, 1);
+        next.splice(to, 0, row);
+        this._setPromptConcatOrder(next);
+    }
+
+    _renderPromptConcatOrderList() {
+        if (!this.promptOrderList) return;
+        const order = this._getPromptConcatOrder();
+        this.promptOrderList.replaceChildren();
+        order.forEach((key, index) => {
+            const row = document.createElement("div");
+            row.className = "cat-te-prompt-order-row";
+            row.dataset.key = key;
+            const label = document.createElement("span");
+            label.className = "cat-te-prompt-order-name";
+            label.textContent = this._promptPartLabel(key);
+            const actions = document.createElement("div");
+            actions.className = "cat-te-prompt-order-actions";
+            const up = document.createElement("button");
+            up.type = "button";
+            up.className = "cat-te-prompt-order-btn";
+            up.title = T("move_up_title");
+            up.disabled = index === 0;
+            up.innerHTML = iconHtml("arrowUp", 12);
+            up.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._movePromptConcatOrder(index, -1);
+            });
+            const down = document.createElement("button");
+            down.type = "button";
+            down.className = "cat-te-prompt-order-btn";
+            down.title = T("move_down_title");
+            down.disabled = index === order.length - 1;
+            down.innerHTML = iconHtml("arrowDown", 12);
+            down.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._movePromptConcatOrder(index, 1);
+            });
+            actions.append(up, down);
+            row.append(label, actions);
+            this.promptOrderList.appendChild(row);
+        });
     }
 
     _onClipRoleChange() {
@@ -13489,7 +14613,13 @@ export class CapTimelineEditorApp {
                         start_ms: startMs,
                         duration_ms: durationMs,
                         name: clip.name || T("voiceover_clip_default_name"),
+                        prompt: m.prompt ?? "",
+                        style_prompt: m.stylePrompt ?? "",
                     };
+                    const generated = this._clipGeneratedAudios(m)
+                        .map((row) => serializeGeneratedAudio(row))
+                        .filter(Boolean);
+                    if (generated.length) voRow.generated_audios = generated;
                     if (Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0) {
                         voRow.resource_start_sec = Number(m.resourceStartSec);
                     }
@@ -13593,15 +14723,7 @@ export class CapTimelineEditorApp {
                     row.name = clip.name || DEFAULT_CLIP_NAME;
                     row.prompt = m.prompt ?? "";
                     row.ai_prompt = m.aiPrompt ?? "";
-                    {
-                        const includes = normalizePromptIncludes(
-                            m.promptIncludes,
-                            { useGlobalPrompt: m.useGlobalPrompt },
-                        );
-                        row.prompt_includes = includes;
-                        row.use_global_prompt = syncUseGlobalFromIncludes(includes);
-                    }
-                    row.use_ai_prompt = m.useAiPrompt !== false;
+                    row.prompt_includes = normalizePromptIncludes(m.promptIncludes);
                     row.use_media_prompts = items.map((item) => item.useMediaPrompt !== false);
                     row.media_enabled = items.map((item) => item.enabled !== false);
                     row.head_extend_sec = Math.max(0, Math.round(Number(m.headExtendSec) || 0));
@@ -13691,6 +14813,7 @@ export class CapTimelineEditorApp {
                     key,
                     this._readSettingPrompt(key),
                 ])),
+                prompt_concat_order: this._getPromptConcatOrder(),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
                 current_time: Number(this._timeline?.currentTime ?? 0) || 0,
                 timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,

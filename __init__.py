@@ -514,8 +514,7 @@ def _register_routes():
             logging.exception("[CapricorncdTools] import_project_zip error")
             return web.json_response({"error": str(exc)}, status=500)
 
-    @routes.get("/audio_keyframe_timeline/output_videos")
-    async def api_list_output_videos(_request: web.Request) -> web.Response:
+    def _list_output_media(extensions: set[str], limit: int = 400) -> list[dict]:
         import folder_paths as _fp
         root = os.path.abspath(_fp.get_output_directory())
         rows = []
@@ -523,7 +522,7 @@ def _register_routes():
             for dirpath, dirnames, filenames in os.walk(root):
                 dirnames[:] = [d for d in dirnames if d not in {".git", "__pycache__", "temp"}]
                 for name in filenames:
-                    if os.path.splitext(name)[1].lower() not in VIDEO_EXTENSIONS:
+                    if os.path.splitext(name)[1].lower() not in extensions:
                         continue
                     full = os.path.join(dirpath, name)
                     try:
@@ -537,7 +536,16 @@ def _register_routes():
         except OSError:
             rows = []
         rows.sort(key=lambda item: item[0], reverse=True)
-        files = [{"file": rel, "mtime": mtime} for mtime, rel in rows[:400]]
+        return [{"file": rel, "mtime": mtime} for mtime, rel in rows[:limit]]
+
+    @routes.get("/audio_keyframe_timeline/output_videos")
+    async def api_list_output_videos(_request: web.Request) -> web.Response:
+        files = _list_output_media(VIDEO_EXTENSIONS)
+        return web.json_response({"files": files, "count": len(files)})
+
+    @routes.get("/audio_keyframe_timeline/output_audios")
+    async def api_list_output_audios(_request: web.Request) -> web.Response:
+        files = _list_output_media(AUDIO_EXTENSIONS)
         return web.json_response({"files": files, "count": len(files)})
 
     @routes.get("/audio_keyframe_timeline/vl_models")
