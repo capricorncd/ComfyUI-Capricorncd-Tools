@@ -1934,6 +1934,50 @@ body.cat-te-media-dnd-over-tl {
     opacity: 0.4;
 }
 
+.cat-te-font-select {
+    min-width: 140px;
+    width: 160px !important;
+}
+
+.cat-te-font-picker {
+    position: fixed;
+    z-index: 10060;
+    max-height: min(360px, 50vh);
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: #16162a;
+    border: 1px solid #3a3a5a;
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+    padding: 4px;
+}
+
+.cat-te-font-picker-item {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: #ececf5;
+    padding: 8px 10px;
+    font-size: 15px;
+    line-height: 1.35;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cat-te-font-picker-item:hover {
+    background: #2a2a48;
+}
+
+.cat-te-font-picker-item.is-active {
+    background: #34345a;
+}
+
 .cat-te-clip-setting-check {
     display: flex;
     align-items: center;
@@ -3190,6 +3234,10 @@ body.cat-te-media-dnd-over-tl {
     padding: 2px !important;
     height: 30px;
     cursor: pointer;
+}
+.cat-te-compose-field .cat-te-font-select {
+    width: 100% !important;
+    min-width: 0;
 }
 .cat-te-wm-image-row {
     display: flex;

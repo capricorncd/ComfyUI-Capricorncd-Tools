@@ -1835,6 +1835,85 @@ export class CapTimelineEditorApp {
         return this._systemFontsPromise;
     }
 
+    /** CSS font-family value safe for inline style. */
+    _cssFontFamily(family) {
+        const fam = String(family || "").trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        return fam ? `"${fam}", sans-serif` : "sans-serif";
+    }
+
+    _syncFontSelectPreview(select) {
+        if (!select) return;
+        select.style.fontFamily = this._cssFontFamily(select.value);
+    }
+
+    /** Custom dropdown so each row renders in that font (native <option> cannot). */
+    _bindFontSelectPreview(select) {
+        if (!select || select.dataset.fontPreviewBound) return;
+        select.dataset.fontPreviewBound = "1";
+        select.classList.add("cat-te-font-select");
+        select.addEventListener("mousedown", (e) => {
+            if (select.disabled) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this._openFontPicker(select);
+        });
+        select.addEventListener("keydown", (e) => {
+            if (select.disabled) return;
+            if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+                e.preventDefault();
+                this._openFontPicker(select);
+            }
+        });
+    }
+
+    _openFontPicker(select) {
+        if (!select) return;
+        this._removeCtxMenu();
+        const fonts = [...select.options]
+            .map((o) => ({
+                family: o.value,
+                label: o.textContent || o.value,
+            }))
+            .filter((f) => f.family);
+        if (!fonts.length) return;
+
+        const menu = document.createElement("div");
+        menu.className = "cat-te-font-picker";
+        const r = select.getBoundingClientRect();
+        menu.style.left = `${r.left}px`;
+        menu.style.top = `${r.bottom + 2}px`;
+        menu.style.minWidth = `${Math.max(r.width, 200)}px`;
+
+        for (const f of fonts) {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = "cat-te-font-picker-item";
+            if (f.family === select.value) row.classList.add("is-active");
+            row.style.fontFamily = this._cssFontFamily(f.family);
+            row.textContent = f.label;
+            row.title = f.family;
+            row.addEventListener("click", (e) => {
+                e.stopPropagation();
+                select.value = f.family;
+                this._syncFontSelectPreview(select);
+                select.dispatchEvent(new Event("change", { bubbles: true }));
+                this._removeCtxMenu();
+            });
+            menu.appendChild(row);
+        }
+
+        (this._overlay || document.body).appendChild(menu);
+        this._ignoreCtxCloseOnce = true;
+        const mr = menu.getBoundingClientRect();
+        if (mr.right > window.innerWidth) {
+            menu.style.left = `${Math.max(8, window.innerWidth - mr.width - 8)}px`;
+        }
+        if (mr.bottom > window.innerHeight) {
+            menu.style.top = `${Math.max(8, r.top - mr.height - 2)}px`;
+        }
+        menu.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
+    }
+
     /** Fill a <select> with system fonts; keep `preferred` if present (or as custom option). */
     _fillSystemFontSelect(select, preferred, { autoPickFirst = false } = {}) {
         if (!select) return;
@@ -1846,6 +1925,8 @@ export class CapTimelineEditorApp {
             opt.value = prev;
             opt.textContent = this._systemFonts ? T("font_not_found") : T("font_loading");
             select.appendChild(opt);
+            this._syncFontSelectPreview(select);
+            this._bindFontSelectPreview(select);
             return;
         }
         for (const f of fonts) {
@@ -1853,6 +1934,7 @@ export class CapTimelineEditorApp {
             opt.value = f.family;
             opt.dataset.path = f.path || "";
             opt.textContent = f.family;
+            opt.style.fontFamily = this._cssFontFamily(f.family);
             select.appendChild(opt);
         }
         if (prev && fonts.some((f) => f.family === prev)) {
@@ -1861,6 +1943,7 @@ export class CapTimelineEditorApp {
             const opt = document.createElement("option");
             opt.value = prev;
             opt.textContent = prev;
+            opt.style.fontFamily = this._cssFontFamily(prev);
             select.appendChild(opt);
             select.value = prev;
         } else if (autoPickFirst) {
@@ -1868,6 +1951,8 @@ export class CapTimelineEditorApp {
         } else {
             select.value = fonts[0].family;
         }
+        this._syncFontSelectPreview(select);
+        this._bindFontSelectPreview(select);
     }
 
     _populateFontSelect() {
@@ -1939,6 +2024,7 @@ export class CapTimelineEditorApp {
             const opt = this.wmFontFamily.selectedOptions?.[0];
             this._watermark.text.fontFamily = this.wmFontFamily.value;
             this._watermark.text.fontPath = opt?.dataset.path || "";
+            this._syncFontSelectPreview(this.wmFontFamily);
             this._scheduleComposePreview();
         });
         this.wmFontSize?.addEventListener("input", () => {
@@ -10396,9 +10482,12 @@ export class CapTimelineEditorApp {
     }
 
     _removeCtxMenu() {
+        let removed = false;
         const m = document.querySelector(".cat-te-ctx-menu");
-        if (m) { m.remove(); return true; }
-        return false;
+        if (m) { m.remove(); removed = true; }
+        const fp = document.querySelector(".cat-te-font-picker");
+        if (fp) { fp.remove(); removed = true; }
+        return removed;
     }
 
     _buildCtxMenu(items, x, y) {
@@ -12564,6 +12653,7 @@ export class CapTimelineEditorApp {
         }
         const m = this._ensureClipMeta(clip);
         this._readSubtitlePanelInto(m);
+        this._syncFontSelectPreview(this.subFontSelect);
         const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
         clip.name = label.slice(0, 40);
         const labelEl = clip.el?.querySelector?.(".tl-clip-label");
