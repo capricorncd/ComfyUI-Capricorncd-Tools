@@ -12,6 +12,7 @@ from comfy_api.latest._input_impl.video_types import VideoFromFile
 from comfy_extras.nodes_minimax_h3 import FPS as H3_FPS, MiniMaxH3ReferenceToVideo, align_frame_count
 
 from .cap_data_json_parser import CAP_DataJsonClipParser
+from .cap_timeline_project_io import _resolve_output_file
 from .timecode import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 
 MAX_REF_IMAGES = 9
@@ -132,6 +133,68 @@ def _context_latent_usable(latent, width: int, height: int) -> bool:
         return False
 
 
+def _prev_clip_output_video_path(data_json: str, index: int) -> str:
+    """Resolve previous runtime clip's CapTimelineEditor output_video under output/."""
+    try:
+        data = json.loads(data_json or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        return ""
+    clips = data.get("clips")
+    if not isinstance(clips, list) or index < 1 or index >= len(clips):
+        return ""
+    prev = clips[index - 1]
+    if not isinstance(prev, dict):
+        return ""
+    rel = str(prev.get("output_video") or "").strip().replace("\\", "/")
+    if not rel:
+        return ""
+    path = _resolve_output_file(rel)
+    if path:
+        return path
+    # Absolute / already-resolved path.
+    if os.path.isfile(rel):
+        return os.path.normpath(rel)
+    return ""
+
+
+def _load_motion_context_from_video(path: str, pin_frames: int):
+    """Load last pin_frames (at H3 fps) + matching audio from a decoded mp4.
+
+    Returns (frames_IMAGE, audio_or_None) or (None, None).
+    """
+    pin_frames = max(1, int(pin_frames or 0))
+    if not path or not os.path.isfile(path):
+        return None, None
+    # Slightly more than the pin so resampling still has enough samples.
+    tail_sec = max(0.5, pin_frames / float(H3_FPS) + 0.35)
+    try:
+        video = VideoFromFile(path, start_time=-tail_sec, duration=tail_sec)
+        components = video.get_components()
+    except Exception as exc:
+        _LOG.warning("Cap MiniMaxH3: failed reading context video %s (%s)", path, exc)
+        return None, None
+    frames = components.images
+    if frames is None or not isinstance(frames, torch.Tensor) or frames.ndim != 4 or frames.shape[0] < 1:
+        return None, None
+    src_fps = float(components.frame_rate) if components.frame_rate else float(H3_FPS)
+    frames = _frames_at_fps(frames, src_fps, float(H3_FPS))
+    if int(frames.shape[0]) < pin_frames:
+        _LOG.warning(
+            "Cap MiniMaxH3: context video has %d frames after resample, need %d; skipping.",
+            int(frames.shape[0]), pin_frames,
+        )
+        return None, None
+    frames = frames[-pin_frames:]
+    audio = components.audio
+    if not isinstance(audio, dict) or audio.get("waveform") is None:
+        audio = None
+    elif int(audio["waveform"].shape[-1]) < 1:
+        audio = None
+    return frames, audio
+
+
 class CAP_MiniMaxH3ReferenceToVideo:
     """Parse a Timeline Editor clip from data_json or clip_json and run MiniMax H3 Reference to Video."""
 
@@ -159,12 +222,13 @@ class CAP_MiniMaxH3ReferenceToVideo:
                 }),
                 "context_latent": ("LATENT", {
                     "tooltip": (
-                        "Previous clip's sampler output latent (from H3 Motion Context Load Latent). "
+                        "Previous clip's sampler output latent (preferred). "
                         "Used when the clip's h3_motion_context_length > 0. "
-                        "Pin length is snapped down to the H3 VAE grid (5/22/39/56…). "
-                        "First run / missing latent -> normal generation (trim_frames=0). "
-                        "Wire Decode -> H3 Motion Context Trim with trim_frames; "
-                        "Save Latent this run for the next clip."
+                        "If missing/unusable, falls back to the previous clip's "
+                        "output_video tail frames + audio (needs clip-specified "
+                        "filenames and that file already on disk). "
+                        "Pin length snaps down to the H3 VAE grid (5/22/39/56…). "
+                        "Wire Decode -> H3 Motion Context Trim with trim_frames."
                     ),
                 }),
             },
@@ -179,17 +243,18 @@ class CAP_MiniMaxH3ReferenceToVideo:
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "MiniMax H3 Reference to Video using a Timeline Editor clip from data_json+index, "
-        "or a self-contained clip_json (when set, data_json and index are ignored). "
+        "or a self-contained clip_json (when set, data_json and index are ignored for the "
+        "clip body; data_json+index are still used to find the previous clip's output_video). "
         "Clip images map to ref_image, videos to ref_video (+ soundtrack), "
         "and clip audios to ref_audio. Frame count and prompt come from the clip. "
         "Also outputs clip stills, video frames, mixed clip audio, and output_video "
         "(CapTimelineEditor-specified save path when enabled). "
         "total_frame_count uses clip_json/data_json fps (Timeline Editor fps), "
         "aligned to the H3 17k+5 frame grid — e.g. 7s at 60fps → ~430 frames. "
-        "Optional context_latent + clip h3_motion_context_length pins the previous "
-        "clip's tail (requires ComfyUI-H3-Motion-Context); trim_frames is for "
-        "H3 Motion Context Trim after decode. save_latent mirrors the clip flag "
-        "so the graph can gate H3 Motion Context Save Latent on the sampler output."
+        "When h3_motion_context_length > 0: prefer context_latent; else pin from the "
+        "previous clip's output_video tail (frames+audio). Requires "
+        "ComfyUI-H3-Motion-Context. trim_frames feeds H3 Motion Context Trim after decode. "
+        "save_latent mirrors the clip flag for gating Save Latent."
     )
 
     @classmethod
@@ -389,18 +454,34 @@ class CAP_MiniMaxH3ReferenceToVideo:
         pin = _project_frames_to_h3_pin(req_ctx, fps)
 
         use_context = False
+        context_frames = None
+        context_audio = None
+        use_latent_ctx = False
+        mc_cls = None
         if pin > 0:
-            # Need the pack whenever the clip asks for context (even if latent missing).
             mc_cls = _motion_context_cls()
             if context_latent is not None and _context_latent_usable(context_latent, width, height):
                 use_context = True
+                use_latent_ctx = True
             else:
-                _LOG.info(
-                    "Cap MiniMaxH3: h3_motion_context_length=%d (pin=%d) but no usable "
-                    "context_latent; generating without motion context.",
-                    req_ctx, pin,
-                )
-                mc_cls = None
+                prev_path = _prev_clip_output_video_path(data_json, int(index))
+                if prev_path:
+                    context_frames, context_audio = _load_motion_context_from_video(prev_path, pin)
+                    if context_frames is not None:
+                        use_context = True
+                        _LOG.info(
+                            "Cap MiniMaxH3: no usable context_latent; pinning from "
+                            "previous output_video %s (pin=%d).",
+                            prev_path, pin,
+                        )
+                if not use_context:
+                    _LOG.info(
+                        "Cap MiniMaxH3: h3_motion_context_length=%d (pin=%d) but no usable "
+                        "context_latent and no previous output_video tail; "
+                        "generating without motion context.",
+                        req_ctx, pin,
+                    )
+                    mc_cls = None
 
         length = align_frame_count(clip_frames + pin) if use_context else clip_frames
         extra_end_ms = max(0, int(round(length * 1000 / fps)) - clip_duration_ms)
@@ -502,11 +583,18 @@ class CAP_MiniMaxH3ReferenceToVideo:
 
         if use_context and mc_cls is not None:
             try:
+                apply_kw = {
+                    "audio_context_length": 0,
+                    "audio_vae": audio_vae,
+                }
+                if use_latent_ctx:
+                    apply_kw["context_latent"] = context_latent
+                else:
+                    apply_kw["context_frames"] = context_frames
+                    if context_audio is not None:
+                        apply_kw["context_audio"] = context_audio
                 positive, trim_frames = mc_cls().apply(
-                    positive, vae, latent, pin,
-                    audio_context_length=0,
-                    context_latent=context_latent,
-                    audio_vae=audio_vae,
+                    positive, vae, latent, pin, **apply_kw,
                 )
                 trim_frames = int(trim_frames or 0)
             except Exception as exc:
@@ -533,5 +621,165 @@ class CAP_MiniMaxH3ReferenceToVideo:
         )
 
 
-NODE_CLASS_MAPPINGS = {"CAP_MiniMaxH3ReferenceToVideo": CAP_MiniMaxH3ReferenceToVideo}
-NODE_DISPLAY_NAME_MAPPINGS = {"CAP_MiniMaxH3ReferenceToVideo": "MiniMaxH3"}
+_EMPTY_CONTEXT_LATENT = {"samples": None}
+
+
+class CAP_H3MotionContextLoadLatentOptional:
+    """Load H3 Motion Context latent only when `load` is True.
+
+    Wire Data Parser `load_context` into `load`. When False (or file missing)
+    returns an empty LATENT — Cap MiniMaxH3 then falls back to previous
+    output_video or skips pinning. No If false-branch needed.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "load": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "From Data Json Clip Parser load_context "
+                               "(h3_motion_context_length > 5). False skips "
+                               "disk load without error.",
+                }),
+                "latent_path": ("STRING", {
+                    "default": "h3_context",
+                    "tooltip": "Same as H3 Motion Context Load Latent: file "
+                               "or folder under ComfyUI output/.",
+                }),
+                "clip_index": ("INT", {
+                    "default": 0, "min": 0, "max": 9999,
+                    "tooltip": "Clip slot to continue FROM (previous clip). "
+                               "0 = newest file (not retry-safe).",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("context_latent",)
+    FUNCTION = "load_latent"
+    CATEGORY = "Capricorncd"
+    DESCRIPTION = (
+        "Optional H3 Motion Context Load Latent. Loads only when load=True; "
+        "otherwise (or if the file is missing) outputs an empty LATENT so Cap "
+        "MiniMaxH3 can fall back to the previous clip's output_video."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, load, latent_path, clip_index=0):
+        if not load:
+            return "skip"
+        try:
+            from nodes import NODE_CLASS_MAPPINGS as _ncm
+            loader = _ncm.get("MiniMaxH3MotionContextLoadLatent")
+            if loader is not None and hasattr(loader, "IS_CHANGED"):
+                return loader.IS_CHANGED(latent_path, clip_index)
+        except Exception:
+            pass
+        return f"{load}:{latent_path}:{clip_index}"
+
+    def load_latent(self, load, latent_path, clip_index=0):
+        if not load:
+            _LOG.info("Cap H3 optional load: load=False; skipped.")
+            return (_EMPTY_CONTEXT_LATENT,)
+        try:
+            from nodes import NODE_CLASS_MAPPINGS as _ncm
+            loader_cls = _ncm.get("MiniMaxH3MotionContextLoadLatent")
+            if loader_cls is None:
+                _LOG.warning(
+                    "Cap H3 optional load: MiniMaxH3MotionContextLoadLatent "
+                    "not installed; skipping."
+                )
+                return (_EMPTY_CONTEXT_LATENT,)
+            out = loader_cls().load(latent_path, clip_index)
+            if isinstance(out, tuple):
+                return out
+            return (out,)
+        except Exception as exc:
+            _LOG.info(
+                "Cap H3 optional load: skipped (%s); Cap MiniMaxH3 will try "
+                "output_video fallback or generate without context.",
+                exc,
+            )
+            return (_EMPTY_CONTEXT_LATENT,)
+
+
+class CAP_H3MotionContextSaveLatentOptional:
+    """Save H3 Motion Context latent only when `save` is True.
+
+    Wire Cap MiniMaxH3 / Data Parser `save_latent` into `save`. When False the
+    node is a no-op (returns empty path) so no If false-branch is needed.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "save": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "From Cap MiniMaxH3 or Data Json Clip Parser "
+                               "save_latent. False skips writing to disk.",
+                }),
+                "latent": ("LATENT", {
+                    "tooltip": "Sampler output latent (same as stock H3 "
+                               "Motion Context Save Latent).",
+                }),
+                "filename_prefix": ("STRING", {
+                    "default": "h3_context/clip",
+                    "tooltip": "Under ComfyUI output/. Same as stock Save Latent.",
+                }),
+                "clip_index": ("INT", {
+                    "default": 0, "min": 0, "max": 9999,
+                    "tooltip": "This clip's slot (overwrite on re-roll). "
+                               "0 = auto-numbered run files.",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "LATENT")
+    RETURN_NAMES = ("latent_path", "latent")
+    FUNCTION = "save"
+    OUTPUT_NODE = True
+    CATEGORY = "Capricorncd"
+    DESCRIPTION = (
+        "Optional H3 Motion Context Save Latent. Saves only when save=True; "
+        "otherwise returns an empty path and passes the latent through. "
+        "Requires ComfyUI-H3-Motion-Context."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, save, latent, filename_prefix, clip_index=0):
+        if not save:
+            return "skip"
+        return f"{save}:{filename_prefix}:{clip_index}"
+
+    def save(self, save, latent, filename_prefix, clip_index=0):
+        if not save:
+            _LOG.info("Cap H3 optional save: save=False; skipped.")
+            return ("", latent)
+        try:
+            from nodes import NODE_CLASS_MAPPINGS as _ncm
+            saver_cls = _ncm.get("MiniMaxH3MotionContextSaveLatent")
+            if saver_cls is None:
+                raise RuntimeError(
+                    "Cap H3 optional save: MiniMaxH3MotionContextSaveLatent "
+                    "not installed (need ComfyUI-H3-Motion-Context)."
+                )
+            out = saver_cls().save(latent, filename_prefix, clip_index)
+            path = out[0] if isinstance(out, tuple) else out
+            return (str(path or ""), latent)
+        except Exception as exc:
+            _LOG.warning("Cap H3 optional save failed: %s", exc)
+            raise
+
+
+NODE_CLASS_MAPPINGS = {
+    "CAP_MiniMaxH3ReferenceToVideo": CAP_MiniMaxH3ReferenceToVideo,
+    "CAP_H3MotionContextLoadLatentOptional": CAP_H3MotionContextLoadLatentOptional,
+    "CAP_H3MotionContextSaveLatentOptional": CAP_H3MotionContextSaveLatentOptional,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "CAP_MiniMaxH3ReferenceToVideo": "MiniMaxH3",
+    "CAP_H3MotionContextLoadLatentOptional": "H3 Motion Context Load Latent (Optional)",
+    "CAP_H3MotionContextSaveLatentOptional": "H3 Motion Context Save Latent (Optional)",
+}

@@ -32,7 +32,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING", "BOOLEAN")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING", "BOOLEAN", "BOOLEAN")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -52,6 +52,7 @@ class CAP_DataJsonClipParser:
         "second_sample",
         "output_video",
         "save_latent",
+        "load_context",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -63,8 +64,9 @@ class CAP_DataJsonClipParser:
         "images (all clip images in editor order as one IMAGE batch), "
         "clip_role, agent, ai_prompt, clip_json (self-contained clip with resolved "
         "image/video file paths and embedded materials), second_sample, output_video "
-        "(CapTimelineEditor-specified save path when enabled), and save_latent "
-        "(whether to run H3 Motion Context Save Latent for this clip)."
+        "(CapTimelineEditor-specified save path when enabled), save_latent "
+        "(whether to run H3 Motion Context Save Latent for this clip), and "
+        "load_context (true when clip h3_motion_context_length > 5)."
     )
 
     @classmethod
@@ -567,6 +569,11 @@ class CAP_DataJsonClipParser:
         generate_preview_video = bool(clip.get("generate_preview_video", False))
         second_sample = bool(clip.get("second_sample", False))
         save_latent = bool(clip.get("save_latent", False))
+        try:
+            h3_ctx_len = int(round(float(clip.get("h3_motion_context_length", 0) or 0)))
+        except (TypeError, ValueError):
+            h3_ctx_len = 0
+        load_context = h3_ctx_len > 5
 
         preview_start_ms = clip.get("preview_start_ms", None)
         preview_end_ms = clip.get("preview_end_ms", None)
@@ -634,6 +641,7 @@ class CAP_DataJsonClipParser:
             second_sample,
             output_video,
             save_latent,
+            load_context,
         )
 
 

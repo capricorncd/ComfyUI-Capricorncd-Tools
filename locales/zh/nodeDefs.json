@@ -214,6 +214,10 @@
       "save_latent": {
         "name": "Save Latent",
         "tooltip": "为 true 时，对本段 sampler 输出执行 H3 Motion Context Save Latent，供下一段使用。"
+      },
+      "load_context": {
+        "name": "加载 Context",
+        "tooltip": "当本片段 h3_motion_context_length > 5 时为 true，表示应通过 H3 Motion Context Load Latent 加载上一段 latent。"
       }
     }
   },
@@ -463,10 +467,14 @@
   "CAP_FormatJson": {
     "display_name": "格式化 JSON",
     "inputs": {
-      "json_text": { "name": "JSON 文本" }
+      "json_text": {
+        "name": "JSON 文本"
+      }
     },
     "outputs": {
-      "formatted_json": { "name": "格式化后的 JSON" }
+      "formatted_json": {
+        "name": "格式化后的 JSON"
+      }
     }
   },
   "CAP_SizeSettings": {
@@ -483,7 +491,10 @@
       },
       "orientation": {
         "name": "方向",
-        "options": { "纵向": "纵向", "横向": "横向" }
+        "options": {
+          "纵向": "纵向",
+          "横向": "横向"
+        }
       },
       "custom_width": {
         "name": "宽度"
@@ -615,8 +626,8 @@
         "name": "片段JSON"
       },
       "context_latent": {
-        "name": "上下文 Latent",
-        "tooltip": "上一段 sampler 输出的 latent。当片段 h3_motion_context_length > 0 时使用。钉住长度会向下对齐到 H3 VAE 网格（5/22/39/56…）。首次无 latent 时按普通生成。Decode 后将 trim_frames 接到 Trim；本段 Save Latent 供下一段 Load。需安装 ComfyUI-H3-Motion-Context。"
+        "name": "Context Latent",
+        "tooltip": "优先：上一段 sampler 的 AV latent。缺失时，若本段 h3_motion_context_length > 0，则从上一段 output_video 截取尾部画面+音频钉住。需开启 Clip 指定文件名且文件已生成。即使用 clip_json，也请保留 data_json 与 index 以便定位上一段。"
       }
     },
     "outputs": {
@@ -676,6 +687,53 @@
     "outputs": {
       "prompt": {
         "name": "提示词"
+      }
+    }
+  },
+  "CAP_H3MotionContextLoadLatentOptional": {
+    "display_name": "H3 Motion Context Load Latent（可选）",
+    "inputs": {
+      "load": {
+        "name": "加载",
+        "tooltip": "接数据解析的 load_context。为 false 时不读盘、不报错。"
+      },
+      "latent_path": {
+        "name": "Latent 路径"
+      },
+      "clip_index": {
+        "name": "Clip 索引"
+      }
+    },
+    "outputs": {
+      "context_latent": {
+        "name": "Context Latent",
+        "tooltip": "跳过时为空；接到 Cap MiniMaxH3 的 context_latent。"
+      }
+    }
+  },
+  "CAP_H3MotionContextSaveLatentOptional": {
+    "display_name": "H3 Motion Context Save Latent（可选）",
+    "inputs": {
+      "save": {
+        "name": "保存",
+        "tooltip": "接 MiniMaxH3 / 数据解析的 save_latent。为 false 时不写盘。"
+      },
+      "latent": {
+        "name": "Latent"
+      },
+      "filename_prefix": {
+        "name": "文件名前缀"
+      },
+      "clip_index": {
+        "name": "Clip 索引"
+      }
+    },
+    "outputs": {
+      "latent_path": {
+        "name": "Latent 路径"
+      },
+      "latent": {
+        "name": "Latent"
       }
     }
   }

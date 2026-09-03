@@ -221,6 +221,11 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "未找到 ffmpeg，请先安装并加入 PATH",
         "ja": "ffmpegが見つかりません。インストールしてPATHに追加してください",
     },
+    "video_has_no_audio": {
+        "en": "This video has no audio track",
+        "zh": "该视频没有音轨",
+        "ja": "この動画には音声トラックがありません",
+    },
     "no_clips_in_data_json": {
         "en": "No usable clips in data_json",
         "zh": "data_json 中没有可用 clips",

@@ -1762,6 +1762,9 @@ body.cat-te-media-dnd-over-tl {
     background: rgba(74, 158, 255, 0.95);
     box-shadow: 0 0 0 1px rgba(158, 197, 255, 0.8);
 }
+.cat-te-end-badge.cat-te-clip-preview-badge.is-sampling {
+    background: rgba(230, 126, 34, 0.9);
+}
 
 .cat-te-mute-badge {
     position: absolute;

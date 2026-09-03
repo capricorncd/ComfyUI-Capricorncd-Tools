@@ -2,327 +2,659 @@
   "CAP_RichPromptInput": {
     "display_name": "Rich Prompt Input",
     "inputs": {
-      "prompt": { "name": "Prompt" },
-      "add_blank_line_start": { "name": "Leading Blank Line" },
-      "add_blank_line_end": { "name": "Trailing Blank Line" }
+      "prompt": {
+        "name": "Prompt"
+      },
+      "add_blank_line_start": {
+        "name": "Leading Blank Line"
+      },
+      "add_blank_line_end": {
+        "name": "Trailing Blank Line"
+      }
     },
     "outputs": {
-      "prompt": { "name": "Prompt" }
+      "prompt": {
+        "name": "Prompt"
+      }
     }
   },
-
   "CAP_AudioTimeline": {
     "display_name": "Audio Timeline",
     "inputs": {
-      "audio":          { "name": "Audio" },
-      "start_time":     { "name": "Start Time" },
-      "end_time":       { "name": "End Time" },
-      "fps":            { "name": "FPS" },
-      "width":          { "name": "Width" },
-      "height":         { "name": "Height" },
-      "assets_dir":     { "name": "Assets Dir" },
-      "one_shot":       { "name": "One Shot" },
-      "global_prompt":  { "name": "Global Prompt" },
-      "clips_json":     { "name": "Clips JSON" },
-      "trim_offset":    { "name": "Trim Offset (s)" }
+      "audio": {
+        "name": "Audio"
+      },
+      "start_time": {
+        "name": "Start Time"
+      },
+      "end_time": {
+        "name": "End Time"
+      },
+      "fps": {
+        "name": "FPS"
+      },
+      "width": {
+        "name": "Width"
+      },
+      "height": {
+        "name": "Height"
+      },
+      "assets_dir": {
+        "name": "Assets Dir"
+      },
+      "one_shot": {
+        "name": "One Shot"
+      },
+      "global_prompt": {
+        "name": "Global Prompt"
+      },
+      "clips_json": {
+        "name": "Clips JSON"
+      },
+      "trim_offset": {
+        "name": "Trim Offset (s)"
+      }
     },
     "outputs": {
-      "trimmed_audio":     { "name": "Trimmed Audio" },
-      "fps":               { "name": "FPS" },
-      "one_shot":          { "name": "One Shot" },
-      "width":             { "name": "Width" },
-      "height":            { "name": "Height" },
-      "global_prompt":     { "name": "Global Prompt" },
-      "data_json":         { "name": "Data JSON" },
-      "clips_length":      { "name": "Clips Length" },
-      "total_frame_count": { "name": "Total Frames" },
-      "clips_audio":       { "name": "Clips Audio" }
+      "trimmed_audio": {
+        "name": "Trimmed Audio"
+      },
+      "fps": {
+        "name": "FPS"
+      },
+      "one_shot": {
+        "name": "One Shot"
+      },
+      "width": {
+        "name": "Width"
+      },
+      "height": {
+        "name": "Height"
+      },
+      "global_prompt": {
+        "name": "Global Prompt"
+      },
+      "data_json": {
+        "name": "Data JSON"
+      },
+      "clips_length": {
+        "name": "Clips Length"
+      },
+      "total_frame_count": {
+        "name": "Total Frames"
+      },
+      "clips_audio": {
+        "name": "Clips Audio"
+      }
     }
   },
-
   "CAP_TimelineEditor": {
     "display_name": "Timeline Editor",
     "inputs": {
-      "fps":            { "name": "FPS" },
-      "width":          { "name": "Width" },
-      "height":         { "name": "Height" },
-      "swap_wh":        { "name": "Swap Dimensions" },
-      "project_version":{ "name": "Project Version" },
-      "project_json":   { "name": "Project JSON" },
-      "trim_offset":    { "name": "Trim Offset (s)" }
+      "fps": {
+        "name": "FPS"
+      },
+      "width": {
+        "name": "Width"
+      },
+      "height": {
+        "name": "Height"
+      },
+      "swap_wh": {
+        "name": "Swap Dimensions"
+      },
+      "project_version": {
+        "name": "Project Version"
+      },
+      "project_json": {
+        "name": "Project JSON"
+      },
+      "trim_offset": {
+        "name": "Trim Offset (s)"
+      }
     },
     "outputs": {
-      "fps":               { "name": "FPS" },
-      "width":             { "name": "Width" },
-      "height":            { "name": "Height" },
-      "global_prompt":     { "name": "Global Prompt" },
-      "data_json":         { "name": "Data JSON" },
-      "clips_length":      { "name": "Clips Length" },
-      "total_frame_count": { "name": "Total Frames" },
-      "clips_audio":       { "name": "Clips Audio" },
-      "frame_seq_dir":     { "name": "Frame Seq Dir" }
+      "fps": {
+        "name": "FPS"
+      },
+      "width": {
+        "name": "Width"
+      },
+      "height": {
+        "name": "Height"
+      },
+      "global_prompt": {
+        "name": "Global Prompt"
+      },
+      "data_json": {
+        "name": "Data JSON"
+      },
+      "clips_length": {
+        "name": "Clips Length"
+      },
+      "total_frame_count": {
+        "name": "Total Frames"
+      },
+      "clips_audio": {
+        "name": "Clips Audio"
+      },
+      "frame_seq_dir": {
+        "name": "Frame Seq Dir"
+      }
     }
   },
-
   "CAP_DataJsonClipParser": {
     "display_name": "Data Json Clip Parser",
     "inputs": {
-      "data_json":    { "name": "Data JSON" },
-      "index":        { "name": "Index" },
-      "trim_offset":  { "name": "Trim Offset (s)" },
-      "seq_name_mode": { "name": "Seq Name Mode" }
+      "data_json": {
+        "name": "Data JSON"
+      },
+      "index": {
+        "name": "Index"
+      },
+      "trim_offset": {
+        "name": "Trim Offset (s)"
+      },
+      "seq_name_mode": {
+        "name": "Seq Name Mode"
+      }
     },
     "outputs": {
-      "audio":       { "name": "Audio" },
-      "frame_count": { "name": "Frame Count" },
-      "first_frame": { "name": "First Frame" },
-      "last_frame":  { "name": "Last Frame" },
-      "prompt":      { "name": "Prompt" },
-      "run_timestamp": { "name": "Run Timestamp" },
-      "generate_preview_video": { "name": "Generate Preview Video" },
-      "from_start":  { "name": "FROM Start" },
-      "from_preview_start": { "name": "FROM Preview Start" },
-      "seq_filename_prefix": { "name": "Seq Filename Prefix" },
-      "images": { "name": "Images" },
-      "clip_role": { "name": "Clip Role" },
-      "agent": { "name": "Agent" },
-      "ai_prompt": { "name": "AI Prompt" },
-      "clip_json": { "name": "Clip JSON" },
-      "second_sample": { "name": "Second Sample" },
-      "output_video": { "name": "Output Video" },
+      "audio": {
+        "name": "Audio"
+      },
+      "frame_count": {
+        "name": "Frame Count"
+      },
+      "first_frame": {
+        "name": "First Frame"
+      },
+      "last_frame": {
+        "name": "Last Frame"
+      },
+      "prompt": {
+        "name": "Prompt"
+      },
+      "run_timestamp": {
+        "name": "Run Timestamp"
+      },
+      "generate_preview_video": {
+        "name": "Generate Preview Video"
+      },
+      "from_start": {
+        "name": "FROM Start"
+      },
+      "from_preview_start": {
+        "name": "FROM Preview Start"
+      },
+      "seq_filename_prefix": {
+        "name": "Seq Filename Prefix"
+      },
+      "images": {
+        "name": "Images"
+      },
+      "clip_role": {
+        "name": "Clip Role"
+      },
+      "agent": {
+        "name": "Agent"
+      },
+      "ai_prompt": {
+        "name": "AI Prompt"
+      },
+      "clip_json": {
+        "name": "Clip JSON"
+      },
+      "second_sample": {
+        "name": "Second Sample"
+      },
+      "output_video": {
+        "name": "Output Video"
+      },
       "save_latent": {
         "name": "Save Latent",
         "tooltip": "When true, run H3 Motion Context Save Latent on this clip's sampler output for the next clip."
+      },
+      "load_context": {
+        "name": "Load Context",
+        "tooltip": "True when this clip h3_motion_context_length > 5 (pin previous clip via H3 Motion Context Load Latent)."
       }
     }
   },
-
   "CAP_ImageBatchCount": {
     "display_name": "Image Batch Count",
     "inputs": {
-      "images": { "name": "Images" }
-    },
-    "outputs": {
-      "count": { "name": "Count" }
-    }
-  },
-
-  "CAP_ImageFromBatchIndex": {
-    "display_name": "Image From Batch Index",
-    "inputs": {
-      "images": { "name": "Images" },
-      "index":  { "name": "Index" }
-    },
-    "outputs": {
-      "image":    { "name": "Image" },
-      "index":    { "name": "Index" },
-      "filename": { "name": "Filename" }
-    }
-  },
-
-  "CAP_SaveImages": {
-    "display_name": "Save Images",
-    "inputs": {
-      "images":          { "name": "Images" },
-      "filename_prefix": { "name": "Filename Prefix" },
-      "filename":        { "name": "Filename" },
-      "quality":         { "name": "Quality" },
-      "dpi":             { "name": "DPI" },
-      "save_as_zip":     { "name": "Save As Zip" },
-      "save_sidecar":    { "name": "Save JSON" },
-      "metadata":        { "name": "Metadata" }
-    },
-    "outputs": {
-      "image_dir":   { "name": "Image Dir" },
-      "image_paths": { "name": "Image Paths" }
-    }
-  },
-
-  "CAP_LoadImagesFromDir": {
-    "display_name": "Load Images From Dir",
-    "inputs": {
-      "directory":   { "name": "Directory" },
-      "deep":          { "name": "Include Subdirs" },
-      "start_index":   { "name": "Start Index" },
-      "max_count":     { "name": "Max Count" }
-    },
-    "outputs": {
-      "images":      { "name": "Images" },
-      "directory":   { "name": "Directory" },
-      "total_count": { "name": "Total Count" },
-      "count":       { "name": "Output Count" }
-    }
-  },
-
-  "CAP_SeqToVideo": {
-    "display_name": "Seq To Video",
-    "inputs": {
-      "frames_dir":        { "name": "Frames Dir" },
-      "fps":               { "name": "FPS" },
-      "filename_prefix":   { "name": "Filename Prefix" },
-      "images":            { "name": "Images" },
-      "audio":             { "name": "Audio" },
-      "image_paths":       { "name": "Image File List" },
-      "metadata":          { "name": "Metadata" },
-      "save_sidecar":      { "name": "Save JSON" }
-    },
-    "outputs": {
-      "filename": { "name": "Filename" }
-    }
-  },
-
-  "CAP_ComposeClipVideos": {
-    "display_name": "Compose Clip Videos",
-    "inputs": {
-      "data_json":         { "name": "Data JSON" },
-      "clips_dir":         { "name": "Clips Dir" },
-      "name_mode":         { "name": "Name Mode" },
-      "filename_prefix":   { "name": "Output Filename Prefix" },
-      "trim_extends":      { "name": "Trim Extends" },
-      "save_sidecar":      { "name": "Save JSON" }
-    },
-    "outputs": {
-      "filename": { "name": "Filename" }
-    }
-  },
-
-  "CAP_JoinStrings": {
-    "display_name": "Join Strings",
-    "inputs": {
-      "join_mode":      { "name": "Join Mode" },
-      "custom_sep":     { "name": "Custom Separator" },
-      "leading_blank":  { "name": "Leading Blank" },
-      "trailing_blank": { "name": "Trailing Blank" },
-      "prefix":         { "name": "Prefix" },
-      "suffix":         { "name": "Suffix" },
-      "texts":          { "name": "Texts" }
-    },
-    "outputs": {
-      "STRING": { "name": "String" }
-    }
-  },
-
-  "CAP_ShowAnything": {
-    "display_name": "Show Anything",
-    "inputs": {
-      "anything": { "name": "Anything" },
-      "format_json": { "name": "Format JSON" }
-    },
-    "outputs": {
-      "output": { "name": "Output" }
-    }
-  },
-
-  "CAP_ClearDirectory": {
-    "display_name": "Clear Directory",
-    "inputs": {
-      "directory":      { "name": "Directory" },
-      "delete_subdirs": { "name": "Include Subdirs" },
-      "delete_images":  { "name": "Delete Images" },
-      "delete_videos":  { "name": "Delete Videos" },
-      "delete_audio":   { "name": "Delete Audio" },
-      "to_recycle_bin": { "name": "To Recycle Bin" }
-    },
-    "outputs": {
-      "directory":     { "name": "Directory" },
-      "deleted_count": { "name": "Deleted Count" }
-    }
-  },
-
-  "CAP_FormatJson": {
-    "display_name": "Format JSON",
-    "inputs": {
-      "json_text": { "name": "JSON Text" }
-    },
-    "outputs": {
-      "formatted_json": { "name": "Formatted JSON" }
-    }
-  },
-
-  "CAP_SizeSettings": {
-    "display_name": "Size Settings",
-    "inputs": {
-      "size":          { "name": "Size" },
-      "scale":         { "name": "Scale" },
-      "lock_aspect":   { "name": "Lock Aspect" },
-      "orientation":   {
-        "name": "Orientation",
-        "options": { "纵向": "Portrait", "横向": "Landscape" }
-      },
-      "custom_width":  { "name": "Width" },
-      "custom_height": { "name": "Height" },
-      "fps":           { "name": "FPS" },
-      "count":         { "name": "Count" }
-    },
-    "outputs": {
-      "width":   { "name": "Width" },
-      "height":  { "name": "Height" },
-      "count":   { "name": "Count" },
-      "fps":     { "name": "FPS" },
-      "fps_int": { "name": "FPS Int" }
-    }
-  },
-
-  "CAP_PromptGroup": {
-    "display_name": "Prompt Group",
-    "inputs": {
-      "global_prompt":   { "name": "Global Prompt" },
-      "scene_prompt":    { "name": "Scene Prompt" },
-      "negative_prompt": { "name": "Negative Prompt" },
-      "output_scenes":   { "name": "Output Scenes" }
-    },
-    "outputs": {
-      "global_prompt":     { "name": "Global Prompt" },
-      "negative_prompt":   { "name": "Negative Prompt" },
-      "scene_prompt":      { "name": "Scene Prompt" },
-      "effective_length":  { "name": "Effective Length" }
-    }
-  },
-
-  "CAP_ClipPromptVL": {
-    "display_name": "Clip Prompt VL",
-    "inputs": {
-      "model": { "name": "Model" },
-      "output_language": { "name": "Output Language" },
-      "system_prompt": { "name": "Agent Prompt" },
-      "skill": { "name": "Prompt Skill" },
-      "user_prompt": { "name": "User Prompt" },
-      "keep_model_loaded": { "name": "Keep Model Loaded" },
-      "max_new_tokens": { "name": "Max Tokens" },
-      "images": { "name": "Images" },
-      "video": { "name": "Video Frames" }
-    },
-    "outputs": {
-      "prompt": { "name": "Prompt" }
-    }
-  },
-
-  "CAP_MiniMaxH3ReferenceToVideo": {
-    "display_name": "MiniMaxH3",
-    "inputs": {
-      "clip": { "name": "CLIP" },
-      "vae": { "name": "VAE" },
-      "audio_vae": { "name": "Audio VAE" },
-      "width": { "name": "Width" },
-      "height": { "name": "Height" },
-      "ref_image_size": { "name": "Ref Image Size" },
-      "data_json": { "name": "Data JSON" },
-      "index": { "name": "Index" },
-      "clip_json": { "name": "Clip JSON" },
-      "context_latent": {
-        "name": "Context Latent",
-        "tooltip": "Previous clip sampler latent. Used when clip h3_motion_context_length > 0. Pin snaps to H3 VAE grid (5/22/39/56…). Missing latent → normal generate. Wire Trim with trim_frames; Save Latent for the next clip. Requires ComfyUI-H3-Motion-Context."
+      "images": {
+        "name": "Images"
       }
     },
     "outputs": {
-      "positive": { "name": "Positive" },
-      "latent": { "name": "Latent" },
-      "total_frame_count": { "name": "Total Frames" },
-      "prompt": { "name": "Prompt" },
-      "images": { "name": "Images" },
-      "videos": { "name": "Videos" },
-      "audio": { "name": "Audio" },
-      "output_video": { "name": "Output Video" },
+      "count": {
+        "name": "Count"
+      }
+    }
+  },
+  "CAP_ImageFromBatchIndex": {
+    "display_name": "Image From Batch Index",
+    "inputs": {
+      "images": {
+        "name": "Images"
+      },
+      "index": {
+        "name": "Index"
+      }
+    },
+    "outputs": {
+      "image": {
+        "name": "Image"
+      },
+      "index": {
+        "name": "Index"
+      },
+      "filename": {
+        "name": "Filename"
+      }
+    }
+  },
+  "CAP_SaveImages": {
+    "display_name": "Save Images",
+    "inputs": {
+      "images": {
+        "name": "Images"
+      },
+      "filename_prefix": {
+        "name": "Filename Prefix"
+      },
+      "filename": {
+        "name": "Filename"
+      },
+      "quality": {
+        "name": "Quality"
+      },
+      "dpi": {
+        "name": "DPI"
+      },
+      "save_as_zip": {
+        "name": "Save As Zip"
+      },
+      "save_sidecar": {
+        "name": "Save JSON"
+      },
+      "metadata": {
+        "name": "Metadata"
+      }
+    },
+    "outputs": {
+      "image_dir": {
+        "name": "Image Dir"
+      },
+      "image_paths": {
+        "name": "Image Paths"
+      }
+    }
+  },
+  "CAP_LoadImagesFromDir": {
+    "display_name": "Load Images From Dir",
+    "inputs": {
+      "directory": {
+        "name": "Directory"
+      },
+      "deep": {
+        "name": "Include Subdirs"
+      },
+      "start_index": {
+        "name": "Start Index"
+      },
+      "max_count": {
+        "name": "Max Count"
+      }
+    },
+    "outputs": {
+      "images": {
+        "name": "Images"
+      },
+      "directory": {
+        "name": "Directory"
+      },
+      "total_count": {
+        "name": "Total Count"
+      },
+      "count": {
+        "name": "Output Count"
+      }
+    }
+  },
+  "CAP_SeqToVideo": {
+    "display_name": "Seq To Video",
+    "inputs": {
+      "frames_dir": {
+        "name": "Frames Dir"
+      },
+      "fps": {
+        "name": "FPS"
+      },
+      "filename_prefix": {
+        "name": "Filename Prefix"
+      },
+      "images": {
+        "name": "Images"
+      },
+      "audio": {
+        "name": "Audio"
+      },
+      "image_paths": {
+        "name": "Image File List"
+      },
+      "metadata": {
+        "name": "Metadata"
+      },
+      "save_sidecar": {
+        "name": "Save JSON"
+      }
+    },
+    "outputs": {
+      "filename": {
+        "name": "Filename"
+      }
+    }
+  },
+  "CAP_ComposeClipVideos": {
+    "display_name": "Compose Clip Videos",
+    "inputs": {
+      "data_json": {
+        "name": "Data JSON"
+      },
+      "clips_dir": {
+        "name": "Clips Dir"
+      },
+      "name_mode": {
+        "name": "Name Mode"
+      },
+      "filename_prefix": {
+        "name": "Output Filename Prefix"
+      },
+      "trim_extends": {
+        "name": "Trim Extends"
+      },
+      "save_sidecar": {
+        "name": "Save JSON"
+      }
+    },
+    "outputs": {
+      "filename": {
+        "name": "Filename"
+      }
+    }
+  },
+  "CAP_JoinStrings": {
+    "display_name": "Join Strings",
+    "inputs": {
+      "join_mode": {
+        "name": "Join Mode"
+      },
+      "custom_sep": {
+        "name": "Custom Separator"
+      },
+      "leading_blank": {
+        "name": "Leading Blank"
+      },
+      "trailing_blank": {
+        "name": "Trailing Blank"
+      },
+      "prefix": {
+        "name": "Prefix"
+      },
+      "suffix": {
+        "name": "Suffix"
+      },
+      "texts": {
+        "name": "Texts"
+      }
+    },
+    "outputs": {
+      "STRING": {
+        "name": "String"
+      }
+    }
+  },
+  "CAP_ShowAnything": {
+    "display_name": "Show Anything",
+    "inputs": {
+      "anything": {
+        "name": "Anything"
+      },
+      "format_json": {
+        "name": "Format JSON"
+      }
+    },
+    "outputs": {
+      "output": {
+        "name": "Output"
+      }
+    }
+  },
+  "CAP_ClearDirectory": {
+    "display_name": "Clear Directory",
+    "inputs": {
+      "directory": {
+        "name": "Directory"
+      },
+      "delete_subdirs": {
+        "name": "Include Subdirs"
+      },
+      "delete_images": {
+        "name": "Delete Images"
+      },
+      "delete_videos": {
+        "name": "Delete Videos"
+      },
+      "delete_audio": {
+        "name": "Delete Audio"
+      },
+      "to_recycle_bin": {
+        "name": "To Recycle Bin"
+      }
+    },
+    "outputs": {
+      "directory": {
+        "name": "Directory"
+      },
+      "deleted_count": {
+        "name": "Deleted Count"
+      }
+    }
+  },
+  "CAP_FormatJson": {
+    "display_name": "Format JSON",
+    "inputs": {
+      "json_text": {
+        "name": "JSON Text"
+      }
+    },
+    "outputs": {
+      "formatted_json": {
+        "name": "Formatted JSON"
+      }
+    }
+  },
+  "CAP_SizeSettings": {
+    "display_name": "Size Settings",
+    "inputs": {
+      "size": {
+        "name": "Size"
+      },
+      "scale": {
+        "name": "Scale"
+      },
+      "lock_aspect": {
+        "name": "Lock Aspect"
+      },
+      "orientation": {
+        "name": "Orientation",
+        "options": {
+          "纵向": "Portrait",
+          "横向": "Landscape"
+        }
+      },
+      "custom_width": {
+        "name": "Width"
+      },
+      "custom_height": {
+        "name": "Height"
+      },
+      "fps": {
+        "name": "FPS"
+      },
+      "count": {
+        "name": "Count"
+      }
+    },
+    "outputs": {
+      "width": {
+        "name": "Width"
+      },
+      "height": {
+        "name": "Height"
+      },
+      "count": {
+        "name": "Count"
+      },
+      "fps": {
+        "name": "FPS"
+      },
+      "fps_int": {
+        "name": "FPS Int"
+      }
+    }
+  },
+  "CAP_PromptGroup": {
+    "display_name": "Prompt Group",
+    "inputs": {
+      "global_prompt": {
+        "name": "Global Prompt"
+      },
+      "scene_prompt": {
+        "name": "Scene Prompt"
+      },
+      "negative_prompt": {
+        "name": "Negative Prompt"
+      },
+      "output_scenes": {
+        "name": "Output Scenes"
+      }
+    },
+    "outputs": {
+      "global_prompt": {
+        "name": "Global Prompt"
+      },
+      "negative_prompt": {
+        "name": "Negative Prompt"
+      },
+      "scene_prompt": {
+        "name": "Scene Prompt"
+      },
+      "effective_length": {
+        "name": "Effective Length"
+      }
+    }
+  },
+  "CAP_ClipPromptVL": {
+    "display_name": "Clip Prompt VL",
+    "inputs": {
+      "model": {
+        "name": "Model"
+      },
+      "output_language": {
+        "name": "Output Language"
+      },
+      "system_prompt": {
+        "name": "Agent Prompt"
+      },
+      "skill": {
+        "name": "Prompt Skill"
+      },
+      "user_prompt": {
+        "name": "User Prompt"
+      },
+      "keep_model_loaded": {
+        "name": "Keep Model Loaded"
+      },
+      "max_new_tokens": {
+        "name": "Max Tokens"
+      },
+      "images": {
+        "name": "Images"
+      },
+      "video": {
+        "name": "Video Frames"
+      }
+    },
+    "outputs": {
+      "prompt": {
+        "name": "Prompt"
+      }
+    }
+  },
+  "CAP_MiniMaxH3ReferenceToVideo": {
+    "display_name": "MiniMaxH3",
+    "inputs": {
+      "clip": {
+        "name": "CLIP"
+      },
+      "vae": {
+        "name": "VAE"
+      },
+      "audio_vae": {
+        "name": "Audio VAE"
+      },
+      "width": {
+        "name": "Width"
+      },
+      "height": {
+        "name": "Height"
+      },
+      "ref_image_size": {
+        "name": "Ref Image Size"
+      },
+      "data_json": {
+        "name": "Data JSON"
+      },
+      "index": {
+        "name": "Index"
+      },
+      "clip_json": {
+        "name": "Clip JSON"
+      },
+      "context_latent": {
+        "name": "Context Latent",
+        "tooltip": "Preferred: previous sampler AV latent. If missing, Cap MiniMaxH3 pins from the previous clip output_video tail (frames+audio) when h3_motion_context_length > 0. Needs clip-specified filenames and that file on disk. Keep data_json+index wired even with clip_json."
+      }
+    },
+    "outputs": {
+      "positive": {
+        "name": "Positive"
+      },
+      "latent": {
+        "name": "Latent"
+      },
+      "total_frame_count": {
+        "name": "Total Frames"
+      },
+      "prompt": {
+        "name": "Prompt"
+      },
+      "images": {
+        "name": "Images"
+      },
+      "videos": {
+        "name": "Videos"
+      },
+      "audio": {
+        "name": "Audio"
+      },
+      "output_video": {
+        "name": "Output Video"
+      },
       "trim_frames": {
         "name": "Trim Frames",
         "tooltip": "Pinned head frames to remove after decode (wire to H3 Motion Context Trim)."
@@ -333,18 +665,76 @@
       }
     }
   },
-
   "CAP_PromptFromBatch": {
     "display_name": "Prompt From Batch",
     "inputs": {
-      "global_prompt": { "name": "Global Prompt" },
-      "scene_prompt":  { "name": "Scene Prompt" },
-      "batch_index":   { "name": "Batch Index" },
-      "batch_length":  { "name": "Batch Length" },
-      "merge_global":  { "name": "Merge Global" }
+      "global_prompt": {
+        "name": "Global Prompt"
+      },
+      "scene_prompt": {
+        "name": "Scene Prompt"
+      },
+      "batch_index": {
+        "name": "Batch Index"
+      },
+      "batch_length": {
+        "name": "Batch Length"
+      },
+      "merge_global": {
+        "name": "Merge Global"
+      }
     },
     "outputs": {
-      "prompt": { "name": "Prompt" }
+      "prompt": {
+        "name": "Prompt"
+      }
+    }
+  },
+  "CAP_H3MotionContextLoadLatentOptional": {
+    "display_name": "H3 Motion Context Load Latent (Optional)",
+    "inputs": {
+      "load": {
+        "name": "Load",
+        "tooltip": "From Data Parser load_context. False skips load without error."
+      },
+      "latent_path": {
+        "name": "Latent Path"
+      },
+      "clip_index": {
+        "name": "Clip Index"
+      }
+    },
+    "outputs": {
+      "context_latent": {
+        "name": "Context Latent",
+        "tooltip": "Empty when skipped; wire to Cap MiniMaxH3 context_latent."
+      }
+    }
+  },
+  "CAP_H3MotionContextSaveLatentOptional": {
+    "display_name": "H3 Motion Context Save Latent (Optional)",
+    "inputs": {
+      "save": {
+        "name": "Save",
+        "tooltip": "From MiniMaxH3 / Data Parser save_latent. False skips disk write."
+      },
+      "latent": {
+        "name": "Latent"
+      },
+      "filename_prefix": {
+        "name": "Filename Prefix"
+      },
+      "clip_index": {
+        "name": "Clip Index"
+      }
+    },
+    "outputs": {
+      "latent_path": {
+        "name": "Latent Path"
+      },
+      "latent": {
+        "name": "Latent"
+      }
     }
   }
 }
