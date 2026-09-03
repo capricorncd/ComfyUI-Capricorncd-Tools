@@ -14,6 +14,11 @@ import folder_paths
 
 from .cap_i18n import get_last_known_lang, t as _t
 from .cap_save_sidecar import build_sidecar_payload, sidecar_path, write_sidecar
+from .cap_te_notify import (
+    EVENT_VIDEO_SAVED,
+    clip_id_from_output_video,
+    notify_timeline,
+)
 
 log = logging.getLogger(__name__)
 
@@ -176,7 +181,10 @@ class CAP_SeqToVideo:
             "required": {
                 "frames_dir": ("STRING", {"default": ""}),
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.1}),
-                "filename_prefix": ("STRING", {"default": "STV"}),
+                "filename_prefix": ("STRING", {
+                    "default": "STV",
+                    "tooltip": "Output name under ComfyUI output/. Prefix mode: dir/STV → dir/STV_{timestamp}.mp4. Exact path: dir/xxxx/xxx.mp4 → save as that file (overwrite).",
+                }),
             },
             "optional": {
                 "images": ("IMAGE",),
@@ -225,10 +233,25 @@ class CAP_SeqToVideo:
         filename_prefix may include subfolders (e.g. ``video/nsfw-audio/STV``).
         Those must go into ``subfolder``, not ``filename``, otherwise the
         browser preview URL cannot resolve the file.
+
+        If the prefix ends with ``.mp4`` (e.g. ``dir/xxxx/xxx.mp4``), save to
+        that exact relative path under output/ without appending a timestamp.
         """
         output_dir = os.path.abspath(folder_paths.get_output_directory())
+        prefix = str(filename_prefix or "").strip().replace("\\", "/").lstrip("/") or "STV"
+        # Exact relative path — keep the given name, do not append a stamp.
+        if prefix.lower().endswith(".mp4"):
+            subfolder = os.path.dirname(prefix)
+            output_filename = os.path.basename(prefix) or "video.mp4"
+            full_output_folder = os.path.abspath(os.path.join(output_dir, subfolder)) if subfolder else output_dir
+            if os.path.commonpath((output_dir, full_output_folder)) != output_dir:
+                raise ValueError("Saving video outside the output folder is not allowed.")
+            os.makedirs(full_output_folder, exist_ok=True)
+            output_path = os.path.join(full_output_folder, output_filename)
+            subfolder_ui = subfolder.replace("\\", "/") if subfolder else ""
+            return output_filename, subfolder_ui, output_path
+
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = str(filename_prefix).strip().replace("\\", "/") or "STV"
         subfolder = os.path.dirname(prefix)
         base = os.path.basename(prefix) or "STV"
         output_filename = f"{base}_{stamp}.mp4"
@@ -372,6 +395,15 @@ class CAP_SeqToVideo:
                 ),
             )
         rel_name = f"{subfolder}/{output_filename}" if subfolder else output_filename
+        rel_name = str(rel_name).replace("\\", "/")
+        clip_id = clip_id_from_output_video(rel_name)
+        notify_timeline(
+            EVENT_VIDEO_SAVED,
+            clip_id=clip_id or None,
+            file=rel_name,
+            filename=output_filename,
+            subfolder=subfolder or "",
+        )
 
         return {
             "ui": {

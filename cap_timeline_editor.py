@@ -10,10 +10,49 @@ import re
 
 import torch
 
-from .cap_audio_timeline import CAP_AudioTimeline, _clip_use_global_prompt, _strip_comment_lines
+from .cap_audio_timeline import (
+    CAP_AudioTimeline,
+    _clip_prompt_includes,
+    _normalize_prompt_concat_order,
+    _strip_comment_lines,
+)
 from .cap_clip_prompt_vl import clear_clip_prompt_vl
 from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_project, resolve_clip_media
 from .timecode import resolve_media_path
+
+
+def _safe_filename_part(value, fallback: str = "Untitled") -> str:
+    text = str(value or "").strip()
+    out = []
+    for ch in text:
+        if ch in '<>:"/\\|?*' or ord(ch) < 32:
+            out.append("_")
+        else:
+            out.append(ch)
+    text = "".join(out).rstrip(". ").strip() or fallback
+    return text[:80] or fallback
+
+
+def _h3_motion_context_length(clip: dict) -> int:
+    try:
+        return max(0, int(round(float((clip or {}).get("h3_motion_context_length", 0) or 0))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_subtitle_track(track_type) -> bool:
+    t = str(track_type or "").lower()
+    return t in ("text", "subtitle")
+
+
+def _is_subtitle_clip(clip: dict, track_type: str = "") -> bool:
+    """Subtitle clips are editor preview-only and must not enter data_json."""
+    if _is_subtitle_track(track_type):
+        return True
+    if not isinstance(clip, dict):
+        return False
+    ct = str(clip.get("type") or "").lower()
+    return ct in ("text", "subtitle")
 
 
 def _use_media_prompt(flags, index: int) -> bool:
@@ -585,6 +624,21 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         width = max(1, int(width))
         height = max(1, int(height))
         global_prompt = _strip_comment_lines(settings.get("global_prompt") or "")
+        style_prompt = _strip_comment_lines(settings.get("style_prompt") or "")
+        non_diegetic_music = _strip_comment_lines(settings.get("non_diegetic_music") or "")
+        negative_prompt = _strip_comment_lines(settings.get("negative_prompt") or "")
+        prompt_concat_order = _normalize_prompt_concat_order(settings.get("prompt_concat_order"))
+        use_clip_video_name = settings.get("use_clip_specified_video_filename", True) is not False
+        gen_video_stamp = str(settings.get("gen_video_stamp") or "").strip()
+        if not gen_video_stamp:
+            gen_video_stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        project_name_safe = _safe_filename_part(project.get("name"), "Untitled")
+        only_raw = settings.get("runtime_only_clip_ids")
+        only_ids = None
+        if isinstance(only_raw, list) and only_raw:
+            only_ids = {str(x).strip() for x in only_raw if str(x).strip()}
+            if not only_ids:
+                only_ids = None
 
         visual_clips: list[tuple[dict, dict, int]] = []
         audio_clips: list[dict] = []
@@ -595,6 +649,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         for z_index, track in enumerate(tracks, start=1):
             track_type = str(track.get("type") or "visual").lower()
             is_audio_track = track_type == "audio"
+            # Subtitle / text tracks are editor preview overlays only.
+            if _is_subtitle_track(track_type):
+                continue
             if is_audio_track:
                 if not self._audio_track_active(track):
                     continue
@@ -602,6 +659,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             for clip in track.get("clips", []):
                 if not isinstance(clip, dict) or clip.get("enabled", True) is False:
+                    continue
+                if _is_subtitle_clip(clip, track_type):
                     continue
                 clip_type = str(clip.get("type") or ("audio" if is_audio_track else "image")).lower()
                 is_audio_clip = clip_type == "audio" or is_audio_track
@@ -613,6 +672,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                     audio_clips.append(clip)
                 else:
                     if clip.get("visible", True) is False:
+                        continue
+                    if only_ids is not None and str(clip.get("id") or "") not in only_ids:
                         continue
                     visual_clips.append((track, clip, z_index))
                     media_rows = resolve_clip_media(project, clip)
@@ -632,8 +693,18 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         runtime_clips = []
         materials = []
         seen_materials = set()
-        for index, (clip, start, end, z_index) in enumerate(segments, start=1):
+        for clip, start, end, z_index in segments:
+            if _is_subtitle_clip(clip):
+                continue
             entries = _clip_visual_entries(project, clip)
+            has_media = any(e.get("enabled") and e.get("id") for e in entries)
+            has_prompt = bool(
+                _strip_comment_lines(clip.get("ai_prompt") or "").strip()
+                or _strip_comment_lines(clip.get("prompt") or "").strip()
+            )
+            # Empty package clips are timeline placeholders (preview only).
+            if not has_media and not has_prompt:
+                continue
             for entry in entries:
                 if not entry.get("enabled"):
                     continue
@@ -656,9 +727,11 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 ext_end = ext_start + 1
             clip_role, clip_role_custom = _clip_role_fields(clip)
             agent, agent_custom = _clip_agent_fields(clip)
-            runtime_clips.append({
-                "id": f"runtime_{index:04d}",
-                "source_clip_id": str(clip.get("id", "")),
+            source_clip_id = str(clip.get("id", ""))
+            prompt_includes = _clip_prompt_includes(clip)
+            runtime_row = {
+                "id": f"runtime_{len(runtime_clips) + 1:04d}",
+                "source_clip_id": source_clip_id,
                 "clip_type": str(clip.get("type") or "image"),
                 "clip_role": clip_role,
                 "clip_role_custom": clip_role_custom,
@@ -672,16 +745,23 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "tail_extend_sec": tail_sec,
                 "generate_preview_video": bool(clip.get("generate_preview_video", False)),
                 "second_sample": bool(clip.get("second_sample", False)),
+                "h3_motion_context_length": _h3_motion_context_length(clip),
+                "save_latent": bool(clip.get("save_latent", False)),
                 "images": _clip_image_refs(entries),
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
                 "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),
-                "use_global_prompt": _clip_use_global_prompt(clip),
-                "use_ai_prompt": clip.get("use_ai_prompt", True) is not False,
+                "prompt_includes": prompt_includes,
                 "z_index": z_index,
                 "audios": self._audio_slices(
                     ext_start, ext_end, audio_clips, resolve_media, project, materials, seen_materials,
                 ),
-            })
+            }
+            if use_clip_video_name:
+                clip_id_safe = _safe_filename_part(source_clip_id, "clip")
+                runtime_row["output_video"] = (
+                    f"CapTimelineEditor/{project_name_safe}/{gen_video_stamp}_{clip_id_safe}.mp4"
+                )
+            runtime_clips.append(runtime_row)
 
         total_frame_count = max(1, sum(
             int(round((clip["end_ms"] - clip["start_ms"]) * fps / 1000))
@@ -701,6 +781,10 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "width": width,
             "height": height,
             "global_prompt": global_prompt,
+            "style_prompt": style_prompt,
+            "non_diegetic_music": non_diegetic_music,
+            "negative_prompt": negative_prompt,
+            "prompt_concat_order": prompt_concat_order,
             "total_frame_count": total_frame_count,
             "run_timestamp": run_timestamp,
             "materials": materials,

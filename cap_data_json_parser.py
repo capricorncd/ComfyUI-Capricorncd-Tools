@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from .cap_te_notify import EVENT_CLIP_RUNNING, notify_timeline
 from .timecode import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, resolve_media_path
 
 
@@ -31,7 +32,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING", "BOOLEAN", "BOOLEAN")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -49,6 +50,9 @@ class CAP_DataJsonClipParser:
         "ai_prompt",
         "clip_json",
         "second_sample",
+        "output_video",
+        "save_latent",
+        "load_context",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -59,7 +63,10 @@ class CAP_DataJsonClipParser:
         "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
         "images (all clip images in editor order as one IMAGE batch), "
         "clip_role, agent, ai_prompt, clip_json (self-contained clip with resolved "
-        "image/video file paths and embedded materials), and second_sample."
+        "image/video file paths and embedded materials), second_sample, output_video "
+        "(CapTimelineEditor-specified save path when enabled), save_latent "
+        "(whether to run H3 Motion Context Save Latent for this clip), and "
+        "load_context (true when clip h3_motion_context_length > 5)."
     )
 
     @classmethod
@@ -147,15 +154,15 @@ class CAP_DataJsonClipParser:
         aligned = [self._match_image_size(frame, height, width) for frame in frames]
         return torch.cat(aligned, dim=0)
 
+    def _clip_prompt_includes(self, clip: dict) -> list[str]:
+        from .cap_audio_timeline import _clip_prompt_includes
+        return _clip_prompt_includes(clip)
+
     def _clip_use_global_prompt(self, clip: dict) -> bool:
-        if "use_global_prompt" in clip:
-            return bool(clip["use_global_prompt"])
-        return not bool(self._strip_comment_lines(clip.get("prompt") or "").strip())
+        return "global" in self._clip_prompt_includes(clip)
 
     def _clip_use_ai_prompt(self, clip: dict) -> bool:
-        if isinstance(clip, dict) and "use_ai_prompt" in clip:
-            return bool(clip["use_ai_prompt"])
-        return True
+        return "ai" in self._clip_prompt_includes(clip)
 
     def _strip_comment_lines(self, text: str) -> str:
         return "\n".join(
@@ -163,18 +170,30 @@ class CAP_DataJsonClipParser:
             if not line.startswith("#")
         )
 
-    def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None) -> str:
-        if self._clip_use_ai_prompt(clip):
-            ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
-            if ai_prompt:
-                return ai_prompt
-        clip_prompt = self._strip_comment_lines(clip.get("prompt") or "")
-        global_prompt = self._strip_comment_lines(global_prompt)
+    def _normalize_prompt_concat_order(self, raw) -> list[str]:
+        from .cap_audio_timeline import _normalize_prompt_concat_order
+        return _normalize_prompt_concat_order(raw)
+
+    def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None,
+                        *, style_prompt: str = "", non_diegetic_music: str = "",
+                        negative_prompt: str = "", prompt_concat_order=None) -> str:
+        includes = set(self._clip_prompt_includes(clip))
+        order = self._normalize_prompt_concat_order(prompt_concat_order)
+        texts = {
+            "global": self._strip_comment_lines(global_prompt).strip(),
+            "style": self._strip_comment_lines(style_prompt).strip(),
+            "clip": self._strip_comment_lines(clip.get("prompt") or "").strip(),
+            "ai": self._strip_comment_lines(clip.get("ai_prompt") or "").strip(),
+            "non_diegetic_music": self._strip_comment_lines(non_diegetic_music).strip(),
+            "negative": self._strip_comment_lines(negative_prompt).strip(),
+        }
         parts = []
-        if self._clip_use_global_prompt(clip) and global_prompt.strip():
-            parts.append(global_prompt.strip())
-        if clip_prompt.strip():
-            parts.append(clip_prompt.strip())
+        for key in order:
+            if key not in includes:
+                continue
+            text = texts.get(key) or ""
+            if text:
+                parts.append(text)
         materials = materials if isinstance(materials, dict) else {}
         for ref in self._ref_list(clip.get("images")):
             if not self._ref_use_media_prompt(ref):
@@ -186,7 +205,7 @@ class CAP_DataJsonClipParser:
                 text = self._strip_comment_lines(row.get("prompt") or "").strip()
             if text:
                 parts.append(text)
-        return "\n".join(part for part in parts if part)
+        return "\n\n".join(part for part in parts if part)
 
     def _ref_id(self, ref) -> str:
         if isinstance(ref, dict):
@@ -421,9 +440,20 @@ class CAP_DataJsonClipParser:
                 entry[key] = copy.deepcopy(mat[key])
         return entry
 
-    def _build_clip_json(self, clip: dict, materials: dict) -> str:
+    def _build_clip_json(self, clip: dict, materials: dict, *, fps: float = 24.0,
+                         global_prompt: str = "", style_prompt: str = "",
+                         non_diegetic_music: str = "", negative_prompt: str = "",
+                         prompt_concat_order=None) -> str:
         """Self-contained clip JSON: images/videos with absolute paths + embedded materials."""
         out = copy.deepcopy(clip) if isinstance(clip, dict) else {}
+        # Carry project-level fields so clip_json alone is enough for MiniMaxH3 etc.
+        out["fps"] = float(fps)
+        out["global_prompt"] = global_prompt if isinstance(global_prompt, str) else ""
+        out["style_prompt"] = style_prompt if isinstance(style_prompt, str) else ""
+        out["non_diegetic_music"] = non_diegetic_music if isinstance(non_diegetic_music, str) else ""
+        out["negative_prompt"] = negative_prompt if isinstance(negative_prompt, str) else ""
+        out["prompt_concat_order"] = self._normalize_prompt_concat_order(prompt_concat_order)
+        out["prompt_includes"] = self._clip_prompt_includes(out)
         images = []
         videos = []
         used_ids: list[str] = []
@@ -502,6 +532,10 @@ class CAP_DataJsonClipParser:
 
         fps = max(1.0, float(data.get("fps", 24.0)))
         global_prompt = data.get("global_prompt", "")
+        style_prompt = data.get("style_prompt", "")
+        non_diegetic_music = data.get("non_diegetic_music", "")
+        negative_prompt = data.get("negative_prompt", "")
+        prompt_concat_order = data.get("prompt_concat_order")
         run_timestamp = str(data.get("run_timestamp") or data.get("run_prefix") or "").strip()
         materials = self._materials_by_id(data)
 
@@ -509,12 +543,37 @@ class CAP_DataJsonClipParser:
         if not isinstance(clip, dict):
             clip = {}
 
+        # Prefer source_clip_id (timeline id); runtime rows use id=runtime_XXXX.
+        timeline_clip_id = str(
+            clip.get("source_clip_id") or clip.get("id") or ""
+        ).strip()
+        if timeline_clip_id:
+            notify_timeline(
+                EVENT_CLIP_RUNNING,
+                clip_id=timeline_clip_id,
+                index=int(index),
+            )
+
         clip_start_ms = int(clip.get("start_ms", 0) or 0)
         clip_end_ms = int(clip.get("end_ms", clip_start_ms) or clip_start_ms)
         frame_count = self._frame_count(clip_start_ms, clip_end_ms, fps)
-        prompt = self._compose_prompt(clip, global_prompt, materials)
+        prompt = self._compose_prompt(
+            clip,
+            global_prompt,
+            materials,
+            style_prompt=style_prompt,
+            non_diegetic_music=non_diegetic_music,
+            negative_prompt=negative_prompt,
+            prompt_concat_order=prompt_concat_order,
+        )
         generate_preview_video = bool(clip.get("generate_preview_video", False))
         second_sample = bool(clip.get("second_sample", False))
+        save_latent = bool(clip.get("save_latent", False))
+        try:
+            h3_ctx_len = int(round(float(clip.get("h3_motion_context_length", 0) or 0)))
+        except (TypeError, ValueError):
+            h3_ctx_len = 0
+        load_context = h3_ctx_len > 5
 
         preview_start_ms = clip.get("preview_start_ms", None)
         preview_end_ms = clip.get("preview_end_ms", None)
@@ -551,7 +610,17 @@ class CAP_DataJsonClipParser:
         clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
         agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
         ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
-        clip_json = self._build_clip_json(clip, materials)
+        clip_json = self._build_clip_json(
+            clip,
+            materials,
+            fps=fps,
+            global_prompt=global_prompt,
+            style_prompt=style_prompt,
+            non_diegetic_music=non_diegetic_music,
+            negative_prompt=negative_prompt,
+            prompt_concat_order=prompt_concat_order,
+        )
+        output_video = str(clip.get("output_video") or "").strip().replace("\\", "/")
 
         return (
             audio_out,
@@ -570,6 +639,9 @@ class CAP_DataJsonClipParser:
             ai_prompt,
             clip_json,
             second_sample,
+            output_video,
+            save_latent,
+            load_context,
         )
 
 

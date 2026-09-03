@@ -145,31 +145,281 @@
 
 ## `project_json`（可编辑）
 
-大致结构：
+编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 2`**（整数，与 Python 包版本 `project_version` 无关）。加载时若遇到旧版（schema 1 或顶层 `resources`），会自动迁移到 schema 2。
+
+通常由全屏编辑器读写，一般无需手改；下表与示例对应编辑器 `_buildProject()` 的写出格式。
+
+### 顶层
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `project_version` | string | 包版本字符串（如 `"0.x.y"`），写入时刷新 |
+| `schema_version` | int | 文档形状版本，现为 `2` |
+| `name` | string | 项目名称 |
+| `media` | array | 素材目录（schema 2）；clip 用 `media_ids` 引用其中的 `id` |
+| `settings` | object | 工程设置（含全局提示词、水印、时间轴视图状态等） |
+| `tracks` | array | 轨道列表（按 `order` 排列） |
+
+旧字段 `resources` 仅作迁移输入，写出时不再保留。
+
+### `media[]`（素材目录）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 素材 ID（如 `md_…`）；clip 的 `media_ids` 指向它 |
+| `kind` | string | `image` / `video` / `audio` |
+| `file` | string | 相对 ComfyUI `input/` 的路径（多为 `capricorncd-timeline/…`） |
+| `location` | string | 通常为 `"input"` |
+| `name` | string | 显示名 |
+| `prompt` | string | 素材级提示词 |
+| `media_type` | string | 资产类型标签（如 character / scene / prop / other，可空） |
+| `tags` | string[] | 标签 |
+| `stars` | int? | 1–5；未评分时省略 |
+
+### `settings`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `fps` / `width` / `height` | number | 与节点标量同步的缓存副本 |
+| `global_prompt` | string | 全局提示词 |
+| `timeline_zoom` | number | 时间轴缩放 |
+| `current_time` | number | 播放头时间（秒） |
+| `timeline_scroll_left` / `timeline_scroll_top` | number | 时间轴滚动位置 |
+| `watermark` | object | 合成视频水印（见下） |
+| `use_clip_specified_video_filename` | bool | 默认 `true`。开启时运行写入 `output_video` 并按该路径关联生成视频；关闭走旧的自动识别 |
+| `runtime_only_clip_ids` | string[]? | 仅单 clip「运行」时临时写入；正常保存通常无无 |
+| `gen_video_stamp` | string? | 仅「运行」排队时临时写入（`yyyyMMdd-HHmmss`），供 `output_video` 与前端期望路径对齐 |
+
+#### `settings.watermark`
+
+| 字段 | 说明 |
+|------|------|
+| `mode` | 派生值：`none` / `text` / `image`（有未禁用图片时优先 image） |
+| `text.content` | 水印文字 |
+| `text.fontFamily` / `text.fontPath` | 字体名 / 本机字体路径 |
+| `text.fontSize` | 字号（约 6–400） |
+| `text.letterSpacing` | 字间距（约 -50–200，默认 0） |
+| `text.color` | `#RRGGBB` |
+| `image.file` | 水印图片路径；空表示无 |
+| `image.disabled` | `true` 时忽略图片，回退到文字 |
+| `opacity` | 0–100 |
+| `scale` | 10–300（百分比） |
+| `position` | `top-left` / `top-center` / `top-right` / `bottom-left` / `bottom-center` / `bottom-right` / `center` / `random-interval` / `random-fixed` |
+| `margin` | `{ top, right, bottom, left, locked }` 边距（像素）；`locked` 为四边联动 |
+
+### `tracks[]`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 轨道 ID |
+| `type` | string | `visual` / `audio` / `subtitle` |
+| `role` | string | `main` / `overlay` / `audio` / `subtitle` 等 |
+| `name` | string | 显示名 |
+| `order` | int | 自上而下顺序（0 起） |
+| `enabled` | bool | 禁用则不进运行时 `data_json` |
+| `visible` | bool | 不可见则跳过 |
+| `muted` | bool | 音频轨 / 带音视频相关 |
+| `locked` | bool | 锁定 |
+| `color` | string | 轨道颜色 |
+| `clips` | array | 片段列表 |
+
+**字幕轨**（`type: "subtitle"`）仅用于节目预览叠字；节点执行时整轨跳过，不进入 `data_json`。
+
+### `tracks[].clips[]`
+
+时间一律用毫秒，且按工程 `fps` 对齐到帧网格：`start_ms` / `duration_ms`。
+
+#### 视觉 clip（`type: "clip"`）
+
+| 字段 | 说明 |
+|------|------|
+| `id` | clip ID |
+| `enabled` / `visible` | 启用 / 可见 |
+| `start_ms` / `duration_ms` | 时间轴区间 |
+| `media_ids` | 有序引用 `media[].id`（多参考图 / 首尾帧 / 视频等） |
+| `source` | 可选；视频等含 `in_ms` / `out_ms` / `duration_ms`（源内裁剪） |
+| `name` | 标题 |
+| `prompt` / `ai_prompt` | 关键帧提示词 / AI 优化结果 |
+| `use_global_prompt` / `use_ai_prompt` | 是否拼全局提示词 / 是否用 AI 结果 |
+| `use_media_prompts` | 与 `media_ids` 等长的 bool[]：是否用对应素材 prompt |
+| `media_enabled` | 与 `media_ids` 等长的 bool[]：该槽位是否启用 |
+| `head_extend_sec` / `tail_extend_sec` | 首 / 尾扩展秒数 |
+| `generate_preview_video` / `second_sample` | 生成相关开关 |
+| `clip_role` | `multi_ref` / `first_last` / `t2v` / `video_ref` / `video_edit` / `other` |
+| `clip_role_custom` | `clip_role === "other"` 时的自定义文案 |
+| `agent` | `MiniMaxH3` / `LTX` / `Bernini` / `Wan` / `other` |
+| `agent_custom` | `agent === "other"` 时的自定义名 |
+| `generated_videos` | 可选；绑定的生成 MP4：`{ id, file, enabled, muted, note }`（`file` 相对 `output/`） |
+| `preview_mode` | 可选；`"generated"` 表示默认看生成视频预览 |
+| `has_audio` / `muted` | 视频素材带音时可选 |
+
+#### 音频 clip（`type: "audio"`）
+
+| 字段 | 说明 |
+|------|------|
+| `media_ids` | 通常一个音频素材 ID |
+| `source` | `in_ms` / `out_ms` / `duration_ms` |
+| `muted` | 是否静音 |
+| `fade_in_ms` / `fade_out_ms` | 可选；大于 0 时写出 |
+
+#### 字幕 clip（`type: "subtitle"`）
+
+| 字段 | 说明 |
+|------|------|
+| `text` | 字幕正文 |
+| `font_family` / `font_path` | 字体 |
+| `font_size` | 字号 |
+| `letter_spacing` | 字间距（默认 0） |
+| `color` | `#RRGGBB` |
+| `bold` / `italic` | 粗体 / 斜体 |
+| `opacity` | 0–1 |
+| `stroke_enabled` / `stroke_color` / `stroke_width` | 描边 |
+| `shadow_enabled` / `shadow_color` / `shadow_blur` / `shadow_offset_x` / `shadow_offset_y` | 阴影 |
+| `align` | `left` / `center` / `right` |
+| `v_align` | `top` / `middle` / `bottom` |
+| `offset_x` / `offset_y` | 相对画布的百分比偏移 |
+
+### 示例（schema 2，字段示意）
 
 ```json
 {
-  "project_version": "x.y.z",
-  "schema_version": "x.y.z",
+  "project_version": "0.x.y",
+  "schema_version": 2,
   "name": "未命名项目",
-  "resources": [],
+  "media": [
+    {
+      "id": "md_abc123",
+      "kind": "image",
+      "file": "capricorncd-timeline/shot01.png",
+      "location": "input",
+      "name": "shot01.png",
+      "prompt": "",
+      "media_type": "character",
+      "tags": [],
+      "stars": 3
+    }
+  ],
   "settings": {
-    "global_prompt": ""
+    "fps": 24,
+    "width": 1344,
+    "height": 768,
+    "global_prompt": "cinematic lighting",
+    "timeline_zoom": 1.2,
+    "current_time": 0,
+    "timeline_scroll_left": 0,
+    "timeline_scroll_top": 0,
+    "watermark": {
+      "mode": "text",
+      "text": {
+        "content": "Cap",
+        "fontFamily": "Microsoft YaHei",
+        "fontPath": "C:/Windows/Fonts/msyh.ttc",
+        "fontSize": 32,
+        "letterSpacing": 2,
+        "color": "#ffffff"
+      },
+      "image": { "file": "", "disabled": false },
+      "opacity": 80,
+      "scale": 100,
+      "position": "bottom-right",
+      "margin": { "top": 24, "right": 24, "bottom": 24, "left": 24, "locked": true }
+    }
   },
   "tracks": [
     {
-      "id": "track_1",
+      "id": "track_main",
       "type": "visual",
+      "role": "main",
+      "name": "主轨",
       "order": 0,
       "enabled": true,
       "visible": true,
-      "clips": []
+      "muted": false,
+      "locked": false,
+      "color": "#4ea1ff",
+      "clips": [
+        {
+          "id": "clip_1",
+          "type": "clip",
+          "enabled": true,
+          "visible": true,
+          "start_ms": 0,
+          "duration_ms": 5000,
+          "media_ids": ["md_abc123"],
+          "name": "Clip",
+          "prompt": "close up",
+          "ai_prompt": "",
+          "use_global_prompt": true,
+          "use_ai_prompt": true,
+          "use_media_prompts": [true],
+          "media_enabled": [true],
+          "head_extend_sec": 0,
+          "tail_extend_sec": 0,
+          "generate_preview_video": false,
+          "second_sample": false,
+          "clip_role": "multi_ref",
+          "clip_role_custom": "",
+          "agent": "MiniMaxH3",
+          "agent_custom": "",
+          "generated_videos": [
+            {
+              "id": "gv_1",
+              "file": "MiniMax_H3/clip_1.mp4",
+              "enabled": true,
+              "muted": false,
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "track_sub",
+      "type": "subtitle",
+      "role": "subtitle",
+      "name": "字幕",
+      "order": 1,
+      "enabled": true,
+      "visible": true,
+      "muted": false,
+      "locked": false,
+      "color": "#ff9e4a",
+      "clips": [
+        {
+          "id": "sub_1",
+          "type": "subtitle",
+          "enabled": true,
+          "visible": true,
+          "start_ms": 0,
+          "duration_ms": 3000,
+          "name": "你好",
+          "text": "你好",
+          "font_family": "Microsoft YaHei",
+          "font_path": "",
+          "font_size": 48,
+          "letter_spacing": 0,
+          "color": "#ffffff",
+          "bold": false,
+          "italic": false,
+          "opacity": 1,
+          "stroke_enabled": true,
+          "stroke_color": "#000000",
+          "stroke_width": 3,
+          "shadow_enabled": true,
+          "shadow_color": "#000000",
+          "shadow_blur": 4,
+          "shadow_offset_x": 2,
+          "shadow_offset_y": 2,
+          "align": "center",
+          "v_align": "bottom",
+          "offset_x": 0,
+          "offset_y": 8
+        }
+      ]
     }
   ]
 }
 ```
-
-通常由全屏编辑器维护，无需手改。
 
 ---
 
@@ -220,6 +470,7 @@
 | `start_image` / `end_image` | 经 ComfyUI `input` 解析后的绝对路径 |
 | `audios[]` | 与该视觉区间重叠的音/视频切片；由 [Data Json Clip Parser](data-json-clip-parser.md) 混音。非音频轨无素材的时间段内，音频不导出 |
 | `z_index` | 构建片段时使用的轨道叠放顺序 |
+| `output_video` | 可选；开启「生成视频使用Clip指定文件名」时写入，形如 `CapTimelineEditor/[项目名]/yyyyMMdd-HHmmss_[clip_id].mp4`（相对 `output/`） |
 
 没有顶层 `audio_path`（该字段仅属于 Audio Timeline）。
 

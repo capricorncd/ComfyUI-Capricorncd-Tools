@@ -111,7 +111,7 @@ Adds extra seconds to the clip's audio end time. This is useful when the generat
 | `clip_role` | STRING | Clip role for agents |
 | `agent` | STRING | Agent id |
 | `ai_prompt` | STRING | Clip AI prompt text |
-| `clip_json` | STRING | Self-contained clip JSON: `images` / `videos` with absolute `file` paths, resolved `audios`, and embedded `materials` |
+| `clip_json` | STRING | Self-contained clip JSON: `fps`, `global_prompt`, `images` / `videos` with absolute `file` paths, resolved `audios`, and embedded `materials` |
 
 `clip_json` is meant for nodes such as [MiniMaxH3](minimax-h3.md) that should not need the full `data_json` + `index`.
 

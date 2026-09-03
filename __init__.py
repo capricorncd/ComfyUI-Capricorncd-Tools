@@ -61,6 +61,10 @@ from .cap_minimax_h3 import (
     NODE_CLASS_MAPPINGS as _CMH_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CMH_NAMES,
 )
+from .cap_h3_fast_audio_refine import (
+    NODE_CLASS_MAPPINGS as _H3FAR_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _H3FAR_NAMES,
+)
 from .cap_clip_prompt_vl import (
     NODE_CLASS_MAPPINGS as _CVP_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CVP_NAMES,
@@ -96,6 +100,7 @@ NODE_CLASS_MAPPINGS = {
     "CAP_ShowAnything": CAP_ShowAnything,
     **_CPG_CLASS,
     **_CMH_CLASS,
+    **_H3FAR_CLASS,
     **_CVP_CLASS,
     "CAP_JoinStrings": CAP_JoinStrings,
 }
@@ -116,11 +121,47 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CAP_ShowAnything": "Show Anything",
     **_CPG_NAMES,
     **_CMH_NAMES,
+    **_H3FAR_NAMES,
     **_CVP_NAMES,
     "CAP_JoinStrings": "Join Strings",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
+
+def _soft_patch_h3_motion_context_load_latent():
+    """Make stock H3 Motion Context Load Latent soft-fail when files are missing.
+
+    Existing graphs keep MiniMaxH3MotionContextLoadLatent wired; without a prior
+    Save Latent the node raises FileNotFoundError and aborts the run. Cap
+    MiniMaxH3 already treats an empty context_latent as 'no pin' / video fallback,
+    so returning {samples: None} is safe and removes the need for If false-branches.
+    """
+    try:
+        from nodes import NODE_CLASS_MAPPINGS as _ncm
+    except Exception:
+        return
+    cls = _ncm.get("MiniMaxH3MotionContextLoadLatent")
+    if cls is None or getattr(cls, "_cap_soft_load_patched", False):
+        return
+    _orig = cls.load
+
+    def load(self, latent_path, clip_index=0):
+        try:
+            return _orig(self, latent_path, clip_index)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            logging.info(
+                "[CapricorncdTools] H3 Motion Context Load Latent soft-skip: %s",
+                exc,
+            )
+            return ({"samples": None},)
+
+    cls.load = load
+    cls._cap_soft_load_patched = True
+    logging.info(
+        "[CapricorncdTools] Patched MiniMaxH3MotionContextLoadLatent for soft-skip "
+        "when latent files are missing."
+    )
 
 
 def _safe_join(base: str, rel: str) -> str | None:
@@ -144,6 +185,8 @@ def _register_routes():
     except Exception:
         logging.warning("[CapricorncdTools] PromptServer not available; API routes skipped.")
         return
+
+    _soft_patch_h3_motion_context_load_latent()
 
     @routes.get("/audio_keyframe_timeline/uploaded")
     async def api_list_uploaded(request: web.Request) -> web.Response:
@@ -462,6 +505,60 @@ def _register_routes():
             logging.exception("[CapricorncdTools] compose_video error")
             return web.json_response({"error": str(exc)}, status=500)
 
+    @routes.post("/audio_keyframe_timeline/extract_audio")
+    async def api_extract_audio(request: web.Request) -> web.Response:
+        import folder_paths as _fp
+        from .cap_compose_clip_videos import extract_audio_file
+        lang = resolve_lang(request)
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                return web.json_response({"error": t("invalid_payload", lang)}, status=400)
+            rel = str(payload.get("file") or "").strip().replace("\\", "/").lstrip("/")
+            if not rel:
+                return web.json_response({"error": t("missing_filename", lang)}, status=400)
+            location = str(payload.get("location") or "output").strip().lower()
+            if location not in ("output", "input"):
+                location = "output"
+            base = _fp.get_output_directory() if location == "output" else _fp.get_input_directory()
+            src = _safe_join(base, rel)
+            if not src or not os.path.isfile(src):
+                return web.json_response({"error": t("file_not_found", lang)}, status=404)
+
+            trim_in = float(payload.get("trim_in_sec") or 0.0)
+            duration = payload.get("duration_sec")
+            duration_sec = None
+            if duration is not None and str(duration).strip() != "":
+                try:
+                    duration_sec = float(duration)
+                except (TypeError, ValueError):
+                    duration_sec = None
+
+            stem = os.path.splitext(os.path.basename(rel))[0] or "extracted"
+            out_name = f"{stem}_audio.wav"
+            dest_dir = os.path.join(_fp.get_input_directory(), "capricorncd-timeline", "audios")
+            dest = _unique_destination(dest_dir, out_name)
+            extract_audio_file(
+                src,
+                dest,
+                trim_in_sec=trim_in,
+                duration_sec=duration_sec,
+            )
+            result_name = os.path.relpath(dest, _fp.get_input_directory()).replace(os.sep, "/")
+            return web.json_response({
+                "ok": True,
+                "file": result_name,
+                "kind": "audio",
+                "location": "input",
+            })
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        except RuntimeError as exc:
+            return web.json_response({"error": str(exc)}, status=500)
+        except Exception as exc:
+            logging.exception("[CapricorncdTools] extract_audio error")
+            return web.json_response({"error": str(exc)}, status=500)
+
     @routes.post("/audio_keyframe_timeline/reveal_output")
     async def api_reveal_output(request: web.Request) -> web.Response:
         import folder_paths as _fp
@@ -514,8 +611,7 @@ def _register_routes():
             logging.exception("[CapricorncdTools] import_project_zip error")
             return web.json_response({"error": str(exc)}, status=500)
 
-    @routes.get("/audio_keyframe_timeline/output_videos")
-    async def api_list_output_videos(_request: web.Request) -> web.Response:
+    def _list_output_media(extensions: set[str], limit: int = 400) -> list[dict]:
         import folder_paths as _fp
         root = os.path.abspath(_fp.get_output_directory())
         rows = []
@@ -523,7 +619,7 @@ def _register_routes():
             for dirpath, dirnames, filenames in os.walk(root):
                 dirnames[:] = [d for d in dirnames if d not in {".git", "__pycache__", "temp"}]
                 for name in filenames:
-                    if os.path.splitext(name)[1].lower() not in VIDEO_EXTENSIONS:
+                    if os.path.splitext(name)[1].lower() not in extensions:
                         continue
                     full = os.path.join(dirpath, name)
                     try:
@@ -537,7 +633,16 @@ def _register_routes():
         except OSError:
             rows = []
         rows.sort(key=lambda item: item[0], reverse=True)
-        files = [{"file": rel, "mtime": mtime} for mtime, rel in rows[:400]]
+        return [{"file": rel, "mtime": mtime} for mtime, rel in rows[:limit]]
+
+    @routes.get("/audio_keyframe_timeline/output_videos")
+    async def api_list_output_videos(_request: web.Request) -> web.Response:
+        files = _list_output_media(VIDEO_EXTENSIONS)
+        return web.json_response({"files": files, "count": len(files)})
+
+    @routes.get("/audio_keyframe_timeline/output_audios")
+    async def api_list_output_audios(_request: web.Request) -> web.Response:
+        files = _list_output_media(AUDIO_EXTENSIONS)
         return web.json_response({"files": files, "count": len(files)})
 
     @routes.get("/audio_keyframe_timeline/vl_models")
@@ -743,3 +848,10 @@ try:
     _register_routes()
 except Exception:
     logging.exception("[CapricorncdTools] API route registration failed")
+
+# Nodes finish registering after package import; patch again so it sticks even if
+# PromptServer was not ready during the first attempt.
+try:
+    _soft_patch_h3_motion_context_load_latent()
+except Exception:
+    logging.exception("[CapricorncdTools] H3 Load Latent soft-patch failed")

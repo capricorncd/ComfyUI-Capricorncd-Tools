@@ -9,8 +9,9 @@ import { t as T } from "./i18n/timeline_editor.js";
 
 /** Right-side empty margin as a fraction of the timeline viewport width. */
 const TIMELINE_RIGHT_VIEWPORT_FRAC = 0.3;
-/** All tracks (main/overlay/audio) share one row height. */
+/** Media / audio / voiceover tracks share full row height; subtitle tracks are half. */
 const TRACK_HEIGHT = 78;
+const SUBTITLE_TRACK_HEIGHT = TRACK_HEIGHT / 2;
 const STORAGE_MEDIA_STARS = "capricorncd.timeline.media_stars";
 const MEDIA_STARS_BUCKET = "comfyui-input";
 const STORAGE_AUTOSAVE_INTERVAL = "cat-te-autosave-interval-sec";
@@ -26,6 +27,10 @@ const STORAGE_PROGRAM_PANEL_H = "cat-te-program-panel-h";
 const MIN_PROGRAM_PANEL_H = 120;
 const DEFAULT_PROGRAM_PANEL_H = 240;
 const MAX_PROGRAM_PANEL_FRAC = 0.7;
+const STORAGE_GEN_EDIT_PREVIEW_H = "cat-te-gen-edit-preview-h";
+const MIN_GEN_EDIT_PREVIEW_H = 120;
+const DEFAULT_GEN_EDIT_PREVIEW_H = 280;
+const MIN_GEN_EDIT_TL_H = 160;
 const STORAGE_MEDIA_LIST_VIEW = "cat-te-media-list-view";
 /** Per-node timeline viewport (scroll) when project settings lack it. */
 const STORAGE_AI_PROMPT_MODEL = "cat-te-ai-prompt-model";
@@ -39,6 +44,24 @@ const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
 /** Must match CAP_TimelineEditor INPUT_TYPES defaults. */
 const PY_SCALAR_DEFAULTS = { fps: 24, width: 1344, height: 768, global_prompt: "" };
+/** Project-level prompt text fields stored under settings. */
+const SETTING_PROMPT_KEYS = [
+    "global_prompt",
+    "style_prompt",
+    "non_diegetic_music",
+    "negative_prompt",
+];
+/**
+ * Prompt parts for clip.prompt_includes and settings.prompt_concat_order.
+ * Order of this constant is the default concatenation order.
+ */
+const PROMPT_PART_KEYS = ["global", "style", "clip", "ai", "non_diegetic_music", "negative"];
+const PROMPT_PART_KEY_SET = new Set(PROMPT_PART_KEYS);
+const DEFAULT_PROMPT_CONCAT_ORDER = [...PROMPT_PART_KEYS];
+const DEFAULT_PROMPT_INCLUDES = ["global", "clip", "ai"];
+/** @deprecated alias — prefer PROMPT_PART_KEYS */
+const PROMPT_INCLUDE_KEYS = PROMPT_PART_KEYS;
+const PROMPT_INCLUDE_KEY_SET = PROMPT_PART_KEY_SET;
 const WATERMARK_FIXED_POSITIONS = [
     "top-left", "top-center", "top-right",
     "bottom-left", "bottom-center", "bottom-right",
@@ -94,7 +117,7 @@ const MEDIA_ASSET_TYPES = [
 const DEFAULT_CLIP_NAME = "Clip";
 const LEGACY_CLIP_NAMES = new Set(["Clip", "Package", "clip", "package"]);
 /** Integer project document shape. Independent of the Python package version. */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function parseSchemaVersion(project) {
     const n = Number(project?.schema_version);
@@ -109,22 +132,127 @@ function normalizeGeneratedVideo(row) {
     if (typeof row === "string") {
         const raw = row.trim().replace(/\\/g, "/");
         const file = normalizeOutputVideoPath(raw) || raw;
-        return file ? { id: genVideoUid(), file, enabled: true, muted: false, note: "" } : null;
+        return file
+            ? {
+                id: genVideoUid(),
+                file,
+                enabled: true,
+                muted: false,
+                note: "",
+                prompt: "",
+                duration_sec: null,
+                trim_in_sec: 0,
+                trim_out_sec: null,
+                edit_start_sec: 0,
+            }
+            : null;
     }
     if (!row || typeof row !== "object") return null;
     const raw = String(row.file || row.src || "").trim().replace(/\\/g, "/");
     if (!raw) return null;
     const file = normalizeOutputVideoPath(raw) || raw;
+    const durationSec = Number(row.duration_sec ?? row.durationSec);
+    const trimIn = Number(row.trim_in_sec ?? row.trimInSec ?? row.trim_in ?? 0);
+    const trimOutRaw = row.trim_out_sec ?? row.trimOutSec ?? row.trim_out;
+    const trimOut = trimOutRaw == null || trimOutRaw === "" ? null : Number(trimOutRaw);
     return {
         id: String(row.id || "").trim() || genVideoUid(),
         file,
         enabled: row.enabled !== false,
         muted: row.muted === true,
         note: String(row.note || row.remark || ""),
+        prompt: String(row.prompt || ""),
+        duration_sec: Number.isFinite(durationSec) && durationSec > 0 ? durationSec : null,
+        trim_in_sec: Number.isFinite(trimIn) && trimIn > 0 ? trimIn : 0,
+        trim_out_sec: Number.isFinite(trimOut) && trimOut > 0 ? trimOut : null,
+        edit_start_sec: (() => {
+            const s = Number(row.edit_start_sec ?? row.editStartSec ?? 0);
+            return Number.isFinite(s) && s > 0 ? s : 0;
+        })(),
     };
 }
 
 const OUTPUT_VIDEO_EXT = /\.(mp4|webm|mov|mkv|avi|m4v)$/i;
+const OUTPUT_AUDIO_EXT = /\.(wav|mp3|flac|ogg|m4a|aac|wma)$/i;
+
+function genAudioUid() {
+    return `ga_${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function normalizeGeneratedAudio(row) {
+    if (typeof row === "string") {
+        const raw = row.trim().replace(/\\/g, "/");
+        const file = normalizeOutputVideoPath(raw) || raw;
+        if (!file) return null;
+        return {
+            id: genAudioUid(),
+            file,
+            enabled: true,
+            muted: false,
+            note: "",
+            prompt: "",
+            duration_sec: null,
+            trim_in_sec: 0,
+            trim_out_sec: null,
+            edit_start_sec: 0,
+            fade_in_sec: 0,
+            fade_out_sec: 0,
+        };
+    }
+    if (!row || typeof row !== "object") return null;
+    const raw = String(row.file || row.src || "").trim().replace(/\\/g, "/");
+    if (!raw) return null;
+    const file = normalizeOutputVideoPath(raw) || raw;
+    const durationSec = Number(row.duration_sec ?? row.durationSec);
+    const trimIn = Number(row.trim_in_sec ?? row.trimInSec ?? row.trim_in ?? 0);
+    const trimOutRaw = row.trim_out_sec ?? row.trimOutSec ?? row.trim_out;
+    const trimOut = trimOutRaw == null || trimOutRaw === "" ? null : Number(trimOutRaw);
+    const fadeIn = Number(row.fade_in_sec ?? row.fadeInSec ?? row.fade_in_ms ?? row.fadeInMs);
+    const fadeOut = Number(row.fade_out_sec ?? row.fadeOutSec ?? row.fade_out_ms ?? row.fadeOutMs);
+    const fadeInSec = Number.isFinite(fadeIn)
+        ? (row.fade_in_ms != null || row.fadeInMs != null ? fadeIn / 1000 : fadeIn)
+        : 0;
+    const fadeOutSec = Number.isFinite(fadeOut)
+        ? (row.fade_out_ms != null || row.fadeOutMs != null ? fadeOut / 1000 : fadeOut)
+        : 0;
+    return {
+        id: String(row.id || "").trim() || genAudioUid(),
+        file,
+        enabled: row.enabled !== false,
+        muted: row.muted === true,
+        note: String(row.note || row.remark || ""),
+        prompt: String(row.prompt || ""),
+        duration_sec: Number.isFinite(durationSec) && durationSec > 0 ? durationSec : null,
+        trim_in_sec: Number.isFinite(trimIn) && trimIn > 0 ? trimIn : 0,
+        trim_out_sec: Number.isFinite(trimOut) && trimOut > 0 ? trimOut : null,
+        edit_start_sec: (() => {
+            const s = Number(row.edit_start_sec ?? row.editStartSec ?? 0);
+            return Number.isFinite(s) && s > 0 ? s : 0;
+        })(),
+        fade_in_sec: Math.max(0, fadeInSec || 0),
+        fade_out_sec: Math.max(0, fadeOutSec || 0),
+    };
+}
+
+function serializeGeneratedAudio(row) {
+    const n = normalizeGeneratedAudio(row);
+    if (!n) return null;
+    const out = {
+        id: n.id,
+        file: n.file,
+        enabled: n.enabled !== false,
+        muted: n.muted === true,
+        note: n.note || "",
+    };
+    if (n.prompt) out.prompt = n.prompt;
+    if (Number.isFinite(n.duration_sec) && n.duration_sec > 0) out.duration_sec = n.duration_sec;
+    if (n.trim_in_sec > 0) out.trim_in_sec = n.trim_in_sec;
+    if (n.trim_out_sec != null && Number.isFinite(n.trim_out_sec)) out.trim_out_sec = n.trim_out_sec;
+    if (n.edit_start_sec > 0) out.edit_start_sec = n.edit_start_sec;
+    if (n.fade_in_sec > 0) out.fade_in_sec = n.fade_in_sec;
+    if (n.fade_out_sec > 0) out.fade_out_sec = n.fade_out_sec;
+    return out;
+}
 
 function normalizeOutputVideoPath(value) {
     let s = String(value || "").trim().replace(/\\/g, "/");
@@ -152,14 +280,87 @@ function mediaUid() {
     return `md_${Math.random().toString(36).slice(2, 11)}`;
 }
 
+function normalizePromptConcatOrder(raw) {
+    const out = [];
+    const seen = new Set();
+    if (Array.isArray(raw)) {
+        for (const value of raw) {
+            const key = String(value || "").trim();
+            if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
+            seen.add(key);
+            out.push(key);
+        }
+    }
+    for (const key of DEFAULT_PROMPT_CONCAT_ORDER) {
+        if (!seen.has(key)) out.push(key);
+    }
+    return out;
+}
+
+function normalizePromptIncludes(raw, { useGlobalPrompt, useAiPrompt, migrateLegacyFlags = false } = {}) {
+    if (Array.isArray(raw)) {
+        const seen = new Set();
+        for (const value of raw) {
+            const key = String(value || "").trim();
+            if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
+            seen.add(key);
+        }
+        // Old projects wrote prompt_includes without clip/ai, plus separate use_* flags.
+        if (migrateLegacyFlags) {
+            const hasNewKeys = seen.has("clip") || seen.has("ai");
+            if (!hasNewKeys) {
+                seen.add("clip");
+                if (useAiPrompt !== false) seen.add("ai");
+            } else if (useAiPrompt === true) {
+                seen.add("ai");
+            } else if (useAiPrompt === false) {
+                seen.delete("ai");
+            }
+            if (useGlobalPrompt === true) seen.add("global");
+            if (useGlobalPrompt === false) seen.delete("global");
+        }
+        return PROMPT_PART_KEYS.filter((k) => seen.has(k));
+    }
+    if (migrateLegacyFlags || useGlobalPrompt !== undefined || useAiPrompt !== undefined) {
+        const out = [];
+        if (useGlobalPrompt !== false) out.push("global");
+        out.push("clip");
+        if (useAiPrompt !== false) out.push("ai");
+        return out;
+    }
+    return [...DEFAULT_PROMPT_INCLUDES];
+}
+
+function promptIncludesFromClipJson(c) {
+    if (!c || typeof c !== "object") return [...DEFAULT_PROMPT_INCLUDES];
+    const migrateLegacyFlags = ("use_ai_prompt" in c) || ("use_global_prompt" in c);
+    if (Array.isArray(c.prompt_includes)) {
+        return normalizePromptIncludes(c.prompt_includes, {
+            useGlobalPrompt: c.use_global_prompt,
+            useAiPrompt: c.use_ai_prompt,
+            migrateLegacyFlags,
+        });
+    }
+    return normalizePromptIncludes(null, {
+        useGlobalPrompt: c.use_global_prompt,
+        useAiPrompt: c.use_ai_prompt,
+        migrateLegacyFlags: true,
+    });
+}
+
+function syncUseGlobalFromIncludes(includes) {
+    return Array.isArray(includes) && includes.includes("global");
+}
+
 function defaultImageMeta(trackIndex = 0) {
+    const promptIncludes = [...DEFAULT_PROMPT_INCLUDES];
     return {
         clipType: "image",
         mediaKind: "clip",
         prompt: "",
         aiPrompt: "",
         endImage: null,
-        useGlobalPrompt: true,
+        promptIncludes,
         disabled: false,
         visible: true,
         muted: false,
@@ -167,6 +368,8 @@ function defaultImageMeta(trackIndex = 0) {
         tailExtendSec: 0,
         generatePreviewVideo: false,
         secondSample: false,
+        h3MotionContextLength: 0,
+        saveLatent: false,
         trackIndex,
         clipRole: "multi_ref",
         clipRoleCustom: "",
@@ -174,8 +377,8 @@ function defaultImageMeta(trackIndex = 0) {
         agentCustom: "",
         items: [],
         generatedVideos: [],
+        genEditAudios: [],
         previewMode: "media",
-        useAiPrompt: true,
     };
 }
 
@@ -235,6 +438,88 @@ function defaultAudioMeta(trackIndex = 2) {
     };
 }
 
+function defaultVoiceoverMeta(trackIndex = 2) {
+    return {
+        clipType: "voiceover",
+        muted: false,
+        visible: true,
+        disabled: false,
+        prompt: "",
+        stylePrompt: "",
+        generatedAudios: [],
+        trackIndex,
+    };
+}
+
+function defaultSubtitleMeta(trackIndex = 0) {
+    return {
+        clipType: "subtitle",
+        text: "",
+        fontFamily: "",
+        fontPath: "",
+        fontSize: 48,
+        letterSpacing: 0,
+        color: "#ffffff",
+        bold: false,
+        italic: false,
+        opacity: 1,
+        strokeEnabled: true,
+        strokeColor: "#000000",
+        strokeWidth: 3,
+        shadowEnabled: true,
+        shadowColor: "rgba(0,0,0,0.75)",
+        shadowBlur: 4,
+        shadowOffsetX: 2,
+        shadowOffsetY: 2,
+        align: "center",
+        vAlign: "bottom",
+        offsetX: 0,
+        offsetY: 8,
+        disabled: false,
+        visible: true,
+        trackIndex,
+    };
+}
+
+const SUBTITLE_STYLE_KEYS = [
+    "fontFamily", "fontPath", "fontSize", "letterSpacing", "color", "bold", "italic", "opacity",
+    "strokeEnabled", "strokeColor", "strokeWidth",
+    "shadowEnabled", "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY",
+    "align", "vAlign", "offsetX", "offsetY",
+];
+
+function pickSubtitleStyle(meta) {
+    const src = meta && typeof meta === "object" ? meta : {};
+    const out = {};
+    for (const key of SUBTITLE_STYLE_KEYS) {
+        if (src[key] !== undefined) out[key] = src[key];
+    }
+    return out;
+}
+
+function isSubtitleTrackType(type) {
+    const t = String(type || "").toLowerCase();
+    return t === "text" || t === "subtitle";
+}
+
+function isVoiceoverTrackType(type) {
+    return String(type || "").toLowerCase() === "voiceover";
+}
+
+function trackHeightFor(type) {
+    return isSubtitleTrackType(type) ? SUBTITLE_TRACK_HEIGHT : TRACK_HEIGHT;
+}
+
+function isSubtitleClipMeta(meta, track) {
+    if (isSubtitleTrackType(track?.type)) return true;
+    return String(meta?.clipType || "").toLowerCase() === "subtitle";
+}
+
+function isVoiceoverClipMeta(meta, track) {
+    if (isVoiceoverTrackType(track?.type)) return true;
+    return String(meta?.clipType || "").toLowerCase() === "voiceover";
+}
+
 const BODY_UI_CLASSES = [
     "cat-te-noscroll",
     "cat-te-col-resize",
@@ -250,6 +535,15 @@ export class CapTimelineEditorApp {
     static _instances = new Set();
     /** Session clipboard for timeline clips (survives editor close/reopen). */
     static _clipClipboard = null;
+    /**
+     * FIFO jobs applied inside graphToPrompt so each queued batch item keeps the
+     * correct runtime_only_clip_ids (ComfyUI may defer graphToPrompt after
+     * queuePrompt returns false while processingQueue is busy).
+     * @type {{ clipId: string, stamp: string|null, expectedFile: string|null }[]}
+     */
+    static _clipRunJobs = [];
+    /** @type {CapTimelineEditorApp|null} */
+    static _clipRunEditor = null;
 
     /** Drop body-level classes / orphaned DOM left by a killed editor. */
     static scrubGlobalUi() {
@@ -272,10 +566,32 @@ export class CapTimelineEditorApp {
         CapTimelineEditorApp._open = null;
     }
 
-    /** Persist any open editor into its node widgets (for serialize / tab switch). */
-    static flushOpenEditors() {
+    /** Walk to the outermost graph (root) for a LiteGraph graph / subgraph. */
+    static _graphRoot(graph) {
+        if (!graph) return null;
+        let cur = graph;
+        const seen = new Set();
+        while (cur && !seen.has(cur)) {
+            seen.add(cur);
+            const parent = cur.parent_graph ?? cur.parent ?? null;
+            if (!parent) return cur;
+            cur = parent;
+        }
+        return graph;
+    }
+
+    /**
+     * Persist open editors into node widgets (for serialize / tab switch).
+     * When `forGraph` is set, only flush editors whose node still belongs to
+     * that graph tree — avoids writing timeline state into the wrong workflow
+     * if a serialize runs while another graph is active.
+     */
+    static flushOpenEditors(forGraph = null) {
+        const root = forGraph ? CapTimelineEditorApp._graphRoot(forGraph) : null;
         for (const te of CapTimelineEditorApp._instances) {
             if (te._destroyed || !te._overlay?.classList.contains("open") || !te._timeline) continue;
+            if (!te.node?.graph) continue;
+            if (root && CapTimelineEditorApp._graphRoot(te.node.graph) !== root) continue;
             try { te._saveToWidgets(); } catch { /* node may be mid-teardown */ }
         }
     }
@@ -352,9 +668,19 @@ export class CapTimelineEditorApp {
         this._onProgramVisChange = null;
         this._pendingGeneratedJobs = [];
         this._deferredGeneratedJobs = [];
+        /** prompt_id of the job currently executing (from execution_start). */
+        this._runningPromptId = null;
+        /** clip id marked as running on the timeline. */
+        this._runningClipId = null;
+        /** 0..1 progress for the running clip (sampler / progress_state). */
+        this._runningProgress = 0;
+        this._queueReconcileTimer = 0;
         this._genVideoState = null;
+        /** Draft state for the generated-video edit modal (no undo until Save). */
+        this._genEditState = null;
         this._outputVideosClipId = null;
         this._outputVideosCache = [];
+        this._outputPickerKind = "video";
         this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
         this._outputVideosThumbIo = null;
         this._outputVideoHoverEl = null;
@@ -362,10 +688,37 @@ export class CapTimelineEditorApp {
         this._outputVideoHoverFile = null;
         this._outputVideoHoverHideTimer = 0;
         this._outputVideoHoverAnchor = null;
+        /**
+         * Resource-edit mode: play a generated video in the program monitor
+         * without moving the timeline playhead / currentTime.
+         * { clipId, file, video }
+         */
+        this._resourceGenPreview = null;
+        this._resourceGenPreviewRaf = 0;
+        this._resourceGenPreviewStopTimer = 0;
+        /** Live KJ Model Preview Override blobs while a clip is sampling: clipId → { url, mime }. */
+        this._runPreviewByClipId = new Map();
+        /** Decoded audio from generated/output videos: file → Promise<AudioBuffer|null>. */
+        this._genAudioBufferCache = new Map();
+        /** Web Audio sources for gen-edit modal playback (canvas videos stay muted). */
+        this._genEditAudioSources = [];
         this._composeBusy = false;
         this._watermark = this._defaultWatermark();
+        this._promptConcatOrder = [...DEFAULT_PROMPT_CONCAT_ORDER];
+        /** When true, Run associates CapTimelineEditor/..._{clipId}.mp4 by specified name. */
+        this._useClipSpecifiedVideoFilename = true;
+        /**
+         * Timeline edit mode:
+         * - resource: edit source media / prompts (default)
+         * - generated: edit generated videos (trim / duration display)
+         */
+        this._timelineEditMode = "resource";
+        /** Temporary stamp written into project settings for one queuePrompt. */
+        this._genVideoStamp = null;
         this._systemFonts = null;
         this._systemFontsPromise = null;
+        /** When set, next queued project_json asks Python to emit only these clip ids. */
+        this._runtimeOnlyClipIds = null;
         this._composePreviewRaf = 0;
         this._videoThumbActive = 0;
         this._videoThumbWaiters = [];
@@ -442,6 +795,7 @@ export class CapTimelineEditorApp {
         document.body.classList.add("cat-te-noscroll");
         CapTimelineEditorApp._open = this;
         this._overlay.focus();
+        void this._ensureFontList();
         const gen = ++this._openGen;
         void this._openEditor(gen);
     }
@@ -477,9 +831,45 @@ export class CapTimelineEditorApp {
     }
 
     /**
+     * While the generated-video edit modal is open, Space toggles the modal
+     * sub-timeline (not the main one). Other bare Timeline keys are swallowed
+     * so the main timeline cannot seek/play underneath.
+     * @returns {boolean}
+     */
+    handleGenEditKey(e) {
+        if (!this.genEditModal || this.genEditModal.hidden) return false;
+        if (e.target?.closest?.("input, textarea, select, [contenteditable='true']")) return false;
+        const code = e.code || "";
+        const isSpace = code === "Space" || e.key === " ";
+        const isTlKey = isSpace
+            || code === "Delete" || code === "Backspace"
+            || code === "KeyQ" || code === "KeyW"
+            || code === "Home" || code === "End"
+            || code === "ArrowLeft" || code === "ArrowRight";
+        if (!isTlKey) return false;
+        if (e.ctrlKey || e.metaKey || e.altKey) return false;
+
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        if (e.repeat) return true;
+
+        const sub = this._genEditState?.timeline;
+        if (!sub) return true;
+        if (isSpace) {
+            sub.togglePlay?.();
+            return true;
+        }
+        // Forward to the sub-timeline handler when present.
+        try { sub._onKey?.(e); } catch { /* ignore */ }
+        return true;
+    }
+
+    /**
      * Editor shortcuts when fullscreen is open.
-     * Ctrl/Cmd+Z/Y are always swallowed so ComfyUI graph-undo cannot close
-     * the editor; outside text fields they drive the timeline undo/redo stack.
+     * Ctrl/Cmd+Z/Y drive the timeline undo/redo stack (outside text fields).
+     * Graph undo is blocked separately by patching ChangeTracker (its keydown
+     * defers undo to rAF, so stopImmediatePropagation alone is not enough).
      * Ctrl+C/V copy/paste clips when clips are selected (even if focus is in a
      * prompt field), unless that field has a text selection — then native wins.
      * @returns {boolean} true if the event was handled
@@ -493,10 +883,16 @@ export class CapTimelineEditorApp {
         const key = this._shortcutModKey(e);
         const inField = !!e.target?.closest?.("input, textarea, select, [contenteditable='true']");
 
-        // Block ComfyUI undo/redo from tearing down the fullscreen shell.
+        // Claim the shortcut so other bubble handlers skip; tracker undo is
+        // patched while fullscreen is open (see _capTePatchChangeTrackerUndo).
         if (key === "z" || key === "y") {
             e.stopPropagation();
             e.stopImmediatePropagation?.();
+            // Gen-edit modal has no undo stack — only swallow graph undo.
+            if (this.genEditModal && !this.genEditModal.hidden) {
+                e.preventDefault();
+                return true;
+            }
             if (inField) {
                 // Native text undo/redo — do not preventDefault.
                 return true;
@@ -555,6 +951,22 @@ export class CapTimelineEditorApp {
         if (e.target?.closest?.("input, textarea, select")) return false;
         if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return false;
         this._stepMediaPreview(e.key === "ArrowRight" ? 1 : -1);
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        return true;
+    }
+
+    /**
+     * Arrow keys — switch clip while AI Optimize modal is open.
+     * @returns {boolean} true if the event was handled
+     */
+    handleAiOptimizeKey(e) {
+        if (!this._overlay?.classList.contains("open")) return false;
+        if (!this.aiOptimizeModal || this.aiOptimizeModal.hidden) return false;
+        if (e.target?.closest?.("input, textarea, select, [contenteditable='true']")) return false;
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return false;
+        void this._stepAiOptimizeClip(e.key === "ArrowRight" ? 1 : -1);
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation?.();
@@ -663,6 +1075,8 @@ export class CapTimelineEditorApp {
             this._stopAudioPlayback();
             try { this._closeMediaPreview(); } catch { /* ignore */ }
             try { this._closeGenVideoModal(); } catch { /* ignore */ }
+            try { this._closeGenEditModal(false); } catch { /* ignore */ }
+        try { this._closeVoiceoverEditModal(false); } catch { /* ignore */ }
             try { this._closeOutputVideosPicker(); } catch { /* ignore */ }
             try { this._closeComposeModal(true); } catch { /* ignore */ }
             try { this._closeAddMaterial(); } catch { /* ignore */ }
@@ -729,6 +1143,9 @@ export class CapTimelineEditorApp {
     _openSettings() {
         if (!this.settingsModal) return;
         this.autosaveIntervalInput.value = String(this._getAutosaveIntervalSec());
+        if (this.useClipVideoFilenameCb) {
+            this.useClipVideoFilenameCb.checked = this._useClipSpecifiedVideoFilename !== false;
+        }
         this.settingsModal.hidden = false;
         void this._loadAgentConfigs();
     }
@@ -864,19 +1281,68 @@ export class CapTimelineEditorApp {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
             { label: T("run_all_clips_menu"), fn: () => void this._runAllActiveClipsDownstream() },
+            {
+                label: T("run_clips_without_generated_menu"),
+                fn: () => void this._runAllActiveClipsDownstream({ withoutGenerated: true }),
+            },
             { label: T("run_workflow_menu"), fn: () => void this._runWorkflow() },
         ], r.left, r.bottom + 4);
     }
 
+    _showAddTrackMenu(e) {
+        const r = e.currentTarget.getBoundingClientRect();
+        this._buildCtxMenu([
+            { label: T("media_track_menu"), fn: () => this._addUserTrack("image") },
+            { label: T("voiceover_track_menu"), fn: () => this._addUserTrack("voiceover") },
+            { label: T("audio_track_menu"), fn: () => this._addUserTrack("audio") },
+            { label: T("subtitle_track_menu"), fn: () => this._addUserTrack("text") },
+        ], r.left, r.bottom + 4);
+    }
+
+    _addUserTrack(type) {
+        if (!this._timeline) return;
+        const name = type === "audio"
+            ? T("audio_track_name")
+            : isVoiceoverTrackType(type)
+                ? T("voiceover_track_name")
+                : isSubtitleTrackType(type)
+                    ? T("subtitle_track_name")
+                    : T("overlay_track_name");
+        const track = this._timeline.addTrack({
+            type,
+            name,
+            height: trackHeightFor(type),
+            isMain: false,
+        });
+        this._trackInfo.set(track.id, {
+            trackIndex: this._nextTrackIndex(),
+            enabled: true,
+            role: type === "audio"
+                ? "audio"
+                : isVoiceoverTrackType(type)
+                    ? "voiceover"
+                    : isSubtitleTrackType(type)
+                        ? "subtitle"
+                        : "overlay",
+        });
+        this._setupTrackControls(track);
+        this._saveToWidgets();
+        return track;
+    }
+
     /** Visual clips that are not disabled (and whose track is enabled). */
-    _listActiveVisualClips() {
+    _listActiveVisualClips({ withoutGenerated = false } = {}) {
         const out = [];
         for (const track of this._allImageTracks()) {
             const info = this._trackInfo.get(track.id) || {};
             if (info.enabled === false) continue;
             for (const clip of track.clips) {
                 const meta = this._meta.get(clip.id) ?? defaultImageMeta();
-                if (meta.disabled || meta.clipType === "audio") continue;
+                if (meta.disabled || meta.clipType === "audio" || meta.clipType === "subtitle" || meta.clipType === "voiceover") continue;
+                if (isSubtitleClipMeta(meta, track)) continue;
+                // Empty package clips have nothing to generate.
+                if (this._isEmptyGroupClip(meta)) continue;
+                if (withoutGenerated && this._clipGeneratedVideos(meta).length) continue;
                 out.push(clip);
             }
         }
@@ -901,10 +1367,12 @@ export class CapTimelineEditorApp {
         }
     }
 
-    async _runAllActiveClipsDownstream() {
-        const clips = this._listActiveVisualClips();
+    async _runAllActiveClipsDownstream({ withoutGenerated = false } = {}) {
+        const clips = this._listActiveVisualClips({ withoutGenerated });
         if (!clips.length) {
-            alert(T("no_active_clips_to_run"));
+            alert(withoutGenerated
+                ? T("no_clips_without_generated_to_run")
+                : T("no_active_clips_to_run"));
             return;
         }
         if (typeof app?.queuePrompt !== "function") {
@@ -913,13 +1381,141 @@ export class CapTimelineEditorApp {
         }
         if (this._runAllClipsBusy) return;
         this._runAllClipsBusy = true;
+
+        const stamp = this._useClipSpecifiedVideoFilename !== false
+            ? this._makeGenVideoStamp()
+            : null;
+        const jobs = clips.map((clip) => ({
+            clipId: String(clip.id),
+            stamp,
+            expectedFile: stamp ? this._clipSpecifiedVideoPath(clip.id, stamp) : null,
+        }));
+
+        CapTimelineEditorApp._installClipRunJobHook();
+        CapTimelineEditorApp._clipRunEditor = this;
+        CapTimelineEditorApp._clipRunJobs = jobs.slice();
+
+        let queued = 0;
         try {
-            for (const clip of clips) {
+            // Chunk by BatchCountLimit so a low UI limit (e.g. 30) cannot truncate
+            // a large run-all — each chunk still applies one clip filter per item.
+            const limit = CapTimelineEditorApp._batchCountLimit();
+            for (let offset = 0; offset < jobs.length; ) {
                 if (this._destroyed || !this._timeline) break;
-                await this._runClipDownstream(clip);
+                const chunk = Math.min(limit, jobs.length - offset);
+                await this._waitForQueueIdle();
+                // Keep remaining jobs at the front for this chunk's graphToPrompt calls.
+                CapTimelineEditorApp._clipRunJobs = jobs.slice(offset);
+                CapTimelineEditorApp._clipRunEditor = this;
+                const pendingBefore = CapTimelineEditorApp._clipRunJobs.length;
+                // Register pending UI jobs before queuePrompt so execution_start
+                // (which can race ahead of the await) can mark them running.
+                const chunkJobs = jobs.slice(offset, offset + chunk);
+                for (const job of chunkJobs) {
+                    this._notePendingGeneratedJob({
+                        clipId: job.clipId,
+                        promptId: null,
+                        files: [],
+                        expectedFile: job.expectedFile,
+                        stamp: job.stamp || stamp,
+                    });
+                }
+                const result = await app.queuePrompt(0, chunk);
+                if (result === false) {
+                    // Request was pushed while another processor was starting; keep
+                    // jobs until graphToPrompt consumes them.
+                    await this._waitForQueueIdle();
+                }
+                const consumed = Math.max(0, pendingBefore - CapTimelineEditorApp._clipRunJobs.length);
+                // Drop unused pre-registered slots if the chunk was truncated.
+                if (consumed < chunkJobs.length) {
+                    for (let i = chunkJobs.length - 1; i >= consumed; i--) {
+                        const dropId = String(chunkJobs[i].clipId);
+                        const idx = this._pendingGeneratedJobs.findIndex(
+                            (j) => String(j.clipId) === dropId && !j.promptId && !(j.files?.length),
+                        );
+                        if (idx >= 0) this._pendingGeneratedJobs.splice(idx, 1);
+                    }
+                    this._syncClipRunDecorations();
+                }
+                const pid = this._promptIdFromQueueResult(result);
+                if (pid && consumed > 0) {
+                    this._bindPromptIdToPendingJob(pid, chunkJobs[0].clipId);
+                }
+                this._schedulePendingJobsQueueReconcile();
+                queued += consumed;
+                offset += consumed;
+                // Validation/API error aborts the batch early — stop rather than
+                // spinning on the same failing prompt.
+                if (consumed < chunk) break;
             }
+            if (queued < jobs.length) {
+                alert(T("run_all_partial", { queued, total: jobs.length }));
+            }
+        } catch (error) {
+            alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
+            CapTimelineEditorApp._clipRunJobs = [];
+            CapTimelineEditorApp._clipRunEditor = null;
+            this._runtimeOnlyClipIds = null;
+            // Keep gen_video_stamp until pending jobs finish so Python save path matches.
+            if (!this._pendingGeneratedJobs.some((j) => j.stamp || j.expectedFile)) {
+                this._genVideoStamp = null;
+            }
+            this._saveToWidgets();
+            this._openedProjectJson = JSON.stringify(this._buildProject());
             this._runAllClipsBusy = false;
+        }
+    }
+
+    /** ComfyUI setting: max tasks per queuePrompt batch (UI default 100). */
+    static _batchCountLimit() {
+        try {
+            const n = Number(app.extensionManager?.setting?.get?.("Comfy.QueueButton.BatchCountLimit"));
+            if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+        } catch { /* ignore */ }
+        try {
+            const n = Number(app.ui?.settings?.getSettingValue?.("Comfy.QueueButton.BatchCountLimit"));
+            if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+        } catch { /* ignore */ }
+        return 100;
+    }
+
+    static _installClipRunJobHook() {
+        if (typeof app?.graphToPrompt !== "function" || app.graphToPrompt._capTeClipRunHooked) return;
+        const orig = app.graphToPrompt;
+        app.graphToPrompt = async function (...args) {
+            const jobs = CapTimelineEditorApp._clipRunJobs;
+            const job = jobs?.[0];
+            const editor = CapTimelineEditorApp._clipRunEditor;
+            if (job && editor && !editor._destroyed) {
+                editor._runtimeOnlyClipIds = [String(job.clipId)];
+                editor._genVideoStamp = job.stamp || null;
+                try { editor._saveToWidgets(); } catch { /* ignore */ }
+            }
+            try {
+                return await orig.apply(this, args);
+            } finally {
+                if (job && jobs?.[0] === job) {
+                    jobs.shift();
+                    if (editor && !editor._destroyed) {
+                        editor._runtimeOnlyClipIds = null;
+                        editor._genVideoStamp = null;
+                        try { editor._saveToWidgets(); } catch { /* ignore */ }
+                    }
+                }
+            }
+        };
+        app.graphToPrompt._capTeClipRunHooked = true;
+    }
+
+    async _waitForQueueIdle(timeoutMs = 120000) {
+        const start = Date.now();
+        while (app.processingQueue) {
+            if (Date.now() - start > timeoutMs) {
+                throw new Error(T("queue_busy_timeout"));
+            }
+            await new Promise((r) => setTimeout(r, 50));
         }
     }
 
@@ -929,6 +1525,43 @@ export class CapTimelineEditorApp {
             .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
             .replace(/[. ]+$/g, "")
             .slice(0, 80) || fallback;
+    }
+
+    _makeGenVideoStamp() {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    }
+
+    _clipSpecifiedVideoPath(clipId, stamp = this._genVideoStamp) {
+        const name = this._safeProjectFilename();
+        const id = String(clipId || "clip").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 80) || "clip";
+        const st = String(stamp || this._makeGenVideoStamp());
+        return `CapTimelineEditor/${name}/${st}_${id}.mp4`;
+    }
+
+    /** Parse clip id from CapTimelineEditor/{project}/{YYYYMMDD-HHMMSS}_{clipId}.mp4 */
+    _clipIdFromSpecifiedVideoPath(file) {
+        const n = normalizeOutputVideoPath(file);
+        if (!n) return null;
+        const m = n.match(/^CapTimelineEditor\/[^/]+\/(\d{8}-\d{6})_(.+)\.mp4$/i);
+        return m ? String(m[2]).trim() || null : null;
+    }
+
+    _teNotifyBelongsHere(clipId, file) {
+        const id = String(clipId || "").trim();
+        if (id) {
+            if (this._findClipById(id)) return true;
+            if (this._pendingGeneratedJobs.some((j) => String(j.clipId) === id)) return true;
+        }
+        const n = normalizeOutputVideoPath(file);
+        if (!n) return false;
+        const prefix = `CapTimelineEditor/${this._safeProjectFilename()}/`;
+        if (n.startsWith(prefix)) return true;
+        const expected = normalizeOutputVideoPath(file);
+        return this._pendingGeneratedJobs.some(
+            (j) => j.expectedFile && normalizeOutputVideoPath(j.expectedFile) === expected,
+        );
     }
 
     async _pickDirectory(mode = "readwrite") {
@@ -1264,7 +1897,7 @@ export class CapTimelineEditorApp {
     _defaultWatermark() {
         return {
             mode: "none",
-            text: { content: "", fontFamily: "", fontPath: "", fontSize: 32, color: "#ffffff" },
+            text: { content: "", fontFamily: "", fontPath: "", fontSize: 32, letterSpacing: 0, color: "#ffffff" },
             image: { file: "", disabled: false },
             opacity: 80,
             scale: 100,
@@ -1289,6 +1922,7 @@ export class CapTimelineEditorApp {
                 fontFamily: String(text.fontFamily ?? d.text.fontFamily),
                 fontPath: String(text.fontPath ?? d.text.fontPath),
                 fontSize: num(text.fontSize, 6, 400, d.text.fontSize),
+                letterSpacing: num(text.letterSpacing ?? text.letter_spacing, -50, 200, d.text.letterSpacing),
                 color: /^#[0-9a-fA-F]{6}$/.test(text.color || "") ? text.color : d.text.color,
             },
             image: {
@@ -1340,37 +1974,215 @@ export class CapTimelineEditorApp {
             })
             .catch(() => {
                 this._systemFonts = [];
+                this._populateFontSelect();
                 return this._systemFonts;
             });
         return this._systemFontsPromise;
     }
 
-    _populateFontSelect() {
-        const select = this.wmFontFamily;
+    /** CSS font-family value safe for inline style. */
+    _cssFontFamily(family) {
+        const fam = String(family || "").trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        return fam ? `"${fam}", sans-serif` : "sans-serif";
+    }
+
+    _syncFontSelectPreview(select) {
+        if (!select) return;
+        select.style.fontFamily = this._cssFontFamily(select.value);
+    }
+
+    /** Custom dropdown so each row renders in that font (native <option> cannot). */
+    _bindFontSelectPreview(select) {
+        if (!select || select.dataset.fontPreviewBound) return;
+        select.dataset.fontPreviewBound = "1";
+        select.classList.add("cat-te-font-select");
+        select.addEventListener("mousedown", (e) => {
+            if (select.disabled) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this._openFontPicker(select);
+        });
+        select.addEventListener("keydown", (e) => {
+            if (select.disabled) return;
+            if (document.querySelector(".cat-te-font-picker")) return;
+            if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                this._openFontPicker(select, { startDelta: e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0 });
+            }
+        });
+    }
+
+    _openFontPicker(select, { startDelta = 0 } = {}) {
+        if (!select) return;
+        this._removeCtxMenu();
+        const fonts = [...select.options]
+            .map((o) => ({
+                family: o.value,
+                label: o.textContent || o.value,
+                path: o.dataset?.path || "",
+            }))
+            .filter((f) => f.family);
+        if (!fonts.length) return;
+
+        const prevFamily = String(select.value || "");
+        const prevPath = String(select.selectedOptions?.[0]?.dataset?.path || "");
+        let activeIndex = Math.max(0, fonts.findIndex((f) => f.family === prevFamily));
+        if (startDelta) {
+            activeIndex = Math.max(0, Math.min(fonts.length - 1, activeIndex + startDelta));
+        }
+
+        const menu = document.createElement("div");
+        menu.className = "cat-te-font-picker";
+        menu.tabIndex = -1;
+        const r = select.getBoundingClientRect();
+        menu.style.left = `${r.left}px`;
+        menu.style.top = `${r.bottom + 2}px`;
+        menu.style.minWidth = `${Math.max(r.width, 200)}px`;
+
+        const items = [];
+        const applyFontAt = (index, { commit = false } = {}) => {
+            activeIndex = Math.max(0, Math.min(fonts.length - 1, index));
+            items.forEach((row, i) => row.classList.toggle("is-active", i === activeIndex));
+            const row = items[activeIndex];
+            row?.scrollIntoView({ block: "nearest" });
+            const f = fonts[activeIndex];
+            if (!f) return;
+            select.value = f.family;
+            this._syncFontSelectPreview(select);
+            // Subtitle panel listens to `input`; watermark listens to `change`.
+            select.dispatchEvent(new Event("input", { bubbles: true }));
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+            if (commit) this._removeCtxMenu();
+        };
+
+        fonts.forEach((f, index) => {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = "cat-te-font-picker-item";
+            if (index === activeIndex) row.classList.add("is-active");
+            row.style.fontFamily = this._cssFontFamily(f.family);
+            row.textContent = f.label;
+            row.title = f.family;
+            row.addEventListener("mouseenter", () => applyFontAt(index));
+            row.addEventListener("click", (e) => {
+                e.stopPropagation();
+                applyFontAt(index, { commit: true });
+            });
+            menu.appendChild(row);
+            items.push(row);
+        });
+
+        const onKey = (e) => {
+            if (!menu.isConnected) return;
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                e.stopPropagation();
+                applyFontAt(activeIndex + 1);
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                e.stopPropagation();
+                applyFontAt(activeIndex - 1);
+            } else if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                applyFontAt(activeIndex, { commit: true });
+            } else if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                select.value = prevFamily;
+                this._syncFontSelectPreview(select);
+                select.dispatchEvent(new Event("input", { bubbles: true }));
+                select.dispatchEvent(new Event("change", { bubbles: true }));
+                this._removeCtxMenu();
+            } else if (e.key === "Home") {
+                e.preventDefault();
+                applyFontAt(0);
+            } else if (e.key === "End") {
+                e.preventDefault();
+                applyFontAt(fonts.length - 1);
+            }
+        };
+        menu._capFontKeyHandler = onKey;
+        window.addEventListener("keydown", onKey, true);
+
+        (this._overlay || document.body).appendChild(menu);
+        this._ignoreCtxCloseOnce = true;
+        const mr = menu.getBoundingClientRect();
+        if (mr.right > window.innerWidth) {
+            menu.style.left = `${Math.max(8, window.innerWidth - mr.width - 8)}px`;
+        }
+        if (mr.bottom > window.innerHeight) {
+            menu.style.top = `${Math.max(8, r.top - mr.height - 2)}px`;
+        }
+        applyFontAt(activeIndex);
+        try { menu.focus({ preventScroll: true }); } catch { /* ignore */ }
+    }
+
+    /** Fill a <select> with system fonts; keep `preferred` if present (or as custom option). */
+    _fillSystemFontSelect(select, preferred, { autoPickFirst = false } = {}) {
         if (!select) return;
         const fonts = this._systemFonts || [];
-        const current = this._watermark.text.fontFamily;
+        const prev = String(preferred || "").trim();
         select.innerHTML = "";
         if (!fonts.length) {
             const opt = document.createElement("option");
-            opt.value = "";
+            opt.value = prev;
             opt.textContent = this._systemFonts ? T("font_not_found") : T("font_loading");
             select.appendChild(opt);
+            this._syncFontSelectPreview(select);
+            this._bindFontSelectPreview(select);
             return;
         }
         for (const f of fonts) {
             const opt = document.createElement("option");
             opt.value = f.family;
-            opt.dataset.path = f.path;
+            opt.dataset.path = f.path || "";
             opt.textContent = f.family;
+            opt.style.fontFamily = this._cssFontFamily(f.family);
             select.appendChild(opt);
         }
-        if (current && fonts.some((f) => f.family === current)) {
-            select.value = current;
+        if (prev && fonts.some((f) => f.family === prev)) {
+            select.value = prev;
+        } else if (prev) {
+            const opt = document.createElement("option");
+            opt.value = prev;
+            opt.textContent = prev;
+            opt.style.fontFamily = this._cssFontFamily(prev);
+            select.appendChild(opt);
+            select.value = prev;
+        } else if (autoPickFirst) {
+            select.value = fonts[0].family;
         } else {
             select.value = fonts[0].family;
-            this._watermark.text.fontFamily = fonts[0].family;
-            this._watermark.text.fontPath = fonts[0].path;
+        }
+        this._syncFontSelectPreview(select);
+        this._bindFontSelectPreview(select);
+    }
+
+    _populateFontSelect() {
+        const fonts = this._systemFonts || [];
+        const wmSelect = this.wmFontFamily;
+        if (wmSelect) {
+            const current = this._watermark.text.fontFamily;
+            this._fillSystemFontSelect(wmSelect, current, { autoPickFirst: true });
+            if (fonts.length) {
+                if (current && fonts.some((f) => f.family === current)) {
+                    wmSelect.value = current;
+                } else {
+                    wmSelect.value = fonts[0].family;
+                    this._watermark.text.fontFamily = fonts[0].family;
+                    this._watermark.text.fontPath = fonts[0].path;
+                }
+            }
+        }
+        const subSelect = this.subFontSelect;
+        if (subSelect) {
+            let preferred = subSelect.value;
+            const clip = this._selClip;
+            if (clip && isSubtitleTrackType(clip.track?.type)) {
+                preferred = this._meta.get(clip.id)?.fontFamily || preferred;
+            }
+            this._fillSystemFontSelect(subSelect, preferred, { autoPickFirst: !preferred });
         }
     }
 
@@ -1416,10 +2228,15 @@ export class CapTimelineEditorApp {
             const opt = this.wmFontFamily.selectedOptions?.[0];
             this._watermark.text.fontFamily = this.wmFontFamily.value;
             this._watermark.text.fontPath = opt?.dataset.path || "";
+            this._syncFontSelectPreview(this.wmFontFamily);
             this._scheduleComposePreview();
         });
         this.wmFontSize?.addEventListener("input", () => {
             this._watermark.text.fontSize = Math.max(6, Math.min(400, Number(this.wmFontSize.value) || 32));
+            this._scheduleComposePreview();
+        });
+        this.wmLetterSpacing?.addEventListener("input", () => {
+            this._watermark.text.letterSpacing = Math.max(-50, Math.min(200, Number(this.wmLetterSpacing.value) || 0));
             this._scheduleComposePreview();
         });
         this.wmFontColor?.addEventListener("input", () => {
@@ -1511,6 +2328,7 @@ export class CapTimelineEditorApp {
         const wm = this._watermark;
         if (this.wmTextContent) this.wmTextContent.value = wm.text.content;
         if (this.wmFontSize) this.wmFontSize.value = String(wm.text.fontSize);
+        if (this.wmLetterSpacing) this.wmLetterSpacing.value = String(wm.text.letterSpacing ?? 0);
         if (this.wmFontColor) this.wmFontColor.value = wm.text.color;
         if (this.wmOpacity) this.wmOpacity.value = String(wm.opacity);
         if (this.wmOpacityReadout) this.wmOpacityReadout.textContent = `${wm.opacity}%`;
@@ -1584,6 +2402,46 @@ export class CapTimelineEditorApp {
         }
     }
 
+    _measureTextWithLetterSpacing(ctx, text, letterSpacing) {
+        const s = String(text ?? "");
+        if (!s) return 0;
+        const spacing = Number(letterSpacing) || 0;
+        if (!spacing) return ctx.measureText(s).width;
+        const chars = Array.from(s);
+        let w = 0;
+        for (let i = 0; i < chars.length; i++) {
+            w += ctx.measureText(chars[i]).width;
+            if (i < chars.length - 1) w += spacing;
+        }
+        return w;
+    }
+
+    _drawTextWithLetterSpacing(ctx, text, x, y, letterSpacing, mode = "fill") {
+        const s = String(text ?? "");
+        if (!s) return;
+        const spacing = Number(letterSpacing) || 0;
+        if (!spacing) {
+            if (mode === "stroke") ctx.strokeText(s, x, y);
+            else ctx.fillText(s, x, y);
+            return;
+        }
+        const chars = Array.from(s);
+        const totalW = this._measureTextWithLetterSpacing(ctx, s, spacing);
+        const align = ctx.textAlign || "left";
+        let startX = x;
+        if (align === "center") startX = x - totalW / 2;
+        else if (align === "right" || align === "end") startX = x - totalW;
+        const prevAlign = ctx.textAlign;
+        ctx.textAlign = "left";
+        let cx = startX;
+        for (let i = 0; i < chars.length; i++) {
+            if (mode === "stroke") ctx.strokeText(chars[i], cx, y);
+            else ctx.fillText(chars[i], cx, y);
+            cx += ctx.measureText(chars[i]).width + (i < chars.length - 1 ? spacing : 0);
+        }
+        ctx.textAlign = prevAlign;
+    }
+
     _drawWatermarkOnCanvas(ctx, cw, ch) {
         const wm = this._watermark;
         if (!wm || wm.mode === "none") return;
@@ -1609,16 +2467,20 @@ export class CapTimelineEditorApp {
             }
         } else if (wm.mode === "text" && wm.text.content) {
             const fontSize = Math.max(1, wm.text.fontSize * scaleFactor * (wm.scale / 100));
+            const letterSpacing = (Number(wm.text.letterSpacing) || 0) * scaleFactor * (wm.scale / 100);
             const family = wm.text.fontFamily ? `"${wm.text.fontFamily}", sans-serif` : "sans-serif";
             ctx.font = `${fontSize}px ${family}`;
             ctx.fillStyle = wm.text.color || "#ffffff";
             ctx.textBaseline = "top";
+            ctx.textAlign = "left";
             const lines = String(wm.text.content).split("\n");
             const lineHeight = fontSize * 1.25;
-            const textW = Math.max(0, ...lines.map((l) => ctx.measureText(l).width));
+            const textW = Math.max(0, ...lines.map((l) => this._measureTextWithLetterSpacing(ctx, l, letterSpacing)));
             const textH = lineHeight * lines.length;
             const { x, y } = this._watermarkXY(previewPos, margin, cw, ch, textW, textH);
-            lines.forEach((line, i) => ctx.fillText(line, x, y + i * lineHeight));
+            lines.forEach((line, i) => {
+                this._drawTextWithLetterSpacing(ctx, line, x, y + i * lineHeight, letterSpacing, "fill");
+            });
         }
         ctx.restore();
     }
@@ -1635,6 +2497,7 @@ export class CapTimelineEditorApp {
         ctx.fillRect(0, 0, cw, ch);
         const t = this._timeline?.currentTime ?? 0;
         this._drawPreviewLayersOnce(ctx, cw, ch, t);
+        this._drawSubtitleOverlays(ctx, cw, ch, t);
         this._drawWatermarkOnCanvas(ctx, cw, ch);
     }
 
@@ -1736,8 +2599,10 @@ export class CapTimelineEditorApp {
 
     destroy() {
         if (this._destroyed) return;
+        // Save BEFORE marking destroyed — `_saveToWidgets` bails on `_destroyed`,
+        // and tab-switch teardown (beforeConfigureGraph) used to skip the flush.
+        try { this._closeInternal(true); } catch { /* continue teardown */ }
         this._destroyed = true;
-        this._closeInternal(true);
         if (this._onDocClick) {
             document.removeEventListener("click", this._onDocClick);
             this._onDocClick = null;
@@ -1763,6 +2628,7 @@ export class CapTimelineEditorApp {
         CapTimelineEditorApp._instances.delete(this);
         if (CapTimelineEditorApp._open === this) CapTimelineEditorApp._open = null;
         this._unbindExecutionWatch();
+        this._clearAllRunPreviews();
         document.body.classList.remove(...BODY_UI_CLASSES);
     }
 
@@ -1820,13 +2686,47 @@ export class CapTimelineEditorApp {
                     <input class="cat-te-title" type="text" value="${T("untitled_project")}" aria-label="${T("project_name_label")}" />
                   </label>
                   <div class="cat-te-project-scalars" aria-label="${T("scalars_aria")}"></div>
-                  <div class="cat-te-prompt-wrap cat-te-global-prompt-wrap">
-                    <div class="cat-te-prompt-label-row">
-                      <div class="cat-te-prompt-label">${T("global_prompt_label")}</div>
-                      <button type="button" class="cat-te-prompt-comment-btn cat-te-global-prompt-comment-btn" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                  <div class="cat-te-settings-prompts">
+                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="global_prompt">
+                      <div class="cat-te-prompt-label-row">
+                        <div class="cat-te-prompt-label">${T("global_prompt_label")}</div>
+                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="global_prompt" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                      </div>
+                      <div class="cat-te-prompt-input-wrap">
+                        <textarea class="cat-te-settings-prompt-input cat-te-global-prompt-input" data-setting-prompt-input="global_prompt" placeholder="${T("global_prompt_placeholder")}"></textarea>
+                      </div>
                     </div>
-                    <div class="cat-te-prompt-input-wrap">
-                      <textarea class="cat-te-global-prompt-input" placeholder="${T("global_prompt_placeholder")}"></textarea>
+                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="style_prompt">
+                      <div class="cat-te-prompt-label-row">
+                        <div class="cat-te-prompt-label">${T("style_prompt_label")}</div>
+                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="style_prompt" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                      </div>
+                      <div class="cat-te-prompt-input-wrap">
+                        <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="style_prompt" placeholder="${T("style_prompt_placeholder")}"></textarea>
+                      </div>
+                    </div>
+                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="non_diegetic_music">
+                      <div class="cat-te-prompt-label-row">
+                        <div class="cat-te-prompt-label">${T("non_diegetic_music_label")}</div>
+                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="non_diegetic_music" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                      </div>
+                      <div class="cat-te-prompt-input-wrap">
+                        <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="non_diegetic_music" placeholder="${T("non_diegetic_music_placeholder")}"></textarea>
+                      </div>
+                    </div>
+                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="negative_prompt">
+                      <div class="cat-te-prompt-label-row">
+                        <div class="cat-te-prompt-label">${T("negative_prompt_label")}</div>
+                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="negative_prompt" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                      </div>
+                      <div class="cat-te-prompt-input-wrap">
+                        <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="negative_prompt" placeholder="${T("negative_prompt_placeholder")}"></textarea>
+                      </div>
+                    </div>
+                    <div class="cat-te-prompt-order" aria-label="${T("prompt_concat_order_label")}">
+                      <div class="cat-te-prompt-order-label">${T("prompt_concat_order_label")}</div>
+                      <div class="cat-te-prompt-order-hint">${T("prompt_concat_order_hint")}</div>
+                      <div class="cat-te-prompt-order-list"></div>
                     </div>
                   </div>
                 </div>
@@ -1841,6 +2741,7 @@ export class CapTimelineEditorApp {
                         <img class="cat-te-clip-thumb" alt="" />
                         <video class="cat-te-clip-thumb-video" muted playsinline hidden></video>
                         <div class="cat-te-clip-thumb-empty" hidden>${T("empty_clip")}</div>
+                        <div class="cat-te-clip-thumb-subtitle" hidden>T</div>
                         <button type="button" class="cat-te-clip-thumb-sort" title="${T("view_material_title")}" hidden>${iconHtml("squareArrowOutUpRight", 12)}</button>
                         <button type="button" class="cat-te-clip-thumb-delete" title="${T("remove_from_clip_title")}" hidden>${iconHtml("trash", 12)}</button>
                       </div>
@@ -1851,12 +2752,20 @@ export class CapTimelineEditorApp {
                       <div class="cat-te-clip-name-row">
                         <div class="cat-te-clip-name"></div>
                       </div>
+                      <div class="cat-te-clip-id" hidden></div>
 
                       <div class="cat-te-clip-times">
                         <span class="cat-te-clip-start"></span>
                         <span class="cat-te-clip-sep">→</span>
                         <span class="cat-te-clip-end"></span>
                       </div>
+                      <div class="cat-te-clip-source-trim" hidden>
+                        <span class="cat-te-clip-source-trim-label"></span>
+                        <span class="cat-te-clip-source-in"></span>
+                        <span class="cat-te-clip-sep">→</span>
+                        <span class="cat-te-clip-source-out"></span>
+                      </div>
+                      <div class="cat-te-clip-source-dur" hidden></div>
                       <div class="cat-te-clip-dur"></div>
                       <label class="cat-te-clip-setting-check cat-te-use-media-prompt">
                         <input class="cat-te-use-media-prompt-cb" type="checkbox" checked disabled />
@@ -1866,6 +2775,7 @@ export class CapTimelineEditorApp {
                   </div>
                 </div>
               </div>
+              <div class="cat-te-visual-clip-body">
               <div class="cat-te-clip-settings">
                 <label class="cat-te-clip-setting-row">
                   <span>${T("type_label")}</span>
@@ -1912,10 +2822,25 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-second-sample" type="checkbox" disabled />
                   <span>${T("second_sample_label")}</span>
                 </label>
-                <label class="cat-te-clip-setting-check cat-te-use-global">
-                  <input class="cat-te-use-global-cb" type="checkbox" checked disabled />
-                  <span>Use Global</span>
+                <label class="cat-te-clip-setting-row" title="${T("h3_motion_context_length_title")}">
+                  <span>${T("h3_motion_context_length_label")}</span>
+                  <input class="cat-te-h3-motion-context" type="number" min="0" max="72" step="24" value="0" disabled />
                 </label>
+                <label class="cat-te-clip-setting-check" title="${T("save_latent_title")}">
+                  <input class="cat-te-save-latent" type="checkbox" disabled />
+                  <span>${T("save_latent_label")}</span>
+                </label>
+                <div class="cat-te-prompt-includes" aria-label="${T("prompt_includes_label")}">
+                  <div class="cat-te-prompt-includes-label">${T("prompt_includes_label")}</div>
+                  <div class="cat-te-prompt-includes-chips" role="group">
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="global" disabled title="${T("prompt_include_global_title")}">${T("prompt_include_global")}</button>
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="style" disabled title="${T("prompt_include_style_title")}">${T("prompt_include_style")}</button>
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="clip" disabled title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="ai" disabled title="${T("prompt_include_ai_title")}">${T("prompt_include_ai")}</button>
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="non_diegetic_music" disabled title="${T("prompt_include_music_title")}">${T("prompt_include_music")}</button>
+                    <button type="button" class="cat-te-prompt-include-chip" data-include="negative" disabled title="${T("prompt_include_negative_title")}">${T("prompt_include_negative")}</button>
+                  </div>
+                </div>
               </div>
               <div class="cat-te-prompt-wrap">
                 <div class="cat-te-prompt-label-row">
@@ -1932,16 +2857,118 @@ export class CapTimelineEditorApp {
                   <textarea class="cat-te-ai-prompt-input" placeholder="${T("ai_prompt_placeholder")}" disabled></textarea>
                 </div>
               </div>
-              <label class="cat-te-clip-setting-check cat-te-use-ai-prompt">
-                <input class="cat-te-use-ai-prompt-cb" type="checkbox" checked disabled />
-                <span>${T("use_ai_prompt_label")}</span>
-              </label>
               <div class="cat-te-clip-videos" hidden>
                 <div class="cat-te-clip-videos-header">
                   <span>${T("gen_video_label")}</span>
                   <button type="button" class="cat-te-clip-videos-open" title="${T("preview_manage_title")}">${iconHtml("squareArrowOutUpRight", 12)}</button>
                 </div>
                 <div class="cat-te-clip-videos-list"></div>
+              </div>
+              </div>
+              <div class="cat-te-subtitle-panel" hidden>
+                <label class="cat-te-clip-setting-row cat-te-sub-text-row">
+                  <span>${T("subtitle_text_label")}</span>
+                  <textarea class="cat-te-sub-text" rows="3" placeholder="${T("subtitle_default_text")}"></textarea>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_font_label")}</span>
+                  <select class="cat-te-sub-font"></select>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_size_label")}</span>
+                  <input class="cat-te-sub-size" type="number" min="8" max="400" step="1" value="48" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("letter_spacing_label")}</span>
+                  <input class="cat-te-sub-letter-spacing" type="number" min="-50" max="200" step="1" value="0" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_color_label")}</span>
+                  <input class="cat-te-sub-color" type="color" value="#ffffff" />
+                </label>
+                <div class="cat-te-sub-check-row">
+                  <label class="cat-te-clip-setting-check"><input class="cat-te-sub-bold" type="checkbox" /><span>${T("subtitle_bold_label")}</span></label>
+                  <label class="cat-te-clip-setting-check"><input class="cat-te-sub-italic" type="checkbox" /><span>${T("subtitle_italic_label")}</span></label>
+                </div>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_opacity_label")}</span>
+                  <input class="cat-te-sub-opacity" type="range" min="0" max="100" step="1" value="100" />
+                  <span class="cat-te-sub-opacity-val">100%</span>
+                </label>
+                <label class="cat-te-clip-setting-check"><input class="cat-te-sub-stroke" type="checkbox" checked /><span>${T("subtitle_stroke_label")}</span></label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_stroke_color_label")}</span>
+                  <input class="cat-te-sub-stroke-color" type="color" value="#000000" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_stroke_width_label")}</span>
+                  <input class="cat-te-sub-stroke-width" type="number" min="0" max="40" step="0.5" value="3" />
+                </label>
+                <label class="cat-te-clip-setting-check"><input class="cat-te-sub-shadow" type="checkbox" checked /><span>${T("subtitle_shadow_label")}</span></label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_color_label")}</span>
+                  <input class="cat-te-sub-shadow-color" type="color" value="#000000" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_blur_label")}</span>
+                  <input class="cat-te-sub-shadow-blur" type="number" min="0" max="64" step="1" value="4" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_x_label")}</span>
+                  <input class="cat-te-sub-shadow-x" type="number" min="-64" max="64" step="1" value="2" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_shadow_y_label")}</span>
+                  <input class="cat-te-sub-shadow-y" type="number" min="-64" max="64" step="1" value="2" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_align_label")}</span>
+                  <select class="cat-te-sub-align">
+                    <option value="left">${T("subtitle_align_left")}</option>
+                    <option value="center" selected>${T("subtitle_align_center")}</option>
+                    <option value="right">${T("subtitle_align_right")}</option>
+                  </select>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_valign_label")}</span>
+                  <select class="cat-te-sub-valign">
+                    <option value="top">${T("subtitle_valign_top")}</option>
+                    <option value="middle">${T("subtitle_valign_middle")}</option>
+                    <option value="bottom" selected>${T("subtitle_valign_bottom")}</option>
+                  </select>
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_offset_x_label")}</span>
+                  <input class="cat-te-sub-offset-x" type="number" min="-50" max="50" step="1" value="0" />
+                </label>
+                <label class="cat-te-clip-setting-row">
+                  <span>${T("subtitle_offset_y_label")}</span>
+                  <input class="cat-te-sub-offset-y" type="number" min="-50" max="50" step="1" value="8" />
+                </label>
+                <div class="cat-te-sub-apply-row">
+                  <button type="button" class="cat-te-btn cat-te-sub-apply-track">${T("subtitle_apply_track_btn")}</button>
+                  <button type="button" class="cat-te-btn cat-te-sub-apply-all">${T("subtitle_apply_all_btn")}</button>
+                </div>
+              </div>
+              <div class="cat-te-voiceover-panel" hidden>
+                <label class="cat-te-clip-setting-row cat-te-vo-prompt-row">
+                  <span>${T("desc_prompt_label")}</span>
+                  <textarea class="cat-te-vo-prompt" rows="4" placeholder="${T("voiceover_prompt_placeholder")}"></textarea>
+                </label>
+                <label class="cat-te-clip-setting-row cat-te-vo-prompt-row">
+                  <span>${T("style_prompt_label")}</span>
+                  <textarea class="cat-te-vo-style-prompt" rows="3" placeholder="${T("style_prompt_placeholder")}"></textarea>
+                </label>
+                <div class="cat-te-clip-videos cat-te-vo-audios">
+                  <div class="cat-te-clip-videos-header">
+                    <span>${T("gen_audio_label")}</span>
+                    <div class="cat-te-vo-audios-actions">
+                      <button type="button" class="cat-te-btn cat-te-vo-audio-add" title="${T("linked_generated_audios_title")}">${T("voiceover_add_audio_btn")}</button>
+                      <button type="button" class="cat-te-clip-videos-open cat-te-vo-audio-edit" title="${T("voiceover_edit_title")}">${iconHtml("squareArrowOutUpRight", 12)}</button>
+                    </div>
+                  </div>
+                  <div class="cat-te-vo-audios-list"></div>
+                </div>
               </div>
               </div>
               <div class="cat-te-shortcuts">
@@ -2039,6 +3066,68 @@ export class CapTimelineEditorApp {
               </div>
             </div>
           </div>
+          <div class="cat-te-modal-backdrop cat-te-gen-edit-modal" hidden>
+            <div class="cat-te-modal cat-te-gen-edit-dialog">
+              <div class="cat-te-modal-header">
+                <span class="cat-te-gen-edit-title">${T("gen_edit_modal_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-gen-edit-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
+              </div>
+              <div class="cat-te-gen-edit-body">
+                <div class="cat-te-gen-edit-left">
+                  <div class="cat-te-gen-edit-preview">
+                    <canvas class="cat-te-gen-edit-preview-canvas"></canvas>
+                    <div class="cat-te-gen-edit-preview-empty">${T("gen_edit_preview_empty")}</div>
+                  </div>
+                  <div class="cat-te-gen-edit-vsplit" title="${T("gen_edit_resize_preview_title")}"></div>
+                  <div class="cat-te-gen-edit-tl-host"></div>
+                </div>
+                <div class="cat-te-gen-edit-right">
+                  <div class="cat-te-gen-edit-name" title=""></div>
+                  <div class="cat-te-gen-edit-file" title=""></div>
+                  <label class="cat-te-gen-edit-field">
+                    <span>${T("desc_prompt_label")}</span>
+                    <textarea class="cat-te-gen-edit-prompt" rows="8" placeholder="${T("gen_edit_prompt_placeholder")}"></textarea>
+                  </label>
+                  <button type="button" class="cat-te-btn cat-te-gen-edit-dub" disabled title="${T("gen_edit_dub_todo_title")}">${T("gen_edit_dub_btn")}</button>
+                  <p class="cat-te-gen-edit-hint">${T("gen_edit_select_hint")}</p>
+                </div>
+              </div>
+              <div class="cat-te-gen-edit-footer">
+                <button type="button" class="cat-te-btn cat-te-gen-edit-cancel">${T("cancel_btn")}</button>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-gen-edit-save">${T("save_btn")}</button>
+              </div>
+            </div>
+          </div>
+          <div class="cat-te-modal-backdrop cat-te-vo-edit-modal" hidden>
+            <div class="cat-te-modal cat-te-gen-edit-dialog cat-te-vo-edit-dialog">
+              <div class="cat-te-modal-header">
+                <span class="cat-te-vo-edit-title">${T("voiceover_edit_modal_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-vo-edit-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
+              </div>
+              <div class="cat-te-gen-edit-body">
+                <div class="cat-te-gen-edit-left cat-te-vo-edit-left">
+                  <div class="cat-te-vo-edit-preview">
+                    <audio class="cat-te-vo-edit-audio" controls preload="metadata"></audio>
+                    <div class="cat-te-vo-edit-preview-empty">${T("voiceover_edit_preview_empty")}</div>
+                  </div>
+                  <div class="cat-te-gen-edit-tl-host cat-te-vo-edit-tl-host"></div>
+                </div>
+                <div class="cat-te-gen-edit-right">
+                  <div class="cat-te-vo-edit-name" title=""></div>
+                  <div class="cat-te-vo-edit-file" title=""></div>
+                  <label class="cat-te-gen-edit-field">
+                    <span>${T("desc_prompt_label")}</span>
+                    <textarea class="cat-te-vo-edit-prompt" rows="8" placeholder="${T("voiceover_item_prompt_placeholder")}"></textarea>
+                  </label>
+                  <p class="cat-te-gen-edit-hint">${T("voiceover_edit_hint")}</p>
+                </div>
+              </div>
+              <div class="cat-te-gen-edit-footer">
+                <button type="button" class="cat-te-btn cat-te-vo-edit-cancel">${T("cancel_btn")}</button>
+                <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-vo-edit-save">${T("save_btn")}</button>
+              </div>
+            </div>
+          </div>
           <div class="cat-te-floating-panel cat-te-output-videos-modal" hidden>
             <div class="cat-te-modal cat-te-output-videos-dialog">
               <div class="cat-te-modal-header cat-te-output-videos-drag">
@@ -2046,7 +3135,10 @@ export class CapTimelineEditorApp {
                 <button type="button" class="cat-te-modal-close cat-te-output-videos-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
               </div>
               <div class="cat-te-output-videos-toolbar">
-                <input class="cat-te-output-videos-filter" type="search" placeholder="${T("filter_filename_placeholder")}" />
+                <div class="cat-te-output-videos-toolbar-row">
+                  <input class="cat-te-output-videos-filter" type="search" placeholder="${T("filter_filename_placeholder")}" />
+                  <button type="button" class="cat-te-btn cat-te-output-videos-auto-link" title="${T("auto_associate_videos_title")}">${T("auto_associate_videos_btn")}</button>
+                </div>
                 <div class="cat-te-output-videos-time-filter">
                   ${OUTPUT_VIDEOS_TIME_RANGES.map((r) => `
                     <button type="button" class="cat-te-output-videos-time-btn${r.id === "1h" ? " is-active" : ""}" data-range="${r.id}">${r.label}</button>
@@ -2130,6 +3222,10 @@ export class CapTimelineEditorApp {
                         <label class="cat-te-compose-field cat-te-wm-narrow">
                           <span>${T("font_size_label")}</span>
                           <input class="cat-te-wm-font-size" type="number" min="6" max="400" step="1" />
+                        </label>
+                        <label class="cat-te-compose-field cat-te-wm-narrow">
+                          <span>${T("letter_spacing_label")}</span>
+                          <input class="cat-te-wm-letter-spacing" type="number" min="-50" max="200" step="1" />
                         </label>
                         <label class="cat-te-compose-field cat-te-wm-narrow">
                           <span>${T("color_label")}</span>
@@ -2220,7 +3316,9 @@ export class CapTimelineEditorApp {
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-ai-optimize-modal" hidden>
-            <div class="cat-te-modal cat-te-ai-optimize-dialog">
+            <div class="cat-te-ai-optimize-shell">
+              <button type="button" class="cat-te-ai-optimize-nav prev" title="${T("ai_optimize_prev_clip_title")}" aria-label="${T("ai_optimize_prev_clip_title")}" disabled>${iconHtml("chevronLeft", 20)}</button>
+              <div class="cat-te-modal cat-te-ai-optimize-dialog">
               <div class="cat-te-modal-header">
                 <span class="cat-te-ai-optimize-title">${T("ai_optimize_prompt_title")}</span>
                 <button type="button" class="cat-te-modal-close cat-te-ai-optimize-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
@@ -2279,6 +3377,8 @@ export class CapTimelineEditorApp {
                   </div>
                 </div>
               </div>
+              </div>
+              <button type="button" class="cat-te-ai-optimize-nav next" title="${T("ai_optimize_next_clip_title")}" aria-label="${T("ai_optimize_next_clip_title")}" disabled>${iconHtml("chevronLeft", 20)}</button>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-skill-picker-modal" hidden>
@@ -2301,6 +3401,14 @@ export class CapTimelineEditorApp {
                 <label class="cat-te-modal-row">
                   <span>${T("autosave_interval_label")}</span>
                   <input class="cat-te-autosave-interval" type="number" min="1" max="300" step="1" />
+                </label>
+                <label class="cat-te-modal-check-row">
+                  <input class="cat-te-use-clip-video-filename" type="checkbox" checked />
+                  <span>${T("use_clip_specified_video_filename_label")}</span>
+                  <span class="cat-te-info-tip" tabindex="0" aria-label="${T("use_clip_specified_video_filename_info_aria")}">
+                    ${iconHtml("info", 12)}
+                    <span class="cat-te-info-tip-pop">${T("use_clip_specified_video_filename_info_text")}</span>
+                  </span>
                 </label>
                 <div class="cat-te-agent-settings">
                   <div class="cat-te-agent-heading">
@@ -2336,8 +3444,23 @@ export class CapTimelineEditorApp {
         this.sidebarTitle = el.querySelector(".cat-te-sidebar-title");
         this.projectPanel = el.querySelector(".cat-te-project-panel");
         this.clipPanel = el.querySelector(".cat-te-clip-panel");
-        this.globalPromptInput = el.querySelector(".cat-te-global-prompt-input");
-        this.globalPromptCommentBtn = el.querySelector(".cat-te-global-prompt-comment-btn");
+        this.visualClipBody = el.querySelector(".cat-te-visual-clip-body");
+        this.subtitlePanel = el.querySelector(".cat-te-subtitle-panel");
+        this.voiceoverPanel = el.querySelector(".cat-te-voiceover-panel");
+        this.voPromptInput = el.querySelector(".cat-te-vo-prompt");
+        this.voStylePromptInput = el.querySelector(".cat-te-vo-style-prompt");
+        this.voAudiosList = el.querySelector(".cat-te-vo-audios-list");
+        this.voAudioAddBtn = el.querySelector(".cat-te-vo-audio-add");
+        this.voAudioEditBtn = el.querySelector(".cat-te-vo-audio-edit");
+        this.globalPromptInput = el.querySelector('[data-setting-prompt-input="global_prompt"]');
+        this.globalPromptCommentBtn = el.querySelector('[data-setting-prompt-comment="global_prompt"]');
+        this._settingPromptInputs = Object.fromEntries(
+            SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-input="${key}"]`)]),
+        );
+        this._settingPromptCommentBtns = Object.fromEntries(
+            SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-comment="${key}"]`)]),
+        );
+        this._settingPromptUndoArmed = Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [key, false]));
         this.mediaStarFilterHost = el.querySelector(".cat-te-media-header-actions");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
         this.mediaPanel = el.querySelector(".cat-te-media");
@@ -2352,25 +3475,55 @@ export class CapTimelineEditorApp {
         this.programEmpty = el.querySelector(".cat-te-program-empty");
         this.programMeta = el.querySelector(".cat-te-program-meta");
         this.promptInput = el.querySelector(".cat-te-clip-panel .cat-te-prompt-input");
-        attachRichPromptHandler(this.promptInput, { mode: "widget" });
         this.aiPromptInput = el.querySelector(".cat-te-clip-panel .cat-te-ai-prompt-input");
-        attachRichPromptHandler(this.aiPromptInput, { mode: "widget" });
         this.aiOptimizeBtn = el.querySelector(".cat-te-ai-optimize-btn");
         this.clipPromptTabs = el.querySelectorAll(".cat-te-clip-panel .cat-te-prompt-tab");
-        attachRichPromptHandler(this.globalPromptInput, { mode: "widget" });
-        this.useGlobalCb = el.querySelector(".cat-te-use-global-cb");
-        this.useAiPromptCb = el.querySelector(".cat-te-use-ai-prompt-cb");
+        this._attachPromptCopyButtons(el);
+        attachRichPromptHandler(this.promptInput, { mode: "widget" });
+        attachRichPromptHandler(this.aiPromptInput, { mode: "widget" });
+        for (const key of SETTING_PROMPT_KEYS) {
+            const input = this._settingPromptInputs[key];
+            if (input) attachRichPromptHandler(input, { mode: "widget" });
+        }
+        this.promptIncludesHost = el.querySelector(".cat-te-prompt-includes");
+        this.promptIncludeChips = el.querySelectorAll(".cat-te-prompt-include-chip");
+        this.promptOrderList = el.querySelector(".cat-te-prompt-order-list");
         this.useMediaPromptCb = el.querySelector(".cat-te-use-media-prompt-cb");
         this.headExtendInput = el.querySelector(".cat-te-head-extend");
         this.tailExtendInput = el.querySelector(".cat-te-tail-extend");
         this.genPreviewVideoCb = el.querySelector(".cat-te-gen-preview-video");
         this.secondSampleCb = el.querySelector(".cat-te-second-sample");
+        this.h3MotionContextInput = el.querySelector(".cat-te-h3-motion-context");
+        this.saveLatentCb = el.querySelector(".cat-te-save-latent");
         this.clipRoleSelect = el.querySelector(".cat-te-clip-role");
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
         this.clipAgentSelect = el.querySelector(".cat-te-clip-agent");
         this.clipAgentCustomInput = el.querySelector(".cat-te-clip-agent-custom");
         this.clipAgentCustomRow = el.querySelector(".cat-te-clip-agent-custom-row");
+        this.subTextInput = el.querySelector(".cat-te-sub-text");
+        this.subFontSelect = el.querySelector(".cat-te-sub-font");
+        this.subSizeInput = el.querySelector(".cat-te-sub-size");
+        this.subLetterSpacingInput = el.querySelector(".cat-te-sub-letter-spacing");
+        this.subColorInput = el.querySelector(".cat-te-sub-color");
+        this.subBoldCb = el.querySelector(".cat-te-sub-bold");
+        this.subItalicCb = el.querySelector(".cat-te-sub-italic");
+        this.subOpacityInput = el.querySelector(".cat-te-sub-opacity");
+        this.subOpacityVal = el.querySelector(".cat-te-sub-opacity-val");
+        this.subStrokeCb = el.querySelector(".cat-te-sub-stroke");
+        this.subStrokeColorInput = el.querySelector(".cat-te-sub-stroke-color");
+        this.subStrokeWidthInput = el.querySelector(".cat-te-sub-stroke-width");
+        this.subShadowCb = el.querySelector(".cat-te-sub-shadow");
+        this.subShadowColorInput = el.querySelector(".cat-te-sub-shadow-color");
+        this.subShadowBlurInput = el.querySelector(".cat-te-sub-shadow-blur");
+        this.subShadowXInput = el.querySelector(".cat-te-sub-shadow-x");
+        this.subShadowYInput = el.querySelector(".cat-te-sub-shadow-y");
+        this.subAlignSelect = el.querySelector(".cat-te-sub-align");
+        this.subVAlignSelect = el.querySelector(".cat-te-sub-valign");
+        this.subOffsetXInput = el.querySelector(".cat-te-sub-offset-x");
+        this.subOffsetYInput = el.querySelector(".cat-te-sub-offset-y");
+        this.subApplyTrackBtn = el.querySelector(".cat-te-sub-apply-track");
+        this.subApplyAllBtn = el.querySelector(".cat-te-sub-apply-all");
         this.clipInfoDetail = el.querySelector(".cat-te-clip-info-detail");
         this.clipSwiper = el.querySelector(".cat-te-clip-swiper");
         this.clipSwiperPrev = el.querySelector(".cat-te-clip-swiper-nav.prev");
@@ -2379,14 +3532,21 @@ export class CapTimelineEditorApp {
         this.clipThumb = el.querySelector(".cat-te-clip-thumb");
         this.clipThumbVideo = el.querySelector(".cat-te-clip-thumb-video");
         this.clipThumbEmpty = el.querySelector(".cat-te-clip-thumb-empty");
+        this.clipThumbSubtitle = el.querySelector(".cat-te-clip-thumb-subtitle");
         this.clipThumbSortBtn = el.querySelector(".cat-te-clip-thumb-sort");
         this.clipThumbDeleteBtn = el.querySelector(".cat-te-clip-thumb-delete");
         this.clipVideosHost = el.querySelector(".cat-te-clip-videos");
         this.clipVideosList = el.querySelector(".cat-te-clip-videos-list");
         this.clipVideosOpenBtn = el.querySelector(".cat-te-clip-videos-open");
         this.clipNameEl = el.querySelector(".cat-te-clip-name");
+        this.clipIdEl = el.querySelector(".cat-te-clip-id");
         this.clipStartEl = el.querySelector(".cat-te-clip-start");
         this.clipEndEl = el.querySelector(".cat-te-clip-end");
+        this.clipSourceTrimEl = el.querySelector(".cat-te-clip-source-trim");
+        this.clipSourceTrimLabelEl = el.querySelector(".cat-te-clip-source-trim-label");
+        this.clipSourceInEl = el.querySelector(".cat-te-clip-source-in");
+        this.clipSourceOutEl = el.querySelector(".cat-te-clip-source-out");
+        this.clipSourceDurEl = el.querySelector(".cat-te-clip-source-dur");
         this.clipDurEl = el.querySelector(".cat-te-clip-dur");
         this.clipItemIndexEl = el.querySelector(".cat-te-clip-item-index");
         this.framePreview = el.querySelector(".cat-te-frame-preview");
@@ -2425,9 +3585,30 @@ export class CapTimelineEditorApp {
         this.genVideoMutedCb = el.querySelector(".cat-te-gen-video-muted");
         this.genVideoNote = el.querySelector(".cat-te-gen-video-note");
         this.genVideoDeleteBtn = el.querySelector(".cat-te-gen-video-delete");
+        this.genEditModal = el.querySelector(".cat-te-gen-edit-modal");
+        this.genEditTitle = el.querySelector(".cat-te-gen-edit-title");
+        this.genEditTlHost = el.querySelector(".cat-te-gen-edit-tl-host");
+        this.genEditPreviewCanvas = el.querySelector(".cat-te-gen-edit-preview-canvas");
+        this.genEditPreviewEmpty = el.querySelector(".cat-te-gen-edit-preview-empty");
+        this.genEditPreviewEl = el.querySelector(".cat-te-gen-edit-preview");
+        this.genEditVSplit = el.querySelector(".cat-te-gen-edit-vsplit");
+        this.genEditLeft = el.querySelector(".cat-te-gen-edit-left");
+        this.genEditNameEl = el.querySelector(".cat-te-gen-edit-name");
+        this.genEditFileEl = el.querySelector(".cat-te-gen-edit-file");
+        this.genEditPrompt = el.querySelector(".cat-te-gen-edit-prompt");
+        this.genEditDubBtn = el.querySelector(".cat-te-gen-edit-dub");
+        this.voEditModal = el.querySelector(".cat-te-vo-edit-modal");
+        this.voEditTitle = el.querySelector(".cat-te-vo-edit-title");
+        this.voEditTlHost = el.querySelector(".cat-te-vo-edit-tl-host");
+        this.voEditAudio = el.querySelector(".cat-te-vo-edit-audio");
+        this.voEditPreviewEmpty = el.querySelector(".cat-te-vo-edit-preview-empty");
+        this.voEditNameEl = el.querySelector(".cat-te-vo-edit-name");
+        this.voEditFileEl = el.querySelector(".cat-te-vo-edit-file");
+        this.voEditPrompt = el.querySelector(".cat-te-vo-edit-prompt");
         this.outputVideosModal = el.querySelector(".cat-te-output-videos-modal");
         this.outputVideosBody = el.querySelector(".cat-te-output-videos-body");
         this.outputVideosFilter = el.querySelector(".cat-te-output-videos-filter");
+        this.outputVideosAutoLinkBtn = el.querySelector(".cat-te-output-videos-auto-link");
         this.outputVideosTimeButtons = el.querySelectorAll(".cat-te-output-videos-time-btn");
         this.outputVideosTitle = el.querySelector(".cat-te-output-videos-title");
         this.outputVideosDragHandle = el.querySelector(".cat-te-output-videos-drag");
@@ -2446,6 +3627,7 @@ export class CapTimelineEditorApp {
         this.wmTextContent = el.querySelector(".cat-te-wm-text-content");
         this.wmFontFamily = el.querySelector(".cat-te-wm-font-family");
         this.wmFontSize = el.querySelector(".cat-te-wm-font-size");
+        this.wmLetterSpacing = el.querySelector(".cat-te-wm-letter-spacing");
         this.wmFontColor = el.querySelector(".cat-te-wm-font-color");
         this.wmImagePreview = el.querySelector(".cat-te-wm-image-preview");
         this.wmImageUploadBtn = el.querySelector(".cat-te-wm-image-upload");
@@ -2465,6 +3647,8 @@ export class CapTimelineEditorApp {
         this.wmMarginLockBtn = el.querySelector(".cat-te-wm-margin-lock");
         this.aiOptimizeModal = el.querySelector(".cat-te-ai-optimize-modal");
         this.aiOptimizeTitle = el.querySelector(".cat-te-ai-optimize-title");
+        this.aiOptimizePrevBtn = el.querySelector(".cat-te-ai-optimize-nav.prev");
+        this.aiOptimizeNextBtn = el.querySelector(".cat-te-ai-optimize-nav.next");
         this.aiModelSelect = el.querySelector(".cat-te-ai-model");
         this.aiLangSelect = el.querySelector(".cat-te-ai-lang");
         this.aiSystemInput = el.querySelector(".cat-te-ai-system");
@@ -2481,6 +3665,7 @@ export class CapTimelineEditorApp {
 
         this.settingsModal = el.querySelector(".cat-te-settings-modal");
         this.autosaveIntervalInput = el.querySelector(".cat-te-autosave-interval");
+        this.useClipVideoFilenameCb = el.querySelector(".cat-te-use-clip-video-filename");
         this.agentList = el.querySelector(".cat-te-agent-list");
         this.agentForm = el.querySelector(".cat-te-agent-form");
         this.agentLabelInput = el.querySelector(".cat-te-agent-label");
@@ -2542,15 +3727,23 @@ export class CapTimelineEditorApp {
             this._syncBrandProjectName();
         });
         this.brandProjectBtn?.addEventListener("click", () => this._focusProjectNameFromBrand());
-        this.globalPromptInput?.addEventListener("focus", () => { this._globalPromptUndoArmed = true; });
-        this.globalPromptInput?.addEventListener("blur", () => { this._globalPromptUndoArmed = false; });
-        this.globalPromptInput?.addEventListener("input", () => this._onGlobalPromptInput());
-        this.globalPromptCommentBtn?.addEventListener("click", () => {
-            if (!this.globalPromptInput) return;
-            this.globalPromptInput.focus();
-            toggleComment(this.globalPromptInput);
-            this._onGlobalPromptInput();
-        });
+        for (const key of SETTING_PROMPT_KEYS) {
+            const input = this._settingPromptInputs?.[key];
+            const commentBtn = this._settingPromptCommentBtns?.[key];
+            input?.addEventListener("focus", () => {
+                if (this._settingPromptUndoArmed) this._settingPromptUndoArmed[key] = true;
+            });
+            input?.addEventListener("blur", () => {
+                if (this._settingPromptUndoArmed) this._settingPromptUndoArmed[key] = false;
+            });
+            input?.addEventListener("input", () => this._onSettingPromptInput(key));
+            commentBtn?.addEventListener("click", () => {
+                if (!input) return;
+                input.focus();
+                toggleComment(input);
+                this._onSettingPromptInput(key);
+            });
+        }
         el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
         this.settingsModal.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
         el.querySelector(".cat-te-agent-add")?.addEventListener("click", () => this._editAgentConfig());
@@ -2573,6 +3766,10 @@ export class CapTimelineEditorApp {
             this.autosaveIntervalInput.value = String(clamped);
             if (this._overlay?.classList.contains("open")) this._startAutoSave();
         });
+        this.useClipVideoFilenameCb?.addEventListener("change", () => {
+            this._useClipSpecifiedVideoFilename = !!this.useClipVideoFilenameCb.checked;
+            this._saveToWidgets();
+        });
 
         this.promptInput.addEventListener("focus", () => { this._promptUndoArmed = true; });
         this.promptInput.addEventListener("blur", () => { this._promptUndoArmed = false; });
@@ -2588,8 +3785,13 @@ export class CapTimelineEditorApp {
             if (this._aiOptimizeBusy) this._cancelAiOptimize();
             else void this._openAiOptimizeModal();
         });
-        this.useGlobalCb.addEventListener("change", () => this._onUseGlobalChange());
-        this.useAiPromptCb?.addEventListener("change", () => this._onUseAiPromptChange());
+        this.promptIncludeChips?.forEach((chip) => {
+            chip.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._onPromptIncludeToggle(chip.dataset.include);
+            });
+        });
+        this._renderPromptConcatOrderList();
         this.useMediaPromptCb?.addEventListener("change", () => this._onUseMediaPromptChange());
         if (this.headExtendInput && !this.headExtendInput._catTeBound) {
             this.headExtendInput._catTeBound = true;
@@ -2597,11 +3799,14 @@ export class CapTimelineEditorApp {
             this.tailExtendInput?.addEventListener("change", () => this._onTailExtendChange());
             this.genPreviewVideoCb?.addEventListener("change", () => this._onGenPreviewVideoChange());
             this.secondSampleCb?.addEventListener("change", () => this._onSecondSampleChange());
+            this.h3MotionContextInput?.addEventListener("change", () => this._onH3MotionContextChange());
+            this.saveLatentCb?.addEventListener("change", () => this._onSaveLatentChange());
         }
         this.clipRoleSelect?.addEventListener("change", () => this._onClipRoleChange());
         this.clipRoleCustomInput?.addEventListener("change", () => this._onClipRoleCustomChange());
         this.clipAgentSelect?.addEventListener("change", () => this._onClipAgentChange());
         this.clipAgentCustomInput?.addEventListener("change", () => this._onClipAgentCustomChange());
+        this._bindSubtitlePanelEvents();
         this.clipSwiperPrev?.addEventListener("click", (e) => {
             e.stopPropagation();
             this._stepClipPreview(-1);
@@ -2642,8 +3847,34 @@ export class CapTimelineEditorApp {
         this.genVideoNote?.addEventListener("change", () => this._onGenVideoNoteChange());
         this.genVideoNote?.addEventListener("blur", () => this._onGenVideoNoteChange());
         this.genVideoDeleteBtn?.addEventListener("click", () => this._deleteCurrentGenVideo());
+        el.querySelector(".cat-te-gen-edit-close")?.addEventListener("click", () => this._closeGenEditModal(false));
+        el.querySelector(".cat-te-gen-edit-cancel")?.addEventListener("click", () => this._closeGenEditModal(false));
+        el.querySelector(".cat-te-gen-edit-save")?.addEventListener("click", () => this._closeGenEditModal(true));
+        this.genEditPrompt?.addEventListener("input", () => this._onGenEditPromptInput());
+        this._bindGenEditPreviewResize();
+        el.querySelector(".cat-te-vo-edit-close")?.addEventListener("click", () => this._closeVoiceoverEditModal(false));
+        el.querySelector(".cat-te-vo-edit-cancel")?.addEventListener("click", () => this._closeVoiceoverEditModal(false));
+        el.querySelector(".cat-te-vo-edit-save")?.addEventListener("click", () => this._closeVoiceoverEditModal(true));
+        this.voEditPrompt?.addEventListener("input", () => this._onVoiceoverEditPromptInput());
+        this.voAudioAddBtn?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const clip = this._selClip;
+            if (clip && isVoiceoverTrackType(clip.track?.type)) void this._openOutputAudiosPicker(clip);
+        });
+        this.voAudioEditBtn?.addEventListener("click", () => {
+            const clip = this._selClip;
+            if (clip && isVoiceoverTrackType(clip.track?.type)) void this._openVoiceoverEditModal(clip);
+        });
+        for (const input of [this.voPromptInput, this.voStylePromptInput]) {
+            if (!input) continue;
+            attachRichPromptHandler(input, { mode: "widget" });
+            input.addEventListener("focus", () => { this._voPromptUndoArmed = true; });
+            input.addEventListener("blur", () => { this._voPromptUndoArmed = false; });
+            input.addEventListener("input", () => this._onVoiceoverPromptInput());
+        }
         el.querySelector(".cat-te-output-videos-close")?.addEventListener("click", () => this._closeOutputVideosPicker());
         this.outputVideosFilter?.addEventListener("input", () => this._renderOutputVideosPicker());
+        this.outputVideosAutoLinkBtn?.addEventListener("click", () => void this._autoAssociateOutputMedia());
         this.outputVideosTimeButtons?.forEach((btn) => {
             btn.addEventListener("click", () => {
                 this._outputVideosTimeRange = btn.dataset.range;
@@ -2670,6 +3901,16 @@ export class CapTimelineEditorApp {
         this.mediaPreviewTags?.addEventListener("blur", () => this._saveMediaPreviewMeta());
         el.querySelector(".cat-te-clip-items-close")?.addEventListener("click", () => this._closeClipItemsModal());
         el.querySelector(".cat-te-ai-optimize-close")?.addEventListener("click", () => this._closeAiOptimizeModal());
+        this.aiOptimizePrevBtn?.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this._stepAiOptimizeClip(-1);
+        });
+        this.aiOptimizeNextBtn?.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void this._stepAiOptimizeClip(1);
+        });
         this.aiSrcTabs?.forEach((tab) => {
             tab.addEventListener("click", () => this._setAiOptimizeSrcTab(tab.dataset.src));
         });
@@ -2716,9 +3957,26 @@ export class CapTimelineEditorApp {
                 e.stopPropagation();
                 return;
             }
+            if (this.aiOptimizeModal && !this.aiOptimizeModal.hidden
+                && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
+                void this._stepAiOptimizeClip(e.key === "ArrowRight" ? 1 : -1);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
             if (e.key === "Escape") {
                 if (this.outputVideosModal && !this.outputVideosModal.hidden) {
                     this._closeOutputVideosPicker();
+                    e.stopPropagation();
+                    return;
+                }
+                if (this.genEditModal && !this.genEditModal.hidden) {
+                    this._closeGenEditModal(false);
+                    e.stopPropagation();
+                    return;
+                }
+                if (this.voEditModal && !this.voEditModal.hidden) {
+                    this._closeVoiceoverEditModal(false);
                     e.stopPropagation();
                     return;
                 }
@@ -3135,6 +4393,14 @@ export class CapTimelineEditorApp {
         return (this._timeline?.tracks ?? []).filter(t => t.type === "audio");
     }
 
+    _allVoiceoverTracks() {
+        return (this._timeline?.tracks ?? []).filter(t => isVoiceoverTrackType(t.type));
+    }
+
+    _allTextTracks() {
+        return (this._timeline?.tracks ?? []).filter(t => isSubtitleTrackType(t.type));
+    }
+
     _trackIndex(track) {
         return this._trackInfo.get(track.id)?.trackIndex ?? 0;
     }
@@ -3202,6 +4468,7 @@ export class CapTimelineEditorApp {
                 track.setMuted(!track.muted);
                 render();
                 this._decorateAllClips();
+                this._scheduleProgramPreview();
                 if (this._timeline?._playing) this._startAudioPlayback();
             });
             render();
@@ -3220,8 +4487,16 @@ export class CapTimelineEditorApp {
         // instead of skipping it, so the icons that DO apply still align
         // vertically with the same column in other rows.
         actions.appendChild(this._makeTrackSlot(track, "lock"));
-        actions.appendChild(this._makeTrackSlot(track, track.type === "image" ? "visible" : null));
-        actions.appendChild(this._makeTrackSlot(track, (track.type === "audio" || track.type === "image" || track.type === "video") ? "mute" : null));
+        actions.appendChild(this._makeTrackSlot(
+            track,
+            (track.type === "image" || isSubtitleTrackType(track.type)) ? "visible" : null,
+        ));
+        // Audio / voiceover: mute; image/video: mute (embedded audio); subtitle: placeholder.
+        actions.appendChild(this._makeTrackSlot(
+            track,
+            (track.type === "audio" || isVoiceoverTrackType(track.type)
+                || track.type === "image" || track.type === "video") ? "mute" : null,
+        ));
     }
 
     /** User-added tracks (not the default main/overlay/audio ones) disappear
@@ -3579,6 +4854,14 @@ export class CapTimelineEditorApp {
                 const source = clip.source && typeof clip.source === "object" ? clip.source : {};
                 const mediaRows = this._jsonClipMediaRows(clip);
                 const isAudio = clip.type === "audio" || trackType === "audio";
+                const isVoiceover = !isAudio && (
+                    clip.type === "voiceover" || trackType === "voiceover"
+                );
+                const isSubtitle = !isAudio && !isVoiceover && (
+                    clip.type === "subtitle"
+                    || trackType === "subtitle"
+                    || trackType === "text"
+                );
                 const first = mediaRows[0];
                 const startMs = Number(clip.start_ms) || 0;
                 const durationMs = Number(clip.duration_ms);
@@ -3593,18 +4876,25 @@ export class CapTimelineEditorApp {
                 const durationMsOut = Math.max(1, Math.round(duration * 1000));
                 clips.push({
                     ...clip,
-                    clip_type: isAudio ? "audio" : "clip",
+                    clip_type: isAudio
+                        ? "audio"
+                        : isVoiceover
+                            ? "voiceover"
+                            : isSubtitle
+                                ? "subtitle"
+                                : "clip",
                     track: trackIndex,
                     start_ms: startMsOut,
                     duration_ms: durationMsOut,
                     end_ms: startMsOut + durationMsOut,
-                    items: isAudio
+                    items: isAudio || isVoiceover || isSubtitle
                         ? []
                         : mediaRows
                             .filter((row) => row.kind !== "audio")
                             .map((row) => ({ id: row.id, kind: row.kind, file: row.file })),
-                    start_image: isAudio ? null : (first?.file || null),
+                    start_image: isAudio || isVoiceover || isSubtitle ? null : (first?.file || null),
                     audio_file: isAudio ? (first?.file || null) : null,
+                    text: isSubtitle ? String(clip.text ?? clip.name ?? "") : undefined,
                     source_duration: (
                         Number(source.duration_ms) > 0
                             ? Number(source.duration_ms)
@@ -3768,7 +5058,295 @@ export class CapTimelineEditorApp {
     }
 
     _clipUsesGeneratedPreview(meta) {
-        return meta?.previewMode === "generated" && !!this._firstEnabledGeneratedVideo(meta);
+        if (!this._isGeneratedEditMode()) return false;
+        return !!this._firstEnabledGeneratedVideo(meta);
+    }
+
+    _isGeneratedEditMode() {
+        return this._timelineEditMode === "generated";
+    }
+
+    _genEffectiveDurationSec(gen) {
+        if (!gen) return null;
+        const tin = Math.max(0, Number(gen.trim_in_sec) || 0);
+        const full = Number(gen.duration_sec);
+        let tout = gen.trim_out_sec == null ? null : Number(gen.trim_out_sec);
+        if (!(Number.isFinite(tout) && tout > tin)) {
+            tout = Number.isFinite(full) && full > tin ? full : null;
+        }
+        if (tout != null && tout > tin) return tout - tin;
+        return null;
+    }
+
+    _ensureResourceDuration(clip, meta) {
+        const m = meta || this._ensureClipMeta(clip);
+        const cur = Number(m.resourceDurationSec);
+        if (!(Number.isFinite(cur) && cur > 0)) {
+            m.resourceDurationSec = Math.max(0.05, Number(clip.duration) || 0.05);
+        }
+        return m.resourceDurationSec;
+    }
+
+    _ensureResourceStart(clip, meta) {
+        const m = meta || this._ensureClipMeta(clip);
+        const cur = Number(m.resourceStartSec);
+        if (!(Number.isFinite(cur) && cur >= 0)) {
+            m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
+        }
+        return m.resourceStartSec;
+    }
+
+    /** Push later clips on a track so expanded durations do not overlap (gaps kept). */
+    _reflowTrackNoOverlap(track) {
+        if (!track?.clips?.length) return;
+        const clips = [...track.clips].sort((a, b) => (
+            (a.startTime - b.startTime) || String(a.id).localeCompare(String(b.id))
+        ));
+        let cursor = 0;
+        for (const clip of clips) {
+            let st = Math.max(0, Number(clip.startTime) || 0);
+            if (st < cursor - 1e-6) {
+                st = cursor;
+                clip.startTime = st;
+            }
+            const dur = Math.max(0.05, Number(clip.duration) || 0.05);
+            cursor = st + dur;
+            clip._applyPosition?.();
+        }
+    }
+
+    _rememberResourceTiming(clip, meta) {
+        if (!clip || this._isGeneratedEditMode()) return;
+        const m = meta || this._ensureClipMeta(clip);
+        m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
+        m.resourceDurationSec = Math.max(0.05, Number(clip.duration) || 0.05);
+        this._meta.set(clip.id, m);
+    }
+
+    async _probeOutputVideoDuration(file) {
+        const url = this._outputVideoUrl(file);
+        if (!url) return null;
+        return new Promise((resolve) => {
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.muted = true;
+            const done = (sec) => {
+                video.removeAttribute("src");
+                try { video.load(); } catch { /* ignore */ }
+                resolve(sec);
+            };
+            video.onloadedmetadata = () => {
+                const d = Number(video.duration);
+                done(Number.isFinite(d) && d > 0 ? d : null);
+            };
+            video.onerror = () => done(null);
+            video.src = url;
+        });
+    }
+
+    async _ensureGenVideoDuration(gen) {
+        if (!gen?.file) return null;
+        const cur = Number(gen.duration_sec);
+        if (Number.isFinite(cur) && cur > 0) return cur;
+        const dur = await this._probeOutputVideoDuration(gen.file);
+        if (dur != null) {
+            gen.duration_sec = dur;
+            if (gen.trim_out_sec == null) gen.trim_out_sec = dur;
+        }
+        return gen.duration_sec;
+    }
+
+    _setTimelineEditMode(mode) {
+        const next = mode === "generated" ? "generated" : "resource";
+        if (this._timelineEditMode === next) {
+            this._updateEditModeToolbar();
+            return;
+        }
+        this._recordUndo();
+        this._timelineEditMode = next;
+        void this._applyTimelineEditMode();
+        this._saveToWidgets();
+    }
+
+    async _applyTimelineEditMode() {
+        const genMode = this._isGeneratedEditMode();
+        if (genMode) {
+            this._hideOutputVideoHoverPreview();
+            this._stopResourceGenProgramPreview();
+        }
+        const jobs = [];
+        for (const track of this._allImageTracks()) {
+            for (const clip of track.clips) {
+                const m = this._ensureClipMeta(clip);
+                this._ensureResourceDuration(clip, m);
+                this._ensureResourceStart(clip, m);
+                const gen = this._firstEnabledGeneratedVideo(m);
+                m.previewMode = genMode && gen ? "generated" : "media";
+                this._meta.set(clip.id, m);
+                // Re-base from resource start so re-entering gen mode does not cascade.
+                clip.startTime = this._ensureResourceStart(clip, m);
+                if (genMode && gen) {
+                    jobs.push((async () => {
+                        await this._ensureGenVideoDuration(gen);
+                        this._applyClipDisplayDuration(clip, m, gen);
+                        this._decorateClip(clip);
+                        this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
+                    })());
+                } else {
+                    this._applyClipDisplayDuration(clip, m, null);
+                    this._decorateClip(clip);
+                    this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
+                }
+            }
+        }
+        if (jobs.length) await Promise.all(jobs);
+        // Gen mode no longer expands clip duration — keep resource layout.
+        if (!genMode) {
+            this._restoreLinkedTrackResourceStarts();
+        }
+        this._updateEditModeToolbar();
+        this.tlHost?.classList.toggle("is-gen-edit-mode", genMode);
+        this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
+    }
+
+    _restoreLinkedTrackResourceStarts() {
+        const linked = [
+            ...this._allAudioTracks(),
+            ...this._allVoiceoverTracks(),
+            ...this._allTextTracks(),
+        ];
+        for (const track of linked) {
+            for (const clip of track.clips) {
+                const m = this._meta.get(clip.id);
+                if (!m) continue;
+                const resStart = Number(m.resourceStartSec);
+                if (Number.isFinite(resStart) && resStart >= 0) {
+                    clip.startTime = resStart;
+                    clip._applyPosition?.();
+                }
+            }
+        }
+    }
+
+    /**
+     * After image clips expand in generated edit mode, push audio/subtitle clips
+     * so the whole timeline stays in sync. Time warp is driven by the main track.
+     */
+    _rippleLinkedTracksFromImageLayout() {
+        const main = this._mainTrack;
+        const imageClips = [];
+        for (const clip of main?.clips ?? []) {
+            const m = this._ensureClipMeta(clip);
+            const resStart = this._ensureResourceStart(clip, m);
+            imageClips.push({
+                resStart,
+                resEnd: resStart + this._ensureResourceDuration(clip, m),
+                outStart: Math.max(0, Number(clip.startTime) || 0),
+                outEnd: Math.max(0, Number(clip.startTime) || 0)
+                    + Math.max(0.05, Number(clip.duration) || 0.05),
+            });
+        }
+        if (!imageClips.length) return;
+        imageClips.sort((a, b) => a.resStart - b.resStart);
+
+        const mapStart = (resT) => {
+            let t = Math.max(0, Number(resT) || 0);
+            let shift = 0;
+            for (const seg of imageClips) {
+                if (seg.resEnd <= t + 1e-9) {
+                    shift += (seg.outEnd - seg.outStart) - (seg.resEnd - seg.resStart);
+                    continue;
+                }
+                if (seg.resStart <= t && t < seg.resEnd) {
+                    const local = t - seg.resStart;
+                    const resDur = Math.max(1e-6, seg.resEnd - seg.resStart);
+                    const outDur = Math.max(0.05, seg.outEnd - seg.outStart);
+                    return seg.outStart + (local / resDur) * outDur;
+                }
+                break;
+            }
+            return t + shift;
+        };
+
+        const linked = [
+            ...this._allAudioTracks(),
+            ...this._allVoiceoverTracks(),
+            ...this._allTextTracks(),
+        ];
+        for (const track of linked) {
+            for (const clip of track.clips) {
+                const m = this._meta.get(clip.id);
+                const resStart = Number.isFinite(Number(m?.resourceStartSec))
+                    ? Number(m.resourceStartSec)
+                    : Math.max(0, Number(clip.startTime) || 0);
+                if (m) {
+                    if (!(Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0)) {
+                        m.resourceStartSec = resStart;
+                    }
+                    if (!(Number.isFinite(Number(m.resourceDurationSec)) && m.resourceDurationSec > 0)) {
+                        m.resourceDurationSec = Math.max(0.05, Number(clip.duration) || 0.05);
+                    }
+                    this._meta.set(clip.id, m);
+                }
+                clip.startTime = mapStart(resStart);
+                clip._applyPosition?.();
+            }
+            this._reflowTrackNoOverlap(track);
+        }
+    }
+
+    _applyClipDisplayDuration(clip, meta, gen) {
+        const m = meta || this._ensureClipMeta(clip);
+        const resourceDur = this._ensureResourceDuration(clip, m);
+        // Generated-edit mode keeps the same clip duration as resource edit;
+        // gen video layout/trim is edited in the gen-edit modal, not here.
+        clip.duration = resourceDur;
+        if (!this._isGeneratedEditMode()) {
+            clip.sourceOffset = Math.max(0, Number(clip.sourceOffset) || 0);
+        }
+        clip._applyPosition?.();
+        this._meta.set(clip.id, m);
+        void gen;
+    }
+
+    _syncGenTrimFromClip(_clip) {
+        // Main-timeline resize no longer writes gen trim (see gen-edit modal).
+    }
+
+    _updateEditModeToolbar() {
+        const genMode = this._isGeneratedEditMode();
+        if (this.insertClipBtn) {
+            this.insertClipBtn.disabled = false;
+            this.insertClipBtn.title = T("insert_empty_clip_title");
+        }
+        if (this.runMenuBtn) {
+            this.runMenuBtn.disabled = false;
+            this.runMenuBtn.title = T("run_menu_title");
+        }
+        const modeBtn = this.editModeBtn;
+        if (modeBtn) {
+            modeBtn.classList.toggle("is-active", genMode);
+            modeBtn.innerHTML = `${iconHtml(genMode ? "camera" : "video", 14)}<span>${
+                genMode ? T("edit_mode_back_to_resource_btn") : T("edit_mode_switch_to_generated_btn")
+            }</span>`;
+            modeBtn.title = genMode
+                ? T("edit_mode_back_to_resource_title")
+                : T("edit_mode_switch_to_generated_title");
+        }
+    }
+
+    _updateAllGeneratedPreviewButton() {
+        this._updateEditModeToolbar();
+    }
+
+    _toggleAllGeneratedPreview() {
+        this._setTimelineEditMode(this._isGeneratedEditMode() ? "resource" : "generated");
+    }
+
+    _allGeneratedPreviewActive() {
+        return this._isGeneratedEditMode();
     }
 
     _generatedVideosFromJson(clip) {
@@ -3786,10 +5364,24 @@ export class CapTimelineEditorApp {
         this._onExecuted = (e) => this._onPromptExecuted(e);
         this._onExecSuccess = (e) => this._flushPendingGeneratedVideos(e);
         this._onExecAbort = (e) => this._abortPendingGeneratedJob(e);
+        this._onExecStart = (e) => this._onExecutionStart(e);
+        this._onProgress = (e) => this._onRunProgress(e);
+        this._onProgressState = (e) => this._onRunProgressState(e);
+        this._onQueueStatus = (e) => this._onQueueStatusEvent(e);
+        this._onTeClipRunning = (e) => this._onTimelineClipRunning(e);
+        this._onTeVideoSaved = (e) => this._onTimelineVideoSaved(e);
+        this._onKjPreviewOverride = (e) => this._onKjPreviewOverrideEvent(e);
         api.addEventListener("executed", this._onExecuted);
         api.addEventListener("execution_success", this._onExecSuccess);
         api.addEventListener("execution_error", this._onExecAbort);
         api.addEventListener("execution_interrupted", this._onExecAbort);
+        api.addEventListener("execution_start", this._onExecStart);
+        api.addEventListener("progress", this._onProgress);
+        api.addEventListener("progress_state", this._onProgressState);
+        api.addEventListener("status", this._onQueueStatus);
+        api.addEventListener("cat_te_clip_running", this._onTeClipRunning);
+        api.addEventListener("cat_te_video_saved", this._onTeVideoSaved);
+        api.addEventListener("kj_preview_override", this._onKjPreviewOverride);
     }
 
     _unbindExecutionWatch() {
@@ -3799,9 +5391,27 @@ export class CapTimelineEditorApp {
         api.removeEventListener?.("execution_success", this._onExecSuccess);
         api.removeEventListener?.("execution_error", this._onExecAbort);
         api.removeEventListener?.("execution_interrupted", this._onExecAbort);
+        api.removeEventListener?.("execution_start", this._onExecStart);
+        api.removeEventListener?.("progress", this._onProgress);
+        api.removeEventListener?.("progress_state", this._onProgressState);
+        api.removeEventListener?.("status", this._onQueueStatus);
+        api.removeEventListener?.("cat_te_clip_running", this._onTeClipRunning);
+        api.removeEventListener?.("cat_te_video_saved", this._onTeVideoSaved);
+        api.removeEventListener?.("kj_preview_override", this._onKjPreviewOverride);
+        if (this._queueReconcileTimer) {
+            clearTimeout(this._queueReconcileTimer);
+            this._queueReconcileTimer = 0;
+        }
         this._onExecuted = null;
         this._onExecSuccess = null;
         this._onExecAbort = null;
+        this._onExecStart = null;
+        this._onProgress = null;
+        this._onProgressState = null;
+        this._onQueueStatus = null;
+        this._onTeClipRunning = null;
+        this._onTeVideoSaved = null;
+        this._onKjPreviewOverride = null;
     }
 
     _promptIdFromQueueResult(result) {
@@ -3825,34 +5435,441 @@ export class CapTimelineEditorApp {
         if (promptId) {
             const hit = jobs.find((j) => j.promptId === promptId);
             if (hit) return hit;
+            // Do not steal a job that is already bound to another prompt.
+            return jobs.find((j) => !j.promptId) || null;
         }
-        // FIFO fallback when prompt_id is missing from the frontend/event.
-        return jobs.find((j) => !j.promptId) || jobs[0] || null;
+        return jobs.find((j) => !j.promptId) || null;
     }
 
     _takePendingGeneratedJob(promptId) {
         const jobs = this._pendingGeneratedJobs;
         if (!jobs?.length) return null;
         let idx = -1;
-        if (promptId) idx = jobs.findIndex((j) => j.promptId === promptId);
-        if (idx < 0) {
+        if (promptId) {
+            idx = jobs.findIndex((j) => j.promptId === promptId);
+            if (idx < 0) idx = jobs.findIndex((j) => !j.promptId);
+        } else {
             idx = jobs.findIndex((j) => !j.promptId);
-            if (idx < 0) idx = 0;
         }
+        if (idx < 0) return null;
         return jobs.splice(idx, 1)[0] || null;
     }
 
     _abortPendingGeneratedJob(e) {
         const promptId = this._promptIdFromEvent(e);
+        let droppedStamp = null;
+        const droppedIds = [];
         if (promptId) {
+            const dropped = this._pendingGeneratedJobs.filter((j) => j.promptId === promptId);
+            droppedStamp = dropped[0]?.stamp || null;
+            for (const j of dropped) {
+                if (j?.clipId != null) droppedIds.push(j.clipId);
+            }
             this._pendingGeneratedJobs = this._pendingGeneratedJobs.filter(
                 (j) => j.promptId !== promptId,
             );
+        } else {
+            // Interrupt / error without id: drop the oldest unmatched job only.
+            const idx = this._pendingGeneratedJobs.findIndex((j) => !j.promptId);
+            if (idx >= 0) {
+                droppedStamp = this._pendingGeneratedJobs[idx]?.stamp || null;
+                if (this._pendingGeneratedJobs[idx]?.clipId != null) {
+                    droppedIds.push(this._pendingGeneratedJobs[idx].clipId);
+                }
+                this._pendingGeneratedJobs.splice(idx, 1);
+            }
+        }
+        if (this._runningClipId != null) droppedIds.push(this._runningClipId);
+        this._clearRunningForPrompt(promptId);
+        for (const id of droppedIds) this._clearRunPreview(id);
+        if (droppedStamp) this._maybeClearGenVideoStamp(droppedStamp);
+        this._syncClipRunDecorations();
+    }
+
+    /**
+     * Queue UI delete/clear does not emit execution_interrupted — only status.
+     * Reconcile pending clip jobs against the live Comfy queue.
+     */
+    _onQueueStatusEvent(e) {
+        if (this._destroyed) return;
+        if (!this._pendingGeneratedJobs.length && !this._runningPromptId) return;
+        const remaining = Number(e?.detail?.exec_info?.queue_remaining);
+        if (remaining === 0) {
+            if (this._queueReconcileTimer) {
+                clearTimeout(this._queueReconcileTimer);
+                this._queueReconcileTimer = 0;
+            }
+            this._pendingGeneratedJobs = [];
+            this._clearRunningForPrompt(this._runningPromptId);
+            this._clearAllRunPreviews();
+            this._genVideoStamp = null;
+            this._syncClipRunDecorations();
             return;
         }
-        // Interrupt / error without id: drop the oldest unmatched job only.
-        const idx = this._pendingGeneratedJobs.findIndex((j) => !j.promptId);
-        if (idx >= 0) this._pendingGeneratedJobs.splice(idx, 1);
+        this._schedulePendingJobsQueueReconcile();
+    }
+
+    _schedulePendingJobsQueueReconcile() {
+        if (this._queueReconcileTimer) return;
+        this._queueReconcileTimer = setTimeout(() => {
+            this._queueReconcileTimer = 0;
+            void this._reconcilePendingJobsWithQueue();
+        }, 60);
+    }
+
+    async _reconcilePendingJobsWithQueue() {
+        if (this._destroyed) return;
+        if (!this._pendingGeneratedJobs.length && !this._runningPromptId) return;
+        if (typeof api?.fetchApi !== "function") return;
+        let data = null;
+        try {
+            const res = await api.fetchApi("/queue");
+            data = await res.json();
+        } catch {
+            return;
+        }
+        if (this._destroyed) return;
+        const liveIds = new Set();
+        for (const row of [...(data?.queue_running || []), ...(data?.queue_pending || [])]) {
+            const pid = row?.[1];
+            if (pid != null && String(pid)) liveIds.add(String(pid));
+        }
+        const beforeLen = this._pendingGeneratedJobs.length;
+        const beforeRun = this._runningClipId;
+        const beforeIds = new Set(this._pendingGeneratedJobs.map((j) => String(j.clipId)));
+
+        // Only drop jobs whose promptId is known and no longer in the live queue.
+        // Do NOT invent promptId bindings from unrelated queue items — that mis-associates
+        // generated videos onto the wrong clip.
+        let kept = this._pendingGeneratedJobs.filter((j) => {
+            if (!j.promptId) return true;
+            return liveIds.has(String(j.promptId));
+        });
+        // Unbound jobs may only remain while the live queue still has unmatched slots.
+        const bound = kept.filter((j) => j.promptId).length;
+        let nullSlots = Math.max(0, liveIds.size - bound);
+        kept = kept.filter((j) => {
+            if (j.promptId) return true;
+            if (nullSlots > 0) {
+                nullSlots -= 1;
+                return true;
+            }
+            return false;
+        });
+        this._pendingGeneratedJobs = kept;
+        const keptIds = new Set(kept.map((j) => String(j.clipId)));
+        for (const id of beforeIds) {
+            if (!keptIds.has(id)) this._clearRunPreview(id);
+        }
+        if (this._runningPromptId && !liveIds.has(String(this._runningPromptId))) {
+            this._clearRunningForPrompt(this._runningPromptId);
+        } else if (
+            this._runningClipId != null
+            && !kept.some((j) => String(j.clipId) === String(this._runningClipId))
+            && !(this._runningPromptId && liveIds.has(String(this._runningPromptId)))
+        ) {
+            this._clearRunningForPrompt(this._runningPromptId);
+        }
+        if (beforeLen !== kept.length || beforeRun !== this._runningClipId) {
+            this._syncClipRunDecorations();
+        }
+    }
+
+    _bindPromptIdToPendingJob(promptId, preferredClipId = null) {
+        const pid = String(promptId || "").trim();
+        if (!pid) return null;
+        let job = this._pendingGeneratedJobs.find((j) => j.promptId === pid);
+        if (!job && preferredClipId != null) {
+            job = this._pendingGeneratedJobs.find(
+                (j) => !j.promptId && String(j.clipId) === String(preferredClipId),
+            );
+        }
+        if (!job) job = this._pendingGeneratedJobs.find((j) => !j.promptId);
+        if (!job) return null;
+        job.promptId = pid;
+        if (this._runningPromptId === pid || !this._runningPromptId) {
+            // execution_start may have already fired; or bind eagerly from queue result.
+            if (!this._runningPromptId) this._runningPromptId = pid;
+            this._runningClipId = job.clipId ?? null;
+            this._syncClipRunDecorations();
+        }
+        return job;
+    }
+
+    _onExecutionStart(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const promptId = this._promptIdFromEvent(e);
+        // Keep prompt id even when the pending list races behind queuePrompt.
+        if (promptId) this._runningPromptId = promptId;
+        let job = null;
+        if (promptId) {
+            job = this._pendingGeneratedJobs.find((j) => j.promptId === promptId);
+            if (!job) {
+                // app.queuePrompt often returns without prompt_id — bind FIFO.
+                job = this._pendingGeneratedJobs.find((j) => !j.promptId);
+                if (job) job.promptId = promptId;
+            }
+        } else {
+            job = this._pendingGeneratedJobs.find((j) => !j.promptId)
+                || this._pendingGeneratedJobs[0]
+                || null;
+            if (job?.promptId) this._runningPromptId = job.promptId;
+        }
+        this._runningClipId = job?.clipId ?? null;
+        this._runningProgress = 0;
+        this._syncClipRunDecorations();
+    }
+
+    /**
+     * For-loop / batch: Data Json Clip Parser emits which timeline clip is starting.
+     * Prefer this over prompt_id FIFO — one prompt can run many clips.
+     */
+    _onTimelineClipRunning(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const d = e?.detail;
+        if (!d || typeof d !== "object") return;
+        const clipId = String(d.clip_id || "").trim();
+        if (!clipId || !this._teNotifyBelongsHere(clipId, null)) return;
+        const promptId = String(d.prompt_id ?? d.promptId ?? "").trim();
+        const job = this._pendingGeneratedJobs.find((j) => String(j.clipId) === clipId);
+        if (job && promptId && !job.promptId) job.promptId = promptId;
+        if (promptId) this._runningPromptId = promptId;
+        const prevClip = this._runningClipId;
+        this._runningClipId = clipId;
+        this._runningProgress = 0;
+        if (prevClip != null && String(prevClip) !== clipId) this._clearRunPreview(prevClip);
+        this._syncClipRunDecorations();
+    }
+
+    /**
+     * Seq To Video finished one file — attach immediately (do not wait for prompt success).
+     */
+    _onTimelineVideoSaved(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const d = e?.detail;
+        if (!d || typeof d !== "object") return;
+        let file = normalizeOutputVideoPath(d.file);
+        if (!file) {
+            const name = d.filename || d.file;
+            if (name) {
+                const sub = String(d.subfolder || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                file = normalizeOutputVideoPath(sub ? `${sub}/${name}` : name);
+            }
+        }
+        if (!file) return;
+
+        let clipId = String(d.clip_id || "").trim()
+            || this._clipIdFromSpecifiedVideoPath(file)
+            || "";
+        if (!clipId) {
+            const expected = file;
+            const job = this._pendingGeneratedJobs.find(
+                (j) => j.expectedFile && normalizeOutputVideoPath(j.expectedFile) === expected,
+            );
+            clipId = job?.clipId ? String(job.clipId) : "";
+        }
+        if (!clipId || !this._teNotifyBelongsHere(clipId, file)) return;
+
+        const idx = this._pendingGeneratedJobs.findIndex((j) => String(j.clipId) === clipId);
+        let stamp = null;
+        if (idx >= 0) {
+            stamp = this._pendingGeneratedJobs[idx]?.stamp || null;
+            this._pendingGeneratedJobs.splice(idx, 1);
+        }
+        if (this._runningClipId != null && String(this._runningClipId) === clipId) {
+            this._runningClipId = null;
+            this._runningProgress = 0;
+        }
+        this._clearRunPreview(clipId);
+        this._syncClipRunDecorations();
+        this._persistGeneratedVideosToProjectJson(clipId, [file]);
+        if (!this._timeline || !this._timelineReady) {
+            this._deferredGeneratedJobs.push({ clipId, files: [file] });
+        } else {
+            this._attachGeneratedVideos(clipId, [file]);
+        }
+        if (stamp) this._maybeClearGenVideoStamp(stamp);
+    }
+
+    _clearRunningForPrompt(promptId) {
+        if (promptId && this._runningPromptId && this._runningPromptId !== promptId) return;
+        const wasClip = this._runningClipId;
+        this._runningPromptId = null;
+        this._runningClipId = null;
+        this._runningProgress = 0;
+        if (wasClip != null) this._clearRunPreview(wasClip);
+    }
+
+    _b64ToBlob(b64, mime) {
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return new Blob([arr], { type: mime || "application/octet-stream" });
+    }
+
+    _runPreviewKey(clipId) {
+        return `__run__:${String(clipId)}`;
+    }
+
+    _clearRunPreview(clipId) {
+        if (clipId == null || !this._runPreviewByClipId) return;
+        const key = String(clipId);
+        const prev = this._runPreviewByClipId.get(key);
+        if (!prev) return;
+        this._runPreviewByClipId.delete(key);
+        if (prev.url) {
+            try { URL.revokeObjectURL(prev.url); } catch { /* ignore */ }
+        }
+        if (this._resourceGenPreview?.clipId != null
+            && String(this._resourceGenPreview.clipId) === key
+            && String(this._resourceGenPreview.file || "") === this._runPreviewKey(key)) {
+            this._stopResourceGenProgramPreview();
+        }
+    }
+
+    _clearAllRunPreviews() {
+        if (!this._runPreviewByClipId?.size) return;
+        for (const id of [...this._runPreviewByClipId.keys()]) this._clearRunPreview(id);
+    }
+
+    /**
+     * KJNodes Model Preview Override pushes sampling frames/videos over WS.
+     * Attach the latest video/mp4 blob to the running timeline clip for hover preview.
+     */
+    _onKjPreviewOverrideEvent(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const d = e?.detail;
+        if (!d || typeof d.image !== "string") return;
+        const mime = typeof d.mime === "string" ? d.mime : "";
+        if (mime !== "video/mp4") return;
+
+        let clipId = this._runningClipId;
+        if (clipId == null && this._runningPromptId) {
+            const head = this._pendingGeneratedJobs.find((j) => (
+                j.promptId === this._runningPromptId || !j.promptId
+            ));
+            clipId = head?.clipId ?? null;
+        }
+        if (clipId == null) return;
+        if (this._clipRunState(clipId) !== "running") return;
+
+        let blob;
+        try {
+            blob = this._b64ToBlob(d.image, mime);
+        } catch {
+            return;
+        }
+        const url = URL.createObjectURL(blob);
+        const key = String(clipId);
+        const prev = this._runPreviewByClipId.get(key);
+        if (prev?.url) {
+            try { URL.revokeObjectURL(prev.url); } catch { /* ignore */ }
+        }
+        this._runPreviewByClipId.set(key, { url, mime });
+
+        const clip = this._findClipById(clipId);
+        if (clip) this._decorateClip(clip);
+        if (clip
+            && this._resourceGenPreview?.clipId != null
+            && String(this._resourceGenPreview.clipId) === key
+            && String(this._resourceGenPreview.file || "") === this._runPreviewKey(key)) {
+            this._startResourceGenProgramPreview(clip, this._runPreviewKey(key), url);
+        }
+    }
+
+    _setRunningProgress(ratio) {
+        const next = Math.max(0, Math.min(1, Number(ratio) || 0));
+        if (Math.abs(next - this._runningProgress) < 0.002) return;
+        this._runningProgress = next;
+        // Progress can arrive before we bound a clip id — promote FIFO then.
+        if (this._runningClipId == null && this._runningPromptId) {
+            this._bindPromptIdToPendingJob(this._runningPromptId);
+        }
+        const clip = this._findClipById(this._runningClipId);
+        if (clip) this._decorateClip(clip);
+    }
+
+    _onRunProgress(e) {
+        if (this._destroyed) return;
+        const d = e?.detail;
+        if (!d || typeof d !== "object") return;
+        const pid = String(d.prompt_id ?? d.promptId ?? "").trim();
+        if (pid) {
+            if (this._runningPromptId && this._runningPromptId !== pid) return;
+            if (!this._runningPromptId) this._runningPromptId = pid;
+            if (this._runningClipId == null) this._bindPromptIdToPendingJob(pid);
+        } else if (!this._runningPromptId) {
+            return;
+        }
+        const max = Number(d.max);
+        if (!(max > 0)) return;
+        this._setRunningProgress(Number(d.value) / max);
+    }
+
+    _onRunProgressState(e) {
+        if (this._destroyed) return;
+        const d = e?.detail;
+        if (!d || typeof d !== "object") return;
+        const pid = String(d.prompt_id ?? d.promptId ?? "").trim();
+        if (pid) {
+            if (this._runningPromptId && this._runningPromptId !== pid) return;
+            if (!this._runningPromptId) this._runningPromptId = pid;
+            if (this._runningClipId == null) this._bindPromptIdToPendingJob(pid);
+        } else if (!this._runningPromptId) {
+            return;
+        }
+        const nodes = d.nodes && typeof d.nodes === "object" ? Object.values(d.nodes) : [];
+        let best = 0;
+        for (const n of nodes) {
+            const max = Number(n?.max);
+            if (!(max > 0)) continue;
+            const state = String(n?.state || "").toLowerCase();
+            // Prefer the actively running node; otherwise keep the highest ratio.
+            const ratio = Math.min(1, (Number(n.value) || 0) / max);
+            if (state === "running") {
+                this._setRunningProgress(ratio);
+                return;
+            }
+            if (ratio > best) best = ratio;
+        }
+        if (best > 0) this._setRunningProgress(best);
+    }
+
+    /** @returns {"queued"|"running"|null} */
+    _clipRunState(clipId) {
+        if (clipId == null) return null;
+        const id = String(clipId);
+        if (this._runningClipId != null && String(this._runningClipId) === id) return "running";
+        // Parser notify already named the active clip — do not also mark the
+        // FIFO pending head as running (same prompt / for-loop left both green).
+        if (this._runningClipId != null) {
+            if (this._pendingGeneratedJobs.some((j) => String(j.clipId) === id)) return "queued";
+            return null;
+        }
+        // No notify yet: treat the head pending job of the active prompt as running.
+        if (this._runningPromptId) {
+            const job = this._pendingGeneratedJobs.find((j) => String(j.clipId) === id);
+            if (job && (job.promptId === this._runningPromptId || !job.promptId)) {
+                const head = this._pendingGeneratedJobs.find((j) => (
+                    j.promptId === this._runningPromptId || !j.promptId
+                ));
+                if (head && String(head.clipId) === id) return "running";
+            }
+        }
+        if (this._pendingGeneratedJobs.some((j) => String(j.clipId) === id)) return "queued";
+        return null;
+    }
+
+    _syncClipRunDecorations() {
+        if (!this._timeline || this._destroyed) return;
+        for (const track of this._timeline.tracks || []) {
+            for (const clip of track.clips || []) this._decorateClip(clip);
+        }
+    }
+
+    _notePendingGeneratedJob(job) {
+        this._pendingGeneratedJobs.push(job);
+        this._syncClipRunDecorations();
     }
 
     _collectExecutedOutputVideos(detail) {
@@ -3891,20 +5908,79 @@ export class CapTimelineEditorApp {
     }
 
     _onPromptExecuted(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
         const files = this._collectExecutedOutputVideos(e?.detail);
         if (!files.length) return;
-        const job = this._findPendingGeneratedJob(this._promptIdFromEvent(e));
-        if (!job) return;
-        job.files.push(...files);
+        const promptId = this._promptIdFromEvent(e);
+        for (const file of files) {
+            const clipId = this._clipIdFromSpecifiedVideoPath(file);
+            if (clipId) {
+                const job = this._pendingGeneratedJobs.find((j) => String(j.clipId) === clipId);
+                if (job) {
+                    if (promptId && !job.promptId) job.promptId = promptId;
+                    job.files.push(file);
+                }
+                continue;
+            }
+            const job = this._findPendingGeneratedJob(promptId);
+            if (job) job.files.push(file);
+        }
     }
 
     _flushPendingGeneratedVideos(e) {
-        const job = this._takePendingGeneratedJob(this._promptIdFromEvent(e));
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const promptId = this._promptIdFromEvent(e);
+        // One prompt may finish several for-loop clips — flush every matching job.
+        const jobs = [];
+        if (promptId) {
+            this._pendingGeneratedJobs = this._pendingGeneratedJobs.filter((j) => {
+                if (j.promptId === promptId) {
+                    jobs.push(j);
+                    return false;
+                }
+                return true;
+            });
+            // Unbound leftovers only when nothing else claims them (single-run race).
+            if (!jobs.length) {
+                const job = this._takePendingGeneratedJob(null);
+                if (job) jobs.push(job);
+            }
+        } else {
+            const job = this._takePendingGeneratedJob(null);
+            if (job) jobs.push(job);
+        }
+        this._clearRunningForPrompt(promptId);
+        this._syncClipRunDecorations();
+        for (const job of jobs) {
+            this._flushOnePendingGeneratedJob(job);
+        }
+    }
+
+    _flushOnePendingGeneratedJob(job) {
         if (!job) return;
-        const files = [...new Set(job.files || [])];
+        let files = [...new Set(
+            (job.files || []).map((f) => normalizeOutputVideoPath(f)).filter(Boolean),
+        )];
+        const expected = job.expectedFile ? normalizeOutputVideoPath(job.expectedFile) : null;
+        if (expected) {
+            if (files.includes(expected)) {
+                files = [expected];
+            } else if (files.length) {
+                const base = expected.split("/").pop() || "";
+                const clipHint = String(job.clipId || "");
+                const matched = files.filter((f) => (
+                    (base && f.endsWith(base))
+                    || (clipHint && f.includes(clipHint))
+                ));
+                if (matched.length) files = matched;
+            } else {
+                files = [];
+            }
+        }
+        if (!this._pendingGeneratedJobs.some((j) => j.expectedFile && j.stamp === job.stamp)) {
+            this._maybeClearGenVideoStamp(job.stamp);
+        }
         if (!files.length) return;
-        // Always write into project_json immediately so close/reopen keeps
-        // auto-linked videos even if the timeline UI is closed or mid-rebuild.
         this._persistGeneratedVideosToProjectJson(job.clipId || null, files);
         if (!this._timeline || !this._timelineReady) {
             this._deferredGeneratedJobs.push({
@@ -3914,6 +5990,13 @@ export class CapTimelineEditorApp {
             return;
         }
         this._attachGeneratedVideos(job.clipId, files);
+    }
+
+    _maybeClearGenVideoStamp(stamp) {
+        if (!stamp || this._genVideoStamp !== stamp) return;
+        if (this._pendingGeneratedJobs.some((j) => j.stamp === stamp || j.expectedFile)) return;
+        this._genVideoStamp = null;
+        this._saveToWidgets();
     }
 
     _applyDeferredGeneratedVideos() {
@@ -3951,8 +6034,8 @@ export class CapTimelineEditorApp {
         this._addGeneratedVideosToClip(clip, files);
     }
 
-    _addGeneratedVideosToClip(clip, files) {
-        if (!clip || clip.track?.type === "audio") return false;
+    _addGeneratedVideosToClip(clip, files, { recordUndo = true } = {}) {
+        if (!clip || !this._isOutputPickerClip(clip, "video")) return false;
         const m = this._ensureClipMeta(clip);
         const rows = this._clipGeneratedVideos(m);
         const have = new Set(rows.map((row) => row.file));
@@ -3961,11 +6044,18 @@ export class CapTimelineEditorApp {
             const n = normalizeOutputVideoPath(file);
             if (!n || have.has(n)) continue;
             have.add(n);
-            added.push({ id: genVideoUid(), file: n, enabled: true, muted: false, note: "" });
+            added.push(normalizeGeneratedVideo({
+                id: genVideoUid(),
+                file: n,
+                enabled: true,
+                muted: false,
+                note: "",
+            }));
         }
         if (!added.length) return false;
-        this._recordUndo();
+        if (recordUndo) this._recordUndo();
         m.generatedVideos = [...added, ...rows];
+        this._ensureResourceDuration(clip, m);
         this._meta.set(clip.id, m);
         this._decorateClip(clip);
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
@@ -3975,35 +6065,13 @@ export class CapTimelineEditorApp {
             if (this._historyReady) {
                 this._openedProjectJson = JSON.stringify(this._buildProject());
             }
+            if (this._isGeneratedEditMode()) void this._applyTimelineEditMode();
+            else this._updateEditModeToolbar();
         } else {
             this._persistGeneratedVideosToProjectJson(clip.id, added.map((row) => row.file));
         }
-        this._updateAllGeneratedPreviewButton();
+        for (const row of added) void this._ensureGenVideoDuration(row);
         return true;
-    }
-
-    _toggleClipGeneratedPreview(clip) {
-        if (!clip || clip.track?.type === "audio") return;
-        const m = this._ensureClipMeta(clip);
-        if (!this._firstEnabledGeneratedVideo(m)) {
-            if (m.previewMode === "generated") {
-                m.previewMode = "media";
-                this._meta.set(clip.id, m);
-            }
-            this._decorateClip(clip);
-            this._syncClipPrimaryAppearance(clip);
-            this._scheduleProgramPreview();
-            this._updateAllGeneratedPreviewButton();
-            return;
-        }
-        m.previewMode = this._clipUsesGeneratedPreview(m) ? "media" : "generated";
-        this._meta.set(clip.id, m);
-        this._decorateClip(clip);
-        this._syncClipPrimaryAppearance(clip);
-        this._scheduleProgramPreview();
-        if (this._timeline?._playing) this._startAudioPlayback();
-        this._saveToWidgets();
-        this._updateAllGeneratedPreviewButton();
     }
 
     /** Visual clips that have at least one enabled generated video. */
@@ -4018,44 +6086,6 @@ export class CapTimelineEditorApp {
             }
         }
         return out;
-    }
-
-    _allGeneratedPreviewActive() {
-        const rows = this._clipsWithEnabledGeneratedVideo();
-        return rows.length > 0 && rows.every(({ meta }) => this._clipUsesGeneratedPreview(meta));
-    }
-
-    /** Toggle every clip that has generated video between gen / asset preview. */
-    _toggleAllGeneratedPreview() {
-        const rows = this._clipsWithEnabledGeneratedVideo();
-        if (!rows.length) return;
-        this._recordUndo();
-        const next = this._allGeneratedPreviewActive() ? "media" : "generated";
-        for (const { clip, meta } of rows) {
-            meta.previewMode = next;
-            this._meta.set(clip.id, meta);
-            this._decorateClip(clip);
-            this._syncClipPrimaryAppearance(clip);
-        }
-        this._updateAllGeneratedPreviewButton();
-        this._scheduleProgramPreview();
-        if (this._timeline?._playing) this._startAudioPlayback();
-        this._saveToWidgets();
-    }
-
-    _updateAllGeneratedPreviewButton() {
-        const btn = this.allGenPreviewBtn;
-        if (!btn) return;
-        const rows = this._clipsWithEnabledGeneratedVideo();
-        const active = this._allGeneratedPreviewActive();
-        btn.disabled = !rows.length;
-        btn.classList.toggle("is-active", active);
-        btn.innerHTML = `${iconHtml(active ? "camera" : "video", 14)}<span>${
-            active ? T("toggle_all_asset_preview_btn") : T("toggle_all_generated_preview_btn")
-        }</span>`;
-        btn.title = active
-            ? T("toggle_all_asset_preview_title")
-            : T("toggle_all_generated_preview_title");
     }
 
     _renderClipGeneratedVideosList(clip, meta, isAudio) {
@@ -4085,8 +6115,8 @@ export class CapTimelineEditorApp {
             const name = document.createElement("button");
             name.type = "button";
             name.className = "cat-te-clip-video-name";
-            name.textContent = row.file.split(/[\\/]/).pop();
-            name.title = row.file;
+            name.textContent = String(row.file || "").split(/[\\/]/).pop() || T("asset_fallback_name");
+            name.title = row.file || "";
             name.addEventListener("click", () => this._openGenVideoModal(clip, index));
 
             const mute = document.createElement("button");
@@ -4294,20 +6324,1862 @@ export class CapTimelineEditorApp {
         this._deleteGeneratedVideo(cur.clip, cur.row.id);
     }
 
-    async _openOutputVideosPicker(clip) {
-        if (!this.outputVideosModal || !clip || clip.track?.type === "audio") return;
+    _genEditPreviewMaxHeight() {
+        const left = this.genEditLeft;
+        const leftH = left?.clientHeight ?? 0;
+        if (leftH <= 0) return DEFAULT_GEN_EDIT_PREVIEW_H + 200;
+        // Leave room for splitter (~6) + timeline min.
+        return Math.max(MIN_GEN_EDIT_PREVIEW_H, leftH - MIN_GEN_EDIT_TL_H - 8);
+    }
+
+    _setGenEditPreviewHeight(h) {
+        const maxH = this._genEditPreviewMaxHeight();
+        const clamped = Math.min(maxH, Math.max(MIN_GEN_EDIT_PREVIEW_H, Math.round(h)));
+        const host = this.genEditLeft || this.genEditModal;
+        host?.style.setProperty("--cat-te-gen-edit-preview-h", `${clamped}px`);
+        return clamped;
+    }
+
+    _applySavedGenEditPreviewHeight() {
+        const saved = parseInt(localStorage.getItem(STORAGE_GEN_EDIT_PREVIEW_H), 10);
+        if (Number.isFinite(saved) && saved >= MIN_GEN_EDIT_PREVIEW_H) {
+            this._setGenEditPreviewHeight(saved);
+        } else {
+            this._setGenEditPreviewHeight(DEFAULT_GEN_EDIT_PREVIEW_H);
+        }
+    }
+
+    _bindGenEditPreviewResize() {
+        const split = this.genEditVSplit;
+        const preview = this.genEditPreviewEl;
+        if (!split || !preview || split._catTeBound) return;
+        split._catTeBound = true;
+        split.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            const startY = e.clientY;
+            const startH = preview.offsetHeight;
+            split.classList.add("dragging");
+            document.body.classList.add("cat-te-row-resize");
+            const onMove = (ev) => {
+                this._setGenEditPreviewHeight(startH + (ev.clientY - startY));
+                this._scheduleGenEditPreview();
+            };
+            const onUp = () => {
+                split.classList.remove("dragging");
+                document.body.classList.remove("cat-te-row-resize");
+                document.removeEventListener("mousemove", onMove);
+                document.removeEventListener("mouseup", onUp);
+                const h = this._setGenEditPreviewHeight(preview.offsetHeight);
+                localStorage.setItem(STORAGE_GEN_EDIT_PREVIEW_H, String(h));
+                this._scheduleGenEditPreview();
+                try { this._genEditState?.timeline?._refresh?.(); } catch { /* ignore */ }
+            };
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+        });
+    }
+
+    _cloneGenVideoDraft(row) {
+        const n = normalizeGeneratedVideo(row);
+        return n ? { ...n } : null;
+    }
+
+    _genEditParentDuration() {
+        const clip = this._findClipById(this._genEditState?.clipId);
+        if (!clip) return 1;
+        const m = this._ensureClipMeta(clip);
+        return Math.max(0.05, this._ensureResourceDuration(clip, m));
+    }
+
+
+    /** Timeline length for gen-edit: at least parent clip + room to show source overhang. */
+    _genEditTimelineDuration(clipDur, draft) {
+        let maxEnd = Math.max(0.05, Number(clipDur) || 0.05);
+        for (const g of draft || []) {
+            const tin = Math.max(0, Number(g.trim_in_sec) || 0);
+            let eff = this._genEffectiveDurationSec(g);
+            const full = Number(g.duration_sec);
+            if (!(eff > 0)) {
+                eff = Number.isFinite(full) && full > tin ? full - tin : 0;
+            }
+            const start = Math.max(0, Number(g.edit_start_sec) || 0);
+            if (eff > 0) maxEnd = Math.max(maxEnd, start + eff);
+            if (Number.isFinite(full) && full > 0) maxEnd = Math.max(maxEnd, full);
+        }
+        return Math.max(maxEnd, clipDur + Math.max(1, clipDur * 0.25));
+    }
+
+    _syncGenEditOutOfBoundsUI(tl, clipDur) {
+        if (!tl?._contentEl) return;
+        let host = tl._contentEl.querySelector(".cat-te-gen-edit-oob");
+        if (!host) {
+            host = document.createElement("div");
+            host.className = "cat-te-gen-edit-oob";
+            host.innerHTML = [
+                '<div class="cat-te-gen-edit-oob-fill"></div>',
+                '<div class="cat-te-gen-edit-oob-line"></div>',
+                '<div class="cat-te-gen-edit-oob-label"></div>',
+            ].join("");
+            tl._contentEl.appendChild(host);
+        }
+        const pps = tl.pixelsPerSecond;
+        const startPx = Math.max(0, clipDur * pps);
+        const widthPx = Math.max(0, tl.duration * pps - startPx);
+        host.style.left = `${startPx}px`;
+        host.style.width = `${widthPx}px`;
+        host.hidden = widthPx < 1;
+        const label = host.querySelector(".cat-te-gen-edit-oob-label");
+        if (label) {
+            label.textContent = T("gen_edit_oob_label", { time: tl.formatTime(clipDur) });
+        }
+        for (const track of tl.tracks) {
+            for (const c of track.clips || []) {
+                const oob = c.startTime >= clipDur - 1e-6;
+                c.el?.classList.toggle("cat-te-gen-edit-clip-oob", oob);
+            }
+        }
+    }
+
+    async _openGenEditModal(clip) {
+        if (!this.genEditModal || !clip || clip.track?.type === "audio") return;
+        if (isSubtitleTrackType(clip.track?.type)) return;
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedVideos(m);
+        if (!rows.length) {
+            alert(T("gen_edit_no_videos"));
+            return;
+        }
+        this._closeGenVideoModal();
+        const draft = rows.map((r) => this._cloneGenVideoDraft(r)).filter(Boolean);
+        await Promise.all(draft.map((g) => this._ensureGenVideoDuration(g)));
+        const clipDur = Math.max(0.05, this._ensureResourceDuration(clip, m));
+        for (const g of draft) {
+            const tin = Math.max(0, Number(g.trim_in_sec) || 0);
+            let eff = this._genEffectiveDurationSec(g);
+            const full = Number(g.duration_sec);
+            if (!(eff > 0)) {
+                eff = Number.isFinite(full) && full > tin ? full - tin : clipDur;
+            }
+            // Keep placements past the parent clip window — they stay editable
+            // but are outside the playable / rendered range.
+            const start = Math.max(0, Number(g.edit_start_sec) || 0);
+            g.edit_start_sec = start;
+            if (!(Number.isFinite(Number(g.duration_sec)) && g.duration_sec > 0) && Number.isFinite(full)) {
+                g.duration_sec = full;
+            }
+            if (!(eff > 0)) {
+                g.trim_out_sec = tin + Math.max(0.05, clipDur);
+            }
+        }
+        this._genEditState = {
+            clipId: clip.id,
+            draft,
+            audioDraft: this._normalizeGenEditAudioDraft(m.genEditAudios),
+            // generatedVideos is newest-first; select the newest entry.
+            selectedId: draft[0]?.id || null,
+            clipMap: new Map(),
+            audioMap: new Map(),
+            previewRaf: 0,
+        };
+        if (this.genEditTitle) {
+            this.genEditTitle.textContent = T("gen_edit_modal_title_named", { name: clip.name || DEFAULT_CLIP_NAME });
+        }
+        this.genEditModal.hidden = false;
+        try { this._timeline?.pause?.(); } catch { /* ignore */ }
+        this._stopAudioPlayback?.();
+        // Cancel main program monitor so it cannot steal shared <video> decoders.
+        if (this._programPreviewRaf) {
+            cancelAnimationFrame(this._programPreviewRaf);
+            this._programPreviewRaf = 0;
+        }
+        this._pauseUnusedPreviewVideos(new Set());
+        if (this._timeline) this._timeline._keyboardSuspended = true;
+        this._applySavedGenEditPreviewHeight();
+        this._buildGenEditTimeline();
+        this._syncGenEditInspector();
+        // Warm-decode audio so play doesn't start silent / delayed.
+        for (const g of draft) {
+            if (g?.file) void this._ensureGenVideoAudioBuffer(g.file, "output");
+        }
+        for (const a of this._genEditState.audioDraft || []) {
+            if (a?.file) void this._ensureGenVideoAudioBuffer(a.file, "input");
+        }
+        // Layout may not be ready on the same frame the modal unhides.
+        this._scheduleGenEditPreview();
+        requestAnimationFrame(() => {
+            this._applySavedGenEditPreviewHeight();
+            this._scheduleGenEditPreview();
+        });
+        setTimeout(() => this._scheduleGenEditPreview(), 80);
+    }
+
+    _buildGenEditTimeline() {
+        const st = this._genEditState;
+        if (!st || !this.genEditTlHost) return;
+        this._destroyGenEditTimeline();
+        const clipDur = this._genEditParentDuration();
+        const tlDur = this._genEditTimelineDuration(clipDur, st.draft);
+        const fps = this.getFps();
+        const tl = new Timeline(this.genEditTlHost, {
+            duration: tlDur,
+            playEndTime: clipDur,
+            fps,
+            timeFormat: "frames",
+            zoom: 1.4,
+            addTrackTypes: [],
+        });
+        tl.toolbarEl?.querySelector(".tl-btn-add-track")?.remove();
+        tl.toolbarEl?.querySelector(".tl-btn-history")?.remove();
+        if (tl._durEl) {
+            tl._durEl.textContent = `/ ${tl.formatTime(clipDur)}`;
+            tl._durEl.title = T("gen_edit_playable_duration_title");
+        }
+        st.timeline = tl;
+        st.clipMap = new Map();
+        st.clipDur = clipDur;
+
+        const n = st.draft.length;
+        for (let i = 0; i < n; i++) {
+            const gen = st.draft[i];
+            const track = tl.addTrackAt({
+                type: "image",
+                name: (gen.file || "").split(/[\\/]/).pop() || T("gen_video_label"),
+                isMain: i === n - 1,
+            }, i);
+            track.height = TRACK_HEIGHT;
+            track.el.style.height = `${TRACK_HEIGHT}px`;
+            track.headerEl.style.height = `${TRACK_HEIGHT}px`;
+            track.setVisible(gen.enabled !== false);
+            track.setMuted(gen.muted === true);
+            this._setupGenEditTrackControls(track, gen.id);
+
+            const tin = Math.max(0, Number(gen.trim_in_sec) || 0);
+            let eff = this._genEffectiveDurationSec(gen);
+            if (!(eff > 0)) {
+                const full = Number(gen.duration_sec);
+                eff = Number.isFinite(full) && full > tin
+                    ? full - tin
+                    : Math.max(0.05, clipDur);
+            }
+            const startSec = Math.max(0, Number(gen.edit_start_sec) || 0);
+            const dur = Math.max(0.05, eff);
+            const src = this._outputVideoUrl(gen.file);
+            const c = track.addClip({
+                name: (gen.file || "").split(/[\\/]/).pop() || T("gen_video_label"),
+                startTime: startSec,
+                duration: dur,
+                sourceOffset: tin,
+                sourceDuration: Number.isFinite(Number(gen.duration_sec)) && gen.duration_sec > 0
+                    ? gen.duration_sec
+                    : Infinity,
+                src,
+                thumbnail: src,
+                color: "#3d6b9e",
+            });
+            if (c) {
+                st.clipMap.set(c.id, gen.id);
+                c.el.dataset.genId = gen.id;
+                this._syncGenEditClipDisabled(c, gen.enabled !== false);
+            }
+        }
+
+        // Detached audio lives only in this modal (not the main timeline).
+        st.audioMap = new Map();
+        const audioRows = Array.isArray(st.audioDraft) ? st.audioDraft : [];
+        if (audioRows.length) {
+            const aTrack = tl.addTrack({
+                type: "audio",
+                name: T("audio_track_name"),
+                height: TRACK_HEIGHT,
+            });
+            aTrack.height = TRACK_HEIGHT;
+            aTrack.el.style.height = `${TRACK_HEIGHT}px`;
+            aTrack.headerEl.style.height = `${TRACK_HEIGHT}px`;
+            // Track-level mute (same as main timeline); draft rows share it.
+            if (audioRows.some((r) => r.muted === true)) aTrack.setMuted(true);
+            this._setupGenEditAudioTrackControls(aTrack);
+            for (const row of audioRows) {
+                if (!row?.file) continue;
+                const startSec = Math.max(0, Number(row.edit_start_sec) || 0);
+                const dur = Math.max(0.05, Number(row.duration) || 0.05);
+                const srcOff = Math.max(0, Number(row.source_offset) || 0);
+                const url = this._audioUrl(row.file) || "";
+                const c = aTrack.addClip({
+                    name: (row.file || "").split(/[\\/]/).pop() || T("audio_track_name"),
+                    startTime: startSec,
+                    duration: dur,
+                    sourceOffset: srcOff,
+                    sourceDuration: Number.isFinite(Number(row.source_duration)) && row.source_duration > 0
+                        ? row.source_duration
+                        : Infinity,
+                    src: row.file,
+                    color: aTrack.color || "#6a9a6a",
+                });
+                if (c) {
+                    st.audioMap.set(c.id, row.id);
+                    c.el.dataset.audioId = row.id;
+                    c.hasAudio = true;
+                    // Waveform optional — load async without blocking.
+                    if (url) {
+                        void this._fetchPeaks(url).then((r) => {
+                            if (!c.el?.isConnected) return;
+                            c.waveformPeaks = r.peaks?.[0] || null;
+                            c._audioBuffer = r.buffer || null;
+                            c.sourceDuration = r.duration || c.sourceDuration;
+                            if (typeof c._refreshWaveRow === "function") c._refreshWaveRow();
+                        }).catch(() => {});
+                    }
+                }
+            }
+        }
+
+        tl.duration = Math.max(tlDur, this._genEditTimelineDuration(clipDur, st.draft));
+        tl.setPlayEndTime(clipDur);
+        this._syncGenEditOutOfBoundsUI(tl, clipDur);
+        tl._refresh?.();
+
+        const refreshBound = () => {
+            const cd = this._genEditParentDuration();
+            st.clipDur = cd;
+            tl.setPlayEndTime(cd);
+            let maxEnd = this._genEditTimelineDuration(cd, st.draft);
+            for (const track of tl.tracks) {
+                for (const c of track.clips || []) maxEnd = Math.max(maxEnd, c.endTime);
+            }
+            if (maxEnd > tl.duration + 1e-3) {
+                tl.duration = maxEnd + Math.max(0.5, cd * 0.1);
+                tl._refresh?.();
+            }
+            this._syncGenEditOutOfBoundsUI(tl, cd);
+            if (tl._durEl) tl._durEl.textContent = `/ ${tl.formatTime(cd)}`;
+        };
+
+        tl.on("clip:select", ({ clip: c }) => {
+            if (!c) return;
+            if (st.audioMap?.get(c.id) || c.el?.dataset?.audioId) {
+                st.selectedId = null;
+                this._syncGenEditInspector();
+                return;
+            }
+            const gid = st.clipMap.get(c?.id) || c?.el?.dataset?.genId;
+            if (gid) {
+                st.selectedId = gid;
+                this._syncGenEditInspector();
+            }
+        });
+        tl.on("clip:moveend", () => {
+            this._pullGenEditDraftFromTimeline();
+            refreshBound();
+            this._scheduleGenEditPreview();
+        });
+        tl.on("clip:resizeend", () => {
+            this._pullGenEditDraftFromTimeline();
+            refreshBound();
+            this._scheduleGenEditPreview();
+        });
+        tl.on("clip:trackchange", () => {
+            this._pullGenEditDraftFromTimeline();
+            refreshBound();
+        });
+        tl.on("timechange", () => this._scheduleGenEditPreview());
+        tl.on("seek", () => {
+            this._scheduleGenEditPreview();
+            if (tl._playing) void this._startGenEditAudioPlayback();
+        });
+        tl.on("play", () => {
+            this._scheduleGenEditPreview();
+            void this._startGenEditAudioPlayback();
+        });
+        tl.on("pause", () => {
+            this._stopGenEditAudioPlayback();
+            this._pauseUnusedPreviewVideos(new Set());
+            this._scheduleGenEditPreview();
+        });
+        tl.on("zoomchange", () => requestAnimationFrame(refreshBound));
+
+        tl.scrollEl?.addEventListener("contextmenu", (e) => {
+            const clipEl = e.target?.closest?.(".tl-clip");
+            if (!clipEl) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const c = tl.tracks.flatMap((t) => t.clips).find((x) => x.el === clipEl || x.id === clipEl.dataset.clipId);
+            if (!c) return;
+            tl.selectClip(c);
+            const gid = st.clipMap.get(c.id);
+            if (gid) st.selectedId = gid;
+            this._syncGenEditInspector();
+            const t = tl.currentTime;
+            const cd = st.clipDur ?? clipDur;
+            const canSplit = t > c.startTime + 1e-3 && t < c.endTime - 1e-3 && t < cd - 1e-3;
+            const isAudioClip = !!(st.audioMap?.get(c.id) || c.el?.dataset?.audioId || c.track?.type === "audio");
+            const items = isAudioClip
+                ? [{
+                    label: T("delete_btn"),
+                    danger: true,
+                    fn: () => this._deleteGenEditAudioClip(c),
+                }]
+                : [
+                    ...(canSplit ? [{ label: T("menu_split"), fn: () => this._splitGenEditClip(c) }] : []),
+                    {
+                        label: T("menu_separate_audio"),
+                        fn: () => void this._separateGenEditClipAudio(c),
+                    },
+                    {
+                        label: T("delete_btn"),
+                        danger: true,
+                        fn: () => this._deleteGenEditClip(c),
+                    },
+                ];
+            this._buildCtxMenu(items, e.clientX, e.clientY);
+        });
+    }
+
+    _setupGenEditTrackControls(track, genId) {
+        const actions = track.actionsEl;
+        if (!actions) return;
+        actions.replaceChildren();
+
+        const makeBtn = (kind) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cat-te-track-btn";
+            if (kind === "lock") {
+                const render = () => {
+                    btn.innerHTML = track.locked ? ICONS.lock : ICONS.lockOpen;
+                    btn.classList.toggle("active", track.locked);
+                    btn.title = track.locked ? T("unlock_track_title") : T("lock_track_title");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    track.setLocked(!track.locked);
+                    render();
+                });
+                render();
+            } else if (kind === "visible") {
+                const render = () => {
+                    btn.innerHTML = track.visible ? ICONS.eye : ICONS.eyeOff;
+                    btn.classList.toggle("active", !track.visible);
+                    btn.title = T("track_visibility_title");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const st = this._genEditState;
+                    const row = st?.draft?.find((g) => g.id === genId);
+                    if (!row) return;
+                    row.enabled = !(row.enabled !== false);
+                    track.setVisible(row.enabled !== false);
+                    for (const c of track.clips || []) {
+                        this._syncGenEditClipDisabled(c, row.enabled !== false);
+                    }
+                    render();
+                    this._scheduleGenEditPreview();
+                });
+                render();
+            } else if (kind === "mute") {
+                const render = () => {
+                    btn.innerHTML = track.muted ? ICONS.volumeOff : ICONS.volume;
+                    btn.classList.toggle("active", track.muted);
+                    btn.title = track.muted ? T("unmute_label") : T("mute_label");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const st = this._genEditState;
+                    const row = st?.draft?.find((g) => g.id === genId);
+                    if (!row) return;
+                    row.muted = !row.muted;
+                    track.setMuted(!!row.muted);
+                    render();
+                    this._scheduleGenEditPreview();
+                    if (this._genEditState?.timeline?._playing) {
+                        void this._startGenEditAudioPlayback();
+                    }
+                });
+                render();
+            }
+            return btn;
+        };
+
+        // Same column order as the main timeline: lock / visibility / mute.
+        actions.append(makeBtn("lock"), makeBtn("visible"), makeBtn("mute"));
+    }
+
+    /** Audio track in gen-edit: lock + mute (visibility slot is a placeholder). */
+    _setupGenEditAudioTrackControls(track) {
+        const actions = track?.actionsEl;
+        if (!actions) return;
+        actions.replaceChildren();
+
+        const makeSlot = (kind) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cat-te-track-btn";
+            if (kind === null) {
+                btn.classList.add("placeholder");
+                btn.disabled = true;
+                btn.tabIndex = -1;
+                return btn;
+            }
+            if (kind === "lock") {
+                const render = () => {
+                    btn.innerHTML = track.locked ? ICONS.lock : ICONS.lockOpen;
+                    btn.classList.toggle("active", track.locked);
+                    btn.title = track.locked ? T("unlock_track_title") : T("lock_track_title");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    track.setLocked(!track.locked);
+                    render();
+                });
+                render();
+            } else if (kind === "mute") {
+                const render = () => {
+                    btn.innerHTML = track.muted ? ICONS.volumeOff : ICONS.volume;
+                    btn.classList.toggle("active", track.muted);
+                    btn.title = track.muted ? T("unmute_label") : T("mute_label");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const st = this._genEditState;
+                    track.setMuted(!track.muted);
+                    const muted = track.muted === true;
+                    if (st?.audioDraft) {
+                        for (const row of st.audioDraft) row.muted = muted;
+                    }
+                    render();
+                    if (st?.timeline?._playing) void this._startGenEditAudioPlayback();
+                });
+                render();
+            }
+            return btn;
+        };
+
+        // Same columns as main timeline audio: lock / (empty) / mute.
+        actions.append(makeSlot("lock"), makeSlot(null), makeSlot("mute"));
+    }
+
+    _pullGenEditDraftFromTimeline() {
+        const st = this._genEditState;
+        const tl = st?.timeline;
+        if (!st || !tl) return;
+        // Preserve placements past the parent clip window; playback ignores them.
+        const next = [];
+        const nextAudio = [];
+        for (const track of tl.tracks) {
+            if (track.type === "audio") {
+                for (const c of [...track.clips].sort((a, b) => a.startTime - b.startTime)) {
+                    const aid = st.audioMap?.get(c.id) || c.el?.dataset?.audioId;
+                    const prev = (st.audioDraft || []).find((a) => a.id === aid);
+                    if (!prev && !c.src) continue;
+                    nextAudio.push({
+                        id: aid || genAudioUid(),
+                        file: String(c.src || prev?.file || "").replace(/\\/g, "/"),
+                        edit_start_sec: Math.max(0, Number(c.startTime) || 0),
+                        duration: Math.max(0.05, Number(c.duration) || 0.05),
+                        source_offset: Math.max(0, Number(c.sourceOffset) || 0),
+                        source_duration: Number.isFinite(Number(c.sourceDuration)) && c.sourceDuration > 0
+                            ? Number(c.sourceDuration)
+                            : (prev?.source_duration ?? null),
+                        muted: track.muted === true,
+                        from_gen_id: prev?.from_gen_id || null,
+                    });
+                }
+                continue;
+            }
+            for (const c of [...track.clips].sort((a, b) => a.startTime - b.startTime)) {
+                const gid = st.clipMap.get(c.id) || c.el?.dataset?.genId;
+                const prev = st.draft.find((g) => g.id === gid);
+                if (!prev) continue;
+                const tin = Math.max(0, Number(c.sourceOffset) || 0);
+                const dur = Math.max(0.05, Number(c.duration) || 0.05);
+                const start = Math.max(0, Number(c.startTime) || 0);
+                next.push({
+                    ...prev,
+                    enabled: track.visible !== false,
+                    muted: track.muted === true,
+                    edit_start_sec: start,
+                    trim_in_sec: tin,
+                    trim_out_sec: tin + dur,
+                    duration_sec: Number.isFinite(Number(c.sourceDuration)) && c.sourceDuration > 0
+                        ? c.sourceDuration
+                        : prev.duration_sec,
+                });
+            }
+        }
+        st.draft = next;
+        st.audioDraft = nextAudio.filter((a) => a.file);
+    }
+
+    _syncGenEditClipDisabled(clip, enabled) {
+        if (!clip?.el) return;
+        clip.el.classList.toggle("cat-te-clip-disabled", enabled === false);
+    }
+
+    _splitGenEditClip(clip) {
+        const st = this._genEditState;
+        const tl = st?.timeline;
+        if (!st || !tl || !clip) return;
+        const t = tl.currentTime;
+        if (!(t > clip.startTime + 1e-3 && t < clip.endTime - 1e-3)) return;
+        this._pullGenEditDraftFromTimeline();
+        const gid = st.clipMap.get(clip.id);
+        const idx = st.draft.findIndex((g) => g.id === gid);
+        if (idx < 0) return;
+        const src = st.draft[idx];
+        const local = t - clip.startTime;
+        const tin = Math.max(0, Number(src.trim_in_sec) || 0);
+        const leftOut = tin + local;
+        const rightIn = leftOut;
+        const rightStart = Math.max(0, Number(src.edit_start_sec) || 0) + local;
+        const fullOut = src.trim_out_sec != null ? Number(src.trim_out_sec) : (Number(src.duration_sec) || rightIn + 0.05);
+        src.trim_out_sec = leftOut;
+        const right = {
+            ...src,
+            id: genVideoUid(),
+            edit_start_sec: rightStart,
+            trim_in_sec: rightIn,
+            trim_out_sec: Number.isFinite(fullOut) && fullOut > rightIn ? fullOut : rightIn + 0.05,
+            prompt: src.prompt || "",
+        };
+        st.draft.splice(idx + 1, 0, right);
+        st.selectedId = right.id;
+        this._buildGenEditTimeline();
+        this._syncGenEditInspector();
+        this._scheduleGenEditPreview();
+    }
+
+    _deleteGenEditClip(clip) {
+        const st = this._genEditState;
+        if (!st || !clip) return;
+        const gid = st.clipMap.get(clip.id);
+        if (!gid) return;
+        st.draft = st.draft.filter((g) => g.id !== gid);
+        if (!st.draft.length) {
+            this._closeGenEditModal(false);
+            return;
+        }
+        if (st.selectedId === gid) st.selectedId = st.draft[st.draft.length - 1].id;
+        st.audioDraft = (st.audioDraft || []).filter((a) => a.from_gen_id !== gid);
+        this._buildGenEditTimeline();
+        this._syncGenEditInspector();
+        this._scheduleGenEditPreview();
+    }
+
+    /**
+     * Extract audio from a generated-video row into the gen-edit modal's own
+     * audio track (never the main timeline).
+     */
+    async _separateGenEditClipAudio(tlClip) {
+        const st = this._genEditState;
+        if (!st || !tlClip) return;
+        if (tlClip.track?.type === "audio") return;
+        this._pullGenEditDraftFromTimeline();
+        const gid = st.clipMap.get(tlClip.id) || tlClip.el?.dataset?.genId;
+        const gen = st.draft.find((g) => g.id === gid);
+        if (!gen?.file) return;
+
+        const tin = Math.max(0, Number(gen.trim_in_sec) || 0);
+        let eff = this._genEffectiveDurationSec(gen);
+        if (!(eff > 0)) {
+            const full = Number(gen.duration_sec);
+            eff = Number.isFinite(full) && full > tin
+                ? full - tin
+                : Math.max(0.05, Number(tlClip.duration) || 0.05);
+        }
+        const startSec = Math.max(0, Number(gen.edit_start_sec) || 0);
+
+        try {
+            const file = await this._extractAudioFromMedia(gen.file, {
+                location: "output",
+                trimInSec: tin,
+                durationSec: eff,
+            });
+            st.audioDraft = (st.audioDraft || []).filter((a) => a.from_gen_id !== gen.id);
+            st.audioDraft.push({
+                id: genAudioUid(),
+                file,
+                edit_start_sec: startSec,
+                duration: eff,
+                source_offset: 0,
+                source_duration: eff,
+                muted: false,
+                from_gen_id: gen.id,
+            });
+            gen.muted = true;
+            void this._ensureGenVideoAudioBuffer(file, "input");
+            this._buildGenEditTimeline();
+            this._syncGenEditInspector();
+            this._scheduleGenEditPreview();
+            if (st.timeline?._playing) void this._startGenEditAudioPlayback();
+        } catch (error) {
+            alert(T("separate_audio_failed", {
+                msg: error instanceof Error ? error.message : String(error),
+            }));
+        }
+    }
+
+    _deleteGenEditAudioClip(clip) {
+        const st = this._genEditState;
+        if (!st || !clip) return;
+        this._pullGenEditDraftFromTimeline();
+        const aid = st.audioMap?.get(clip.id) || clip.el?.dataset?.audioId;
+        if (!aid) return;
+        st.audioDraft = (st.audioDraft || []).filter((a) => a.id !== aid);
+        this._buildGenEditTimeline();
+        this._scheduleGenEditPreview();
+        if (st.timeline?._playing) void this._startGenEditAudioPlayback();
+    }
+
+    _normalizeGenEditAudioDraft(rows) {
+        if (!Array.isArray(rows)) return [];
+        return rows.map((row) => {
+            if (!row || typeof row !== "object") return null;
+            const file = String(row.file || "").replace(/\\/g, "/").replace(/^\/+/, "");
+            if (!file) return null;
+            return {
+                id: String(row.id || "").trim() || genAudioUid(),
+                file,
+                edit_start_sec: Math.max(0, Number(row.edit_start_sec ?? row.editStartSec) || 0),
+                duration: Math.max(0.05, Number(row.duration ?? row.duration_sec) || 0.05),
+                source_offset: Math.max(0, Number(row.source_offset ?? row.sourceOffset) || 0),
+                source_duration: Number.isFinite(Number(row.source_duration ?? row.sourceDuration))
+                    && Number(row.source_duration ?? row.sourceDuration) > 0
+                    ? Number(row.source_duration ?? row.sourceDuration)
+                    : null,
+                muted: row.muted === true,
+                from_gen_id: row.from_gen_id || row.fromGenId || null,
+            };
+        }).filter(Boolean);
+    }
+
+    /** Extract audio from a main-timeline visual clip (generated video preferred). */
+    async _separateClipAudio(clip) {
+        if (!clip || clip.track?.type === "audio") return;
+        const m = this._ensureClipMeta(clip);
+        if (isSubtitleClipMeta(m, clip.track) || isVoiceoverClipMeta(m, clip.track)) return;
+
+        const gen = this._firstEnabledGeneratedVideo(m);
+        let file = "";
+        let location = "output";
+        let trimIn = 0;
+        let durationSec = Math.max(0.05, Number(clip.duration) || 0.05);
+        let atSec = Math.max(0, Number(clip.startTime) || 0);
+
+        if (gen?.file) {
+            file = gen.file;
+            location = "output";
+            trimIn = Math.max(0, Number(gen.trim_in_sec) || 0);
+            const editStart = Math.max(0, Number(gen.edit_start_sec) || 0);
+            let eff = this._genEffectiveDurationSec(gen);
+            if (!(eff > 0)) {
+                const full = Number(gen.duration_sec);
+                eff = Number.isFinite(full) && full > trimIn
+                    ? full - trimIn
+                    : Math.max(0.05, (Number(clip.duration) || 0.05) - editStart);
+            }
+            durationSec = eff;
+            atSec = Math.max(0, (Number(clip.startTime) || 0) + editStart);
+        } else {
+            const items = typeof this._enabledClipItems === "function"
+                ? (this._enabledClipItems(m) || [])
+                : [];
+            const videoItem = items.find((it) => it?.kind === "video" && it.file) || null;
+            file = videoItem?.file || (m.mediaKind === "video" ? clip.src : "") || "";
+            location = "input";
+            trimIn = Math.max(0, Number(clip.sourceOffset) || Number(m.trimIn) || 0);
+            durationSec = Math.max(0.05, Number(clip.duration) || 0.05);
+            atSec = Math.max(0, Number(clip.startTime) || 0);
+        }
+        if (!file) {
+            alert(T("separate_audio_failed", { msg: T("gen_edit_no_videos") }));
+            return;
+        }
+
+        try {
+            const audioFile = await this._extractAudioFromMedia(file, {
+                location,
+                trimInSec: trimIn,
+                durationSec,
+            });
+            await this._addAudioAtTime(audioFile, atSec, null);
+            if (gen) {
+                this._setGeneratedVideoMuted(clip, gen.id, true);
+            } else {
+                this._recordUndo();
+                m.muted = true;
+                this._meta.set(clip.id, m);
+                this._decorateClip(clip);
+            }
+            this._saveToWidgets();
+            this._scheduleProgramPreview();
+        } catch (error) {
+            alert(T("separate_audio_failed", {
+                msg: error instanceof Error ? error.message : String(error),
+            }));
+        }
+    }
+
+    async _extractAudioFromMedia(file, {
+        location = "output",
+        trimInSec = 0,
+        durationSec = null,
+    } = {}) {
+        const rel = String(file || "").replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!rel) throw new Error("missing file");
+        const res = await api.fetchApi("/audio_keyframe_timeline/extract_audio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                file: rel,
+                location,
+                trim_in_sec: Math.max(0, Number(trimInSec) || 0),
+                duration_sec: durationSec == null ? null : Math.max(0.05, Number(durationSec) || 0.05),
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        const out = String(data.file || "").trim();
+        if (!out) throw new Error("empty extract result");
+        return out;
+    }
+
+    _syncGenEditInspector() {
+        const st = this._genEditState;
+        const row = st?.draft?.find((g) => g.id === st.selectedId) || st?.draft?.[st.draft.length - 1];
+        const name = row ? ((row.file || "").split(/[\\/]/).pop() || T("gen_video_label")) : "";
+        if (this.genEditNameEl) {
+            this.genEditNameEl.textContent = name || T("gen_edit_select_hint");
+            this.genEditNameEl.title = name;
+        }
+        if (this.genEditFileEl) {
+            this.genEditFileEl.textContent = row?.file || "";
+            this.genEditFileEl.title = row?.file || "";
+        }
+        if (this.genEditPrompt) {
+            this.genEditPrompt.disabled = !row;
+            this.genEditPrompt.value = row?.prompt || "";
+        }
+    }
+
+    _onGenEditPromptInput() {
+        const st = this._genEditState;
+        if (!st || !this.genEditPrompt) return;
+        const row = st.draft.find((g) => g.id === st.selectedId);
+        if (!row) return;
+        row.prompt = String(this.genEditPrompt.value || "");
+    }
+
+    _scheduleGenEditPreview() {
+        const st = this._genEditState;
+        if (!st) return;
+        if (st.previewRaf) return;
+        st.previewRaf = requestAnimationFrame(() => {
+            st.previewRaf = 0;
+            void this._renderGenEditPreview();
+        });
+    }
+
+    async _renderGenEditPreview() {
+        const st = this._genEditState;
+        const canvas = this.genEditPreviewCanvas;
+        if (!st || !canvas || this.genEditModal?.hidden) return;
+        const stage = canvas.parentElement;
+        const w = Math.max(2, Math.floor(stage?.clientWidth || 320));
+        const h = Math.max(2, Math.floor(stage?.clientHeight || 180));
+        const sizeChanged = canvas.width !== w || canvas.height !== h;
+        if (sizeChanged) {
+            canvas.width = w;
+            canvas.height = h;
+            st.previewHadFrame = false;
+        }
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const t = st.timeline?.currentTime ?? 0;
+        const clipDur = this._genEditParentDuration();
+        const playing = !!st.timeline?._playing;
+
+        // Outside the parent clip window: no playback / no render.
+        if (t >= clipDur - 1e-9) {
+            this._stopGenEditAudioPlayback();
+            this._pauseUnusedPreviewVideos(new Set());
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, w, h);
+            if (this.genEditPreviewEmpty) {
+                this.genEditPreviewEmpty.hidden = false;
+                this.genEditPreviewEmpty.textContent = T("gen_edit_oob_preview");
+            }
+            st.previewHadFrame = false;
+            if (playing) st.timeline.pause?.();
+            return;
+        }
+        if (this.genEditPreviewEmpty && this.genEditPreviewEmpty.dataset.oobRestored !== "1") {
+            this.genEditPreviewEmpty.dataset.defaultText = this.genEditPreviewEmpty.textContent;
+            this.genEditPreviewEmpty.dataset.oobRestored = "1";
+        }
+        if (this.genEditPreviewEmpty?.dataset.defaultText) {
+            this.genEditPreviewEmpty.textContent = this.genEditPreviewEmpty.dataset.defaultText;
+        }
+
+        const layers = this._collectGenEditPreviewLayers(t);
+        const usedVideoKeys = new Set();
+
+        if (!layers.length) {
+            this._pauseUnusedPreviewVideos(usedVideoKeys);
+            if (playing && st.previewHadFrame) {
+                if (this.genEditPreviewEmpty) this.genEditPreviewEmpty.hidden = true;
+                this._scheduleGenEditPreview();
+                return;
+            }
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, w, h);
+            st.previewHadFrame = false;
+            if (this.genEditPreviewEmpty) this.genEditPreviewEmpty.hidden = false;
+            if (playing) this._scheduleGenEditPreview();
+            return;
+        }
+
+        // Same path as main program monitor: offscreen draw → hold frame while seeking.
+        let off = st.previewOffscreen;
+        if (!off || off.width !== w || off.height !== h) {
+            off = document.createElement("canvas");
+            off.width = w;
+            off.height = h;
+            st.previewOffscreen = off;
+        }
+        const octx = off.getContext("2d");
+        if (!octx) return;
+        octx.setTransform(1, 0, 0, 1, 0, 0);
+        octx.fillStyle = "#000";
+        octx.fillRect(0, 0, w, h);
+        const drew = this._drawPreviewLayersOnce(octx, w, h, t, {
+            onVideoUsed: (key) => usedVideoKeys.add(key),
+            layers,
+            fit: "contain",
+        });
+        this._pauseUnusedPreviewVideos(usedVideoKeys);
+
+        if (drew) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.drawImage(off, 0, 0);
+            st.previewHadFrame = true;
+            st.previewDrawnTime = t;
+        } else if (playing && st.previewHadFrame) {
+            this._scheduleGenEditPreview();
+        } else if (sizeChanged || !st.previewHadFrame) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, w, h);
+            st.previewHadFrame = false;
+            st.previewDrawnTime = t;
+        }
+
+        if (this.genEditPreviewEmpty) {
+            this.genEditPreviewEmpty.hidden = !!st.previewHadFrame;
+        }
+        if (playing) this._scheduleGenEditPreview();
+    }
+
+    /** Layers for gen-edit modal — same shape as main generated preview layers. */
+    _collectGenEditPreviewLayers(t) {
+        const st = this._genEditState;
+        if (!st) return [];
+        const clipDur = this._genEditParentDuration();
+        if (!(t < clipDur - 1e-9)) return [];
+        const hostClip = {
+            startTime: 0,
+            duration: clipDur,
+            sourceOffset: 0,
+            name: this._findClipById(st.clipId)?.name || DEFAULT_CLIP_NAME,
+        };
+        const layers = [];
+        // draft is newest-first; paint older first so newest ends on top.
+        for (const gen of [...st.draft].reverse()) {
+            if (gen.enabled === false || !gen.file) continue;
+            const start = Math.max(0, Number(gen.edit_start_sec) || 0);
+            let eff = this._genEffectiveDurationSec(gen);
+            if (!(eff > 0)) {
+                const tin0 = Math.max(0, Number(gen.trim_in_sec) || 0);
+                const full = Number(gen.duration_sec);
+                eff = Number.isFinite(full) && full > tin0
+                    ? Math.min(full - tin0, Math.max(0.05, clipDur - start))
+                    : Math.max(0.05, clipDur - start);
+            }
+            if (t < start - 1e-6 || t >= start + eff - 1e-9) continue;
+            layers.push({
+                kind: "generated",
+                clip: hostClip,
+                file: gen.file,
+                muted: gen.muted === true,
+                trimInSec: Math.max(0, Number(gen.trim_in_sec) || 0),
+                editStartSec: start,
+            });
+        }
+        return layers;
+    }
+
+    _destroyGenEditTimeline() {
+        const st = this._genEditState;
+        this._stopGenEditAudioPlayback();
+        if (st?.previewRaf) {
+            cancelAnimationFrame(st.previewRaf);
+            st.previewRaf = 0;
+        }
+        if (st) {
+            st.previewOffscreen = null;
+            st.previewHadFrame = false;
+        }
+        if (st?.timeline) {
+            try { st.timeline.pause?.(); } catch { /* ignore */ }
+            try { st.timeline.destroy?.(); } catch { /* ignore */ }
+            st.timeline = null;
+        }
+        this._pauseUnusedPreviewVideos(new Set());
+        this.genEditTlHost?.replaceChildren();
+    }
+
+    async _ensureGenVideoAudioBuffer(file, location = "output") {
+        const rel = String(file || "").replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!rel) return null;
+        const key = `${location}:${rel}`;
+        if (this._genAudioBufferCache.has(key)) return this._genAudioBufferCache.get(key);
+        const p = (async () => {
+            try {
+                const url = location === "output"
+                    ? this._outputVideoUrl(rel)
+                    : (this._audioUrl(rel) || this._videoUrl(rel));
+                if (!url) return null;
+                const r = await this._fetchPeaks(url);
+                return r?.buffer || null;
+            } catch {
+                return null;
+            }
+        })();
+        this._genAudioBufferCache.set(key, p);
+        return p;
+    }
+
+    _stopGenEditAudioPlayback() {
+        for (const row of this._genEditAudioSources || []) {
+            const src = row?.src ?? row;
+            const gain = row?.gain;
+            try { src.stop(); } catch { /* already stopped */ }
+            try { src.disconnect(); } catch { /* already disconnected */ }
+            if (gain) {
+                try { gain.disconnect(); } catch { /* already disconnected */ }
+            }
+        }
+        this._genEditAudioSources = [];
+    }
+
+    /**
+     * Gen-edit audio via Web Audio. Canvas <video> decoders stay muted.
+     * Prefer detached audioDraft clips in the modal; else unmuted video audio.
+     */
+    async _startGenEditAudioPlayback() {
+        this._stopGenEditAudioPlayback();
+        const st = this._genEditState;
+        const tl = st?.timeline;
+        if (!st || !tl || !tl._playing) return;
+        const ctx = this._ensurePlaybackContext();
+        const startCtxTime = ctx.currentTime + 0.03;
+        const startPlayhead = tl.currentTime;
+        const clipDur = this._genEditParentDuration();
+        const sources = [];
+        const token = (st._audioPlayToken = (st._audioPlayToken || 0) + 1);
+
+        const jobs = [];
+        const audioTrackMuted = (tl.tracks || []).some((t) => t.type === "audio" && t.muted);
+        for (const row of st.audioDraft || []) {
+            if (audioTrackMuted || row.muted === true || !row.file) continue;
+            const start = Math.max(0, Number(row.edit_start_sec) || 0);
+            const end = Math.min(clipDur, start + Math.max(0.05, Number(row.duration) || 0.05));
+            if (end <= startPlayhead + 1e-6) continue;
+            jobs.push({
+                file: row.file,
+                location: "input",
+                tin: Math.max(0, Number(row.source_offset) || 0),
+                start,
+                end,
+            });
+        }
+        if (!jobs.length) {
+            // Fallback: embedded audio from unmuted generated videos.
+            for (const gen of st.draft) {
+                if (gen.enabled === false || gen.muted === true || !gen.file) continue;
+                const start = Math.max(0, Number(gen.edit_start_sec) || 0);
+                let eff = this._genEffectiveDurationSec(gen);
+                if (!(eff > 0)) {
+                    const tin0 = Math.max(0, Number(gen.trim_in_sec) || 0);
+                    const full = Number(gen.duration_sec);
+                    eff = Number.isFinite(full) && full > tin0
+                        ? Math.min(full - tin0, Math.max(0.05, clipDur - start))
+                        : Math.max(0.05, clipDur - start);
+                }
+                const end = Math.min(clipDur, start + eff);
+                if (end <= startPlayhead + 1e-6) continue;
+                if (startPlayhead >= start - 1e-6 && startPlayhead < end - 1e-9) {
+                    jobs.push({
+                        file: gen.file,
+                        location: "output",
+                        tin: Math.max(0, Number(gen.trim_in_sec) || 0),
+                        start,
+                        end,
+                    });
+                    break;
+                }
+            }
+        }
+
+        for (const job of jobs) {
+            const buffer = await this._ensureGenVideoAudioBuffer(job.file, job.location);
+            if (!buffer || st._audioPlayToken !== token || !tl._playing) return;
+            const src = ctx.createBufferSource();
+            src.buffer = buffer;
+            const gain = ctx.createGain();
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(1, startCtxTime);
+
+            let when;
+            let offset;
+            let dur;
+            if (job.start <= startPlayhead) {
+                when = startCtxTime;
+                offset = job.tin + (startPlayhead - job.start);
+                dur = job.end - startPlayhead;
+            } else {
+                when = startCtxTime + (job.start - startPlayhead);
+                offset = job.tin;
+                dur = job.end - job.start;
+            }
+            const maxOff = Math.max(0, buffer.duration - 0.001);
+            offset = Math.max(0, Math.min(offset, maxOff));
+            dur = Math.max(0.001, Math.min(dur, Math.max(0.001, buffer.duration - offset)));
+            try {
+                src.start(when, offset, dur);
+                sources.push({ src, gain });
+            } catch { /* ignore */ }
+        }
+        this._genEditAudioSources = sources;
+    }
+
+    _closeGenEditModal(save) {
+        const st = this._genEditState;
+        if (!st) {
+            if (this._timeline) this._timeline._keyboardSuspended = false;
+            if (this.genEditModal) this.genEditModal.hidden = true;
+            return;
+        }
+        if (save) {
+            this._pullGenEditDraftFromTimeline();
+            const clip = this._findClipById(st.clipId);
+            if (clip) {
+                this._recordUndo();
+                const m = this._ensureClipMeta(clip);
+                m.generatedVideos = st.draft.map((g) => ({ ...g }));
+                m.genEditAudios = this._normalizeGenEditAudioDraft(st.audioDraft);
+                if (this._isGeneratedEditMode()) {
+                    m.previewMode = this._firstEnabledGeneratedVideo(m) ? "generated" : "media";
+                }
+                this._meta.set(clip.id, m);
+                this._decorateClip(clip);
+                this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
+                if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
+                this._saveToWidgets();
+                this._scheduleProgramPreview();
+            }
+        }
+        this._destroyGenEditTimeline();
+        this._genEditState = null;
+        if (this._timeline) this._timeline._keyboardSuspended = false;
+        if (this.genEditModal) this.genEditModal.hidden = true;
+        this._scheduleProgramPreview();
+    }
+
+    _clipGeneratedAudios(meta) {
+        const rows = Array.isArray(meta?.generatedAudios) ? meta.generatedAudios : [];
+        return rows.map((row) => normalizeGeneratedAudio(row)).filter(Boolean);
+    }
+
+    _firstEnabledGeneratedAudio(meta) {
+        return this._clipGeneratedAudios(meta).find((row) => row.enabled !== false) || null;
+    }
+
+    _generatedAudioUrl(file) {
+        const rel = String(file || "").replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!rel) return "";
+        if (rel.includes("/")) return this._outputVideoUrl(rel) || this._audioUrl(rel);
+        return this._audioUrl(rel) || this._outputVideoUrl(rel);
+    }
+
+    _attachPromptCopyButtons(root) {
+        if (!root) return;
+        const selector = [
+            ".cat-te-settings-prompt-input",
+            ".cat-te-prompt-input",
+            ".cat-te-ai-prompt-input",
+            ".cat-te-vo-prompt",
+            ".cat-te-vo-style-prompt",
+            ".cat-te-vo-edit-prompt",
+            ".cat-te-media-preview-desc",
+            ".cat-te-gen-edit-prompt",
+            ".cat-te-ai-src-text",
+            ".cat-te-ai-system",
+            ".cat-te-ai-skill",
+            ".cat-te-ai-result",
+        ].join(",");
+        for (const ta of root.querySelectorAll(selector)) {
+            if (!(ta instanceof HTMLTextAreaElement) || ta.dataset.promptCopyAttached === "1") continue;
+            ta.dataset.promptCopyAttached = "1";
+
+            let host = ta.parentElement;
+            const reuseHost = host && (
+                host.classList.contains("cat-te-prompt-input-wrap")
+                || host.classList.contains("cat-te-media-preview-desc-wrap")
+                || host.classList.contains("cat-te-prompt-copy-host")
+            );
+            if (!reuseHost) {
+                host = document.createElement("div");
+                host.className = "cat-te-prompt-copy-host";
+                ta.parentNode.insertBefore(host, ta);
+                host.appendChild(ta);
+            } else {
+                host.classList.add("cat-te-prompt-copy-host");
+            }
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cat-te-prompt-copy-btn";
+            btn.title = T("copy_prompt_title");
+            btn.setAttribute("aria-label", T("copy_prompt_title"));
+            btn.innerHTML = iconHtml("copy", 12);
+            btn.addEventListener("mousedown", (e) => e.preventDefault());
+            btn.addEventListener("click", async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const text = ta.value ?? "";
+                let ok = false;
+                try {
+                    if (navigator.clipboard?.writeText) {
+                        await navigator.clipboard.writeText(text);
+                        ok = true;
+                    }
+                } catch {
+                    ok = false;
+                }
+                if (!ok) {
+                    const prev = ta.selectionStart;
+                    const prevEnd = ta.selectionEnd;
+                    ta.focus();
+                    ta.select();
+                    try {
+                        ok = document.execCommand("copy");
+                    } catch {
+                        ok = false;
+                    }
+                    try {
+                        ta.setSelectionRange(prev, prevEnd);
+                    } catch {
+                        /* ignore */
+                    }
+                }
+                if (!ok) return;
+                btn.classList.add("is-copied");
+                btn.title = T("copy_prompt_done_title");
+                btn.innerHTML = iconHtml("check", 12);
+                clearTimeout(btn._copyResetTimer);
+                btn._copyResetTimer = setTimeout(() => {
+                    btn.classList.remove("is-copied");
+                    btn.title = T("copy_prompt_title");
+                    btn.innerHTML = iconHtml("copy", 12);
+                }, 1200);
+            });
+            host.appendChild(btn);
+        }
+    }
+
+    _onVoiceoverPromptInput() {
+        const clip = this._selClip;
+        if (!clip || !isVoiceoverTrackType(clip.track?.type)) return;
+        if (this._voPromptUndoArmed) {
+            this._recordUndo();
+            this._voPromptUndoArmed = false;
+        }
+        const m = this._ensureClipMeta(clip);
+        m.prompt = this.voPromptInput?.value ?? "";
+        m.stylePrompt = this.voStylePromptInput?.value ?? "";
+        this._meta.set(clip.id, m);
+    }
+
+    _fillVoiceoverPanel(meta) {
+        if (!meta) return;
+        if (this.voPromptInput) setRichPromptValue(this.voPromptInput, meta.prompt ?? "", true);
+        if (this.voStylePromptInput) setRichPromptValue(this.voStylePromptInput, meta.stylePrompt ?? "", true);
+        this._renderVoiceoverAudiosList(this._selClip, meta);
+    }
+
+    _renderVoiceoverAudiosList(clip, meta) {
+        if (!this.voAudiosList) return;
+        const rows = this._clipGeneratedAudios(meta);
+        this.voAudiosList.replaceChildren();
+        for (const [index, row] of rows.entries()) {
+            const item = document.createElement("div");
+            item.className = "cat-te-clip-video-row cat-te-vo-audio-row";
+            if (!row.enabled) item.classList.add("is-disabled");
+
+            const enable = document.createElement("input");
+            enable.type = "checkbox";
+            enable.className = "cat-te-clip-video-enabled";
+            enable.checked = row.enabled !== false;
+            enable.title = row.enabled ? T("disable_label") : T("enable_label");
+            enable.addEventListener("click", (e) => e.stopPropagation());
+            enable.addEventListener("change", () => {
+                this._setGeneratedAudioEnabled(clip, row.id, !!enable.checked);
+            });
+
+            const icon = document.createElement("div");
+            icon.className = "cat-te-vo-audio-icon";
+            icon.innerHTML = iconHtml("micVocal", 16) || "♫";
+
+            const name = document.createElement("button");
+            name.type = "button";
+            name.className = "cat-te-clip-video-name";
+            name.textContent = String(row.file || "").split(/[\\/]/).pop() || T("asset_fallback_name");
+            name.title = row.file || "";
+            name.addEventListener("click", () => this._previewGeneratedAudio(clip, index));
+
+            const up = document.createElement("button");
+            up.type = "button";
+            up.className = "cat-te-vo-audio-move";
+            up.title = T("move_up_title");
+            up.innerHTML = iconHtml("arrowUp", 12);
+            up.disabled = index === 0;
+            up.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._moveGeneratedAudio(clip, row.id, -1);
+            });
+
+            const down = document.createElement("button");
+            down.type = "button";
+            down.className = "cat-te-vo-audio-move";
+            down.title = T("move_down_title");
+            down.innerHTML = iconHtml("arrowDown", 12);
+            down.disabled = index >= rows.length - 1;
+            down.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._moveGeneratedAudio(clip, row.id, 1);
+            });
+
+            const mute = document.createElement("button");
+            mute.type = "button";
+            mute.className = "cat-te-clip-video-mute";
+            const muted = row.muted === true;
+            mute.innerHTML = muted ? ICONS.volumeOff : ICONS.volume;
+            mute.classList.toggle("active", muted);
+            mute.title = muted ? T("unmute_label") : T("mute_label");
+            mute.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._setGeneratedAudioMuted(clip, row.id, !muted);
+            });
+
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "cat-te-clip-video-del";
+            del.title = T("delete_btn");
+            del.textContent = "×";
+            del.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._deleteGeneratedAudio(clip, row.id);
+            });
+
+            item.append(enable, icon, name, up, down, mute, del);
+            this.voAudiosList.appendChild(item);
+        }
+    }
+
+    _setGeneratedAudioEnabled(clip, audioId, enabled) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        m.generatedAudios = this._clipGeneratedAudios(m);
+        const row = m.generatedAudios.find((item) => item.id === audioId);
+        if (!row || row.enabled === enabled) return;
+        this._recordUndo();
+        row.enabled = enabled;
+        this._meta.set(clip.id, m);
+        this._decorateClip(clip);
+        this._scheduleProgramPreview();
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _setGeneratedAudioMuted(clip, audioId, muted) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        m.generatedAudios = this._clipGeneratedAudios(m);
+        const row = m.generatedAudios.find((item) => item.id === audioId);
+        if (!row || row.muted === muted) return;
+        this._recordUndo();
+        row.muted = muted === true;
+        this._meta.set(clip.id, m);
+        this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _deleteGeneratedAudio(clip, audioId) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        const before = this._clipGeneratedAudios(m);
+        const next = before.filter((item) => item.id !== audioId);
+        if (next.length === before.length) return;
+        this._recordUndo();
+        m.generatedAudios = next;
+        this._meta.set(clip.id, m);
+        this._decorateClip(clip);
+        this._scheduleProgramPreview();
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _moveGeneratedAudio(clip, audioId, delta) {
+        if (!clip || !delta) return;
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedAudios(m);
+        const i = rows.findIndex((item) => item.id === audioId);
+        const j = i + delta;
+        if (i < 0 || j < 0 || j >= rows.length) return;
+        this._recordUndo();
+        const [row] = rows.splice(i, 1);
+        rows.splice(j, 0, row);
+        m.generatedAudios = rows;
+        this._meta.set(clip.id, m);
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+    }
+
+    _addGeneratedAudiosToClip(clip, files, { recordUndo = true } = {}) {
+        if (!clip || !isVoiceoverTrackType(clip.track?.type)) return false;
+        const list = (Array.isArray(files) ? files : [files])
+            .map((f) => normalizeGeneratedAudio(f))
+            .filter(Boolean);
+        if (!list.length) return false;
+        const m = this._ensureClipMeta(clip);
+        const existing = this._clipGeneratedAudios(m);
+        const have = new Set(existing.map((r) => normalizeOutputVideoPath(r.file) || r.file));
+        const added = [];
+        for (const row of list) {
+            const key = normalizeOutputVideoPath(row.file) || row.file;
+            if (!key || have.has(key)) continue;
+            have.add(key);
+            added.push(row);
+        }
+        if (!added.length) return false;
+        if (recordUndo) this._recordUndo();
+        m.generatedAudios = [...existing, ...added];
+        this._meta.set(clip.id, m);
+        this._decorateClip(clip);
+        if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+        return true;
+    }
+
+    _previewGeneratedAudio(clip, index) {
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedAudios(m);
+        const row = rows[index];
+        if (!row?.file) return;
+        const url = this._generatedAudioUrl(row.file);
+        if (!url) return;
+        // Reuse media preview stage as a simple audio player.
+        if (!this.mediaPreviewModal || !this.mediaPreviewStage) {
+            const a = new Audio(url);
+            void a.play().catch(() => {});
+            return;
+        }
+        this.mediaPreviewModal.hidden = false;
+        if (this.mediaPreviewTitle) {
+            this.mediaPreviewTitle.textContent = String(row.file).split(/[\\/]/).pop() || T("gen_audio_label");
+        }
+        this.mediaPreviewStage.replaceChildren();
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        audio.preload = "metadata";
+        audio.src = url;
+        audio.style.maxWidth = "100%";
+        this.mediaPreviewStage.appendChild(audio);
+        void audio.play().catch(() => {});
+    }
+
+    _voiceoverParentDuration(clip) {
+        const m = this._ensureClipMeta(clip);
+        return Math.max(0.05, Number(m.resourceDurationSec) || Number(clip.duration) || 0.05);
+    }
+
+    async _ensureGeneratedAudioDuration(row) {
+        if (!row || (Number.isFinite(Number(row.duration_sec)) && row.duration_sec > 0)) return;
+        const url = this._generatedAudioUrl(row.file);
+        if (!url) return;
+        try {
+            const dur = await this._probeAudioDuration(url);
+            if (Number.isFinite(dur) && dur > 0) row.duration_sec = dur;
+        } catch { /* keep null */ }
+    }
+
+    async _openVoiceoverEditModal(clip) {
+        if (!this.voEditModal || !clip || !isVoiceoverTrackType(clip.track?.type)) return;
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedAudios(m);
+        if (!rows.length) {
+            alert(T("voiceover_edit_no_audio"));
+            return;
+        }
+        this._closeVoiceoverEditModal(false);
+        const draft = rows.map((r) => normalizeGeneratedAudio(r)).filter(Boolean);
+        await Promise.all(draft.map((g) => this._ensureGeneratedAudioDuration(g)));
+        const clipDur = this._voiceoverParentDuration(clip);
+        for (const g of draft) {
+            const tin = Math.max(0, Number(g.trim_in_sec) || 0);
+            const full = Number(g.duration_sec);
+            let eff = Number.isFinite(full) && full > tin
+                ? (g.trim_out_sec != null && Number(g.trim_out_sec) > tin
+                    ? Number(g.trim_out_sec) - tin
+                    : full - tin)
+                : clipDur;
+            let start = Math.max(0, Number(g.edit_start_sec) || 0);
+            if (start >= clipDur) start = 0;
+            const maxDur = Math.max(0.05, clipDur - start);
+            if (eff > maxDur) {
+                eff = maxDur;
+                g.trim_out_sec = tin + eff;
+            }
+            g.edit_start_sec = start;
+        }
+        this._voEditState = {
+            clipId: clip.id,
+            draft,
+            selectedId: draft[0]?.id || null,
+            clipMap: new Map(),
+        };
+        if (this.voEditTitle) {
+            this.voEditTitle.textContent = T("voiceover_edit_modal_title_named", {
+                name: clip.name || T("voiceover_clip_default_name"),
+            });
+        }
+        this.voEditModal.hidden = false;
+        try { this._timeline?.pause?.(); } catch { /* ignore */ }
+        if (this._timeline) this._timeline._keyboardSuspended = true;
+        await this._buildVoiceoverEditTimeline();
+        this._syncVoiceoverEditInspector();
+    }
+
+    async _buildVoiceoverEditTimeline() {
+        const st = this._voEditState;
+        if (!st || !this.voEditTlHost) return;
+        this._destroyVoiceoverEditTimeline();
+        const parent = this._findClipById(st.clipId);
+        const clipDur = parent ? this._voiceoverParentDuration(parent) : 1;
+        const fps = this.getFps();
+        const tl = new Timeline(this.voEditTlHost, {
+            duration: clipDur,
+            fps,
+            timeFormat: "frames",
+            zoom: 1.4,
+            addTrackTypes: [],
+        });
+        tl.toolbarEl?.querySelector(".tl-btn-add-track")?.remove();
+        tl.toolbarEl?.querySelector(".tl-btn-history")?.remove();
+        st.timeline = tl;
+        st.clipMap = new Map();
+
+        for (let i = 0; i < st.draft.length; i++) {
+            const gen = st.draft[i];
+            const track = tl.addTrack({
+                type: "audio",
+                name: (gen.file || "").split(/[\\/]/).pop() || T("gen_audio_label"),
+                isMain: false,
+                height: trackHeightFor("audio"),
+                color: "#5bc0de",
+            });
+            track.setMuted(gen.muted === true);
+            track.setVisible(gen.enabled !== false);
+            this._setupVoiceoverEditTrackControls(track, gen.id);
+
+            const tin = Math.max(0, Number(gen.trim_in_sec) || 0);
+            const full = Number(gen.duration_sec);
+            let eff = Number.isFinite(full) && full > tin
+                ? (gen.trim_out_sec != null && Number(gen.trim_out_sec) > tin
+                    ? Number(gen.trim_out_sec) - tin
+                    : full - tin)
+                : Math.max(0.05, clipDur - (Number(gen.edit_start_sec) || 0));
+            const start = Math.max(0, Math.min(clipDur - 0.05, Number(gen.edit_start_sec) || 0));
+            const dur = Math.max(0.05, Math.min(eff, clipDur - start));
+            const url = this._generatedAudioUrl(gen.file);
+            let peaks = null;
+            if (url) {
+                try {
+                    const r = await this._fetchPeaks(url);
+                    peaks = r.peaks[0];
+                    if (!(Number.isFinite(full) && full > 0) && Number.isFinite(r.duration)) {
+                        gen.duration_sec = r.duration;
+                    }
+                } catch { /* placeholder wave */ }
+            }
+            const c = track.addClip({
+                name: (gen.file || "").split(/[\\/]/).pop() || T("gen_audio_label"),
+                startTime: start,
+                duration: dur,
+                sourceOffset: tin,
+                sourceDuration: Number.isFinite(Number(gen.duration_sec)) && gen.duration_sec > 0
+                    ? gen.duration_sec
+                    : Infinity,
+                src: gen.file || "",
+                waveformPeaks: peaks || undefined,
+                fadeIn: Math.max(0, Number(gen.fade_in_sec) || 0),
+                fadeOut: Math.max(0, Number(gen.fade_out_sec) || 0),
+                color: "#5bc0de",
+            });
+            if (c) {
+                st.clipMap.set(c.id, gen.id);
+                c.el.dataset.genId = gen.id;
+                c._clampFades?.();
+                c._updateFadeUI?.();
+            }
+        }
+        tl.duration = clipDur;
+        tl._refresh?.();
+
+        tl.on("clip:select", ({ clip: c }) => {
+            const gid = st.clipMap.get(c?.id) || c?.el?.dataset?.genId;
+            if (gid) {
+                st.selectedId = gid;
+                this._syncVoiceoverEditInspector();
+            }
+        });
+        tl.on("clip:moveend", () => this._pullVoiceoverEditDraftFromTimeline());
+        tl.on("clip:resizeend", () => this._pullVoiceoverEditDraftFromTimeline());
+        tl.on("clip:fadeend", () => this._pullVoiceoverEditDraftFromTimeline());
+        if (st.draft[0]) {
+            const first = [...st.clipMap.entries()].find(([, gid]) => gid === st.selectedId)
+                || [...st.clipMap.entries()][0];
+            if (first) {
+                const c = tl.tracks.flatMap((t) => t.clips).find((x) => x.id === first[0]);
+                if (c) tl.selectClip(c);
+            }
+        }
+    }
+
+    _setupVoiceoverEditTrackControls(track, genId) {
+        const actions = track.actionsEl;
+        if (!actions) return;
+        actions.replaceChildren();
+        const makeBtn = (kind) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cat-te-track-btn";
+            if (kind === "lock") {
+                const render = () => {
+                    btn.innerHTML = track.locked ? ICONS.lock : ICONS.lockOpen;
+                    btn.classList.toggle("active", track.locked);
+                    btn.title = track.locked ? T("unlock_track_title") : T("lock_track_title");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    track.setLocked(!track.locked);
+                    render();
+                });
+                render();
+            } else if (kind === "visible") {
+                const render = () => {
+                    btn.innerHTML = track.visible ? ICONS.eye : ICONS.eyeOff;
+                    btn.classList.toggle("active", !track.visible);
+                    btn.title = T("track_visibility_title");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const st = this._voEditState;
+                    const row = st?.draft?.find((g) => g.id === genId);
+                    if (!row) return;
+                    row.enabled = !(row.enabled !== false);
+                    track.setVisible(row.enabled !== false);
+                    render();
+                });
+                render();
+            } else if (kind === "mute") {
+                const render = () => {
+                    btn.innerHTML = track.muted ? ICONS.volumeOff : ICONS.volume;
+                    btn.classList.toggle("active", track.muted);
+                    btn.title = track.muted ? T("unmute_label") : T("mute_label");
+                };
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const st = this._voEditState;
+                    const row = st?.draft?.find((g) => g.id === genId);
+                    if (!row) return;
+                    row.muted = !row.muted;
+                    track.setMuted(!!row.muted);
+                    render();
+                });
+                render();
+            }
+            return btn;
+        };
+        actions.append(makeBtn("lock"), makeBtn("visible"), makeBtn("mute"));
+    }
+
+    _pullVoiceoverEditDraftFromTimeline() {
+        const st = this._voEditState;
+        const tl = st?.timeline;
+        if (!st || !tl) return;
+        const parent = this._findClipById(st.clipId);
+        const clipDur = parent ? this._voiceoverParentDuration(parent) : tl.duration;
+        tl.duration = clipDur;
+        const next = [];
+        for (const track of tl.tracks) {
+            for (const c of [...track.clips].sort((a, b) => a.startTime - b.startTime)) {
+                const gid = st.clipMap.get(c.id) || c.el?.dataset?.genId;
+                const prev = st.draft.find((g) => g.id === gid);
+                if (!prev) continue;
+                const tin = Math.max(0, Number(c.sourceOffset) || 0);
+                const dur = Math.max(0.05, Number(c.duration) || 0.05);
+                next.push({
+                    ...prev,
+                    edit_start_sec: Math.max(0, Number(c.startTime) || 0),
+                    trim_in_sec: tin,
+                    trim_out_sec: tin + dur,
+                    fade_in_sec: Math.max(0, Number(c.fadeIn) || 0),
+                    fade_out_sec: Math.max(0, Number(c.fadeOut) || 0),
+                    enabled: track.visible !== false,
+                    muted: !!track.muted,
+                    duration_sec: Number.isFinite(Number(c.sourceDuration)) && c.sourceDuration > 0
+                        ? c.sourceDuration
+                        : prev.duration_sec,
+                });
+            }
+        }
+        if (next.length) st.draft = next;
+        this._syncVoiceoverEditInspector();
+    }
+
+    _syncVoiceoverEditInspector() {
+        const st = this._voEditState;
+        const row = st?.draft?.find((g) => g.id === st.selectedId) || st?.draft?.[0];
+        if (this.voEditNameEl) {
+            this.voEditNameEl.textContent = row
+                ? (String(row.file || "").split(/[\\/]/).pop() || T("gen_audio_label"))
+                : "";
+            this.voEditNameEl.title = row?.file || "";
+        }
+        if (this.voEditFileEl) {
+            this.voEditFileEl.textContent = row?.file || "";
+            this.voEditFileEl.title = row?.file || "";
+        }
+        if (this.voEditPrompt) {
+            this.voEditPrompt.value = row?.prompt || "";
+            this.voEditPrompt.disabled = !row;
+        }
+        if (this.voEditAudio) {
+            const url = row?.file ? this._generatedAudioUrl(row.file) : "";
+            if (url) {
+                if (this.voEditAudio.src !== url) this.voEditAudio.src = url;
+                this.voEditAudio.hidden = false;
+                if (this.voEditPreviewEmpty) this.voEditPreviewEmpty.hidden = true;
+            } else {
+                this.voEditAudio.removeAttribute("src");
+                this.voEditAudio.hidden = true;
+                if (this.voEditPreviewEmpty) this.voEditPreviewEmpty.hidden = false;
+            }
+        }
+    }
+
+    _onVoiceoverEditPromptInput() {
+        const st = this._voEditState;
+        if (!st) return;
+        const row = st.draft.find((g) => g.id === st.selectedId);
+        if (!row) return;
+        row.prompt = this.voEditPrompt?.value ?? "";
+    }
+
+    _destroyVoiceoverEditTimeline() {
+        const st = this._voEditState;
+        try { st?.timeline?.destroy?.(); } catch { /* ignore */ }
+        if (st) st.timeline = null;
+        this.voEditTlHost?.replaceChildren();
+        if (this.voEditAudio) {
+            try { this.voEditAudio.pause(); } catch { /* ignore */ }
+            this.voEditAudio.removeAttribute("src");
+        }
+    }
+
+    _closeVoiceoverEditModal(save) {
+        const st = this._voEditState;
+        if (!st) {
+            if (this._timeline) this._timeline._keyboardSuspended = false;
+            if (this.voEditModal) this.voEditModal.hidden = true;
+            return;
+        }
+        if (save) {
+            this._pullVoiceoverEditDraftFromTimeline();
+            const clip = this._findClipById(st.clipId);
+            if (clip) {
+                this._recordUndo();
+                const m = this._ensureClipMeta(clip);
+                m.generatedAudios = st.draft.map((g) => normalizeGeneratedAudio(g)).filter(Boolean);
+                this._meta.set(clip.id, m);
+                this._decorateClip(clip);
+                if (this._selClip?.id === clip.id) this._fillVoiceoverPanel(m);
+                this._saveToWidgets();
+                this._scheduleProgramPreview();
+            }
+        }
+        this._destroyVoiceoverEditTimeline();
+        this._voEditState = null;
+        if (this._timeline) this._timeline._keyboardSuspended = false;
+        if (this.voEditModal) this.voEditModal.hidden = true;
+    }
+
+    _isOutputPickerClip(clip, kind = this._outputPickerKind) {
+        if (!clip) return false;
+        if (kind === "audio") return isVoiceoverTrackType(clip.track?.type);
+        return clip.track?.type !== "audio"
+            && !isVoiceoverTrackType(clip.track?.type)
+            && !isSubtitleTrackType(clip.track?.type);
+    }
+
+    _openOutputVideosPicker(clip) {
+        return this._openOutputMediaPicker(clip, "video");
+    }
+
+    _openOutputAudiosPicker(clip) {
+        return this._openOutputMediaPicker(clip, "audio");
+    }
+
+    async _openOutputMediaPicker(clip, kind = "video") {
+        if (!this.outputVideosModal || !this._isOutputPickerClip(clip, kind)) return;
         const alreadyOpen = !this.outputVideosModal.hidden;
+        const kindChanged = this._outputPickerKind !== kind;
+        this._outputPickerKind = kind;
         this._outputVideosClipId = clip.id;
+        this._syncOutputPickerChrome();
         this._syncOutputVideosPickerTitle(clip);
-        if (!alreadyOpen) {
+        if (!alreadyOpen || kindChanged) {
             this._ensureOutputVideosPanelPos();
             this.outputVideosModal.hidden = false;
             if (this.outputVideosFilter) this.outputVideosFilter.value = "";
             this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
             this.outputVideosTimeButtons?.forEach((b) => b.classList.toggle("is-active", b.dataset.range === this._outputVideosTimeRange));
             if (this.outputVideosBody) this.outputVideosBody.textContent = T("loading_ellipsis");
+            const endpoint = kind === "audio"
+                ? "/audio_keyframe_timeline/output_audios"
+                : "/audio_keyframe_timeline/output_videos";
             try {
-                const response = await fetch(api.apiURL("/audio_keyframe_timeline/output_videos"));
+                const response = await fetch(api.apiURL(endpoint));
                 const data = await response.json();
                 this._outputVideosCache = Array.isArray(data.files) ? data.files : [];
             } catch {
@@ -4315,14 +8187,14 @@ export class CapTimelineEditorApp {
             }
         }
         // Drop stale target if the open request finished after a newer selection.
-        if (this._outputVideosClipId !== clip.id) return;
+        if (this._outputVideosClipId !== clip.id || this._outputPickerKind !== kind) return;
         this._renderOutputVideosPicker();
     }
 
     _retargetOutputVideosPickerFromSelection() {
         if (!this.outputVideosModal || this.outputVideosModal.hidden) return;
         const clip = this._selClip;
-        if (!clip || clip.track?.type === "audio") return;
+        if (!this._isOutputPickerClip(clip)) return;
         if (this._outputVideosClipId === clip.id) {
             this._syncOutputVideosPickerTitle(clip);
             return;
@@ -4332,13 +8204,27 @@ export class CapTimelineEditorApp {
         this._renderOutputVideosPicker();
     }
 
+    _syncOutputPickerChrome() {
+        const isAudio = this._outputPickerKind === "audio";
+        this.outputVideosModal?.classList.toggle("is-audio-picker", isAudio);
+        if (this.outputVideosAutoLinkBtn) {
+            this.outputVideosAutoLinkBtn.textContent = isAudio
+                ? T("auto_associate_audios_btn")
+                : T("auto_associate_videos_btn");
+            this.outputVideosAutoLinkBtn.title = isAudio
+                ? T("auto_associate_audios_title")
+                : T("auto_associate_videos_title");
+        }
+    }
+
     _syncOutputVideosPickerTitle(clip = null) {
         if (!this.outputVideosTitle) return;
         const target = clip || this._findClipById(this._outputVideosClipId);
         const name = String(target?.name || "").trim();
-        this.outputVideosTitle.textContent = name
-            ? `${T("linked_generated_videos_title")} · ${name}`
+        const base = this._outputPickerKind === "audio"
+            ? T("linked_generated_audios_title")
             : T("linked_generated_videos_title");
+        this.outputVideosTitle.textContent = name ? `${base} · ${name}` : base;
     }
 
     _ensureOutputVideosPanelPos() {
@@ -4383,11 +8269,134 @@ export class CapTimelineEditorApp {
     _closeOutputVideosPicker() {
         this._hideOutputVideoHoverPreview();
         this._outputVideosClipId = null;
+        this._outputPickerKind = "video";
         this._outputVideosThumbIo?.disconnect();
         this._outputVideosThumbIo = null;
-        if (this.outputVideosModal) this.outputVideosModal.hidden = true;
+        if (this.outputVideosModal) {
+            this.outputVideosModal.hidden = true;
+            this.outputVideosModal.classList.remove("is-audio-picker");
+        }
         this.outputVideosBody?.replaceChildren();
+        this._syncOutputPickerChrome();
         this._syncOutputVideosPickerTitle(null);
+    }
+
+    /** Files already linked on any visual clip (normalized output paths). */
+    _allLinkedGeneratedVideoFiles() {
+        const have = new Set();
+        for (const track of this._timeline?.tracks ?? []) {
+            if (track.type === "audio" || isVoiceoverTrackType(track.type) || isSubtitleTrackType(track.type)) continue;
+            for (const clip of track.clips) {
+                for (const row of this._clipGeneratedVideos(this._meta.get(clip.id))) {
+                    const n = normalizeOutputVideoPath(row.file) || row.file;
+                    if (n) have.add(n);
+                }
+            }
+        }
+        return have;
+    }
+
+    /** Files already linked on any voiceover clip (normalized output paths). */
+    _allLinkedGeneratedAudioFiles() {
+        const have = new Set();
+        for (const track of this._timeline?.tracks ?? []) {
+            if (!isVoiceoverTrackType(track.type)) continue;
+            for (const clip of track.clips) {
+                for (const row of this._clipGeneratedAudios(this._meta.get(clip.id))) {
+                    const n = normalizeOutputVideoPath(row.file) || row.file;
+                    if (n) have.add(n);
+                }
+            }
+        }
+        return have;
+    }
+
+    _clipIdFromSpecifiedAudioPath(file) {
+        const n = normalizeOutputVideoPath(file);
+        if (!n) return null;
+        const m = n.match(/^CapTimelineEditor\/[^/]+\/(\d{8}-\d{6})_(.+)\.(wav|mp3|flac|ogg|m4a|aac|wma)$/i);
+        return m ? String(m[2]).trim() || null : null;
+    }
+
+    /**
+     * Scan output media under CapTimelineEditor/{project}/…_{clipId}.* and
+     * link each file to the matching timeline clip. Used when live WS attach
+     * was missed (e.g. switched workflows while generating).
+     */
+    async _autoAssociateOutputMedia() {
+        if (!this.outputVideosModal || this.outputVideosModal.hidden) return;
+        const isAudio = this._outputPickerKind === "audio";
+        const btn = this.outputVideosAutoLinkBtn;
+        if (btn?.disabled) return;
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add("is-loading");
+        }
+        try {
+            const endpoint = isAudio
+                ? "/audio_keyframe_timeline/output_audios"
+                : "/audio_keyframe_timeline/output_videos";
+            try {
+                const response = await fetch(api.apiURL(endpoint));
+                const data = await response.json();
+                this._outputVideosCache = Array.isArray(data.files) ? data.files : [];
+            } catch {
+                /* keep existing cache */
+            }
+            const projectPrefix = `CapTimelineEditor/${this._safeProjectFilename()}/`.toLowerCase();
+            const already = isAudio
+                ? this._allLinkedGeneratedAudioFiles()
+                : this._allLinkedGeneratedVideoFiles();
+            /** @type {Map<string, string[]>} */
+            const byClip = new Map();
+            for (const row of this._outputVideosCache || []) {
+                const file = normalizeOutputVideoPath(row?.file) || String(row?.file || "").trim();
+                if (!file) continue;
+                const key = normalizeOutputVideoPath(file) || file;
+                if (already.has(key)) continue;
+                if (!key.toLowerCase().startsWith(projectPrefix)) continue;
+                const clipId = isAudio
+                    ? this._clipIdFromSpecifiedAudioPath(key)
+                    : this._clipIdFromSpecifiedVideoPath(key);
+                if (!clipId || !this._findClipById(clipId)) continue;
+                if (isAudio && !isVoiceoverTrackType(this._findClipById(clipId)?.track?.type)) continue;
+                if (!isAudio && !this._isOutputPickerClip(this._findClipById(clipId), "video")) continue;
+                const list = byClip.get(clipId) || [];
+                list.push(key);
+                byClip.set(clipId, list);
+            }
+            let linked = 0;
+            if (byClip.size) {
+                this._recordUndo();
+                for (const [clipId, files] of byClip) {
+                    const clip = this._findClipById(clipId);
+                    if (!clip) continue;
+                    const ok = isAudio
+                        ? this._addGeneratedAudiosToClip(clip, files, { recordUndo: false })
+                        : this._addGeneratedVideosToClip(clip, files, { recordUndo: false });
+                    if (ok) {
+                        linked += files.length;
+                        for (const f of files) already.add(f);
+                    }
+                }
+            }
+            this._renderOutputVideosPicker();
+            if (linked > 0) {
+                alert(T(isAudio ? "auto_associate_audios_done" : "auto_associate_videos_done", { count: linked }));
+            } else {
+                alert(T(isAudio ? "auto_associate_audios_none" : "auto_associate_videos_none"));
+            }
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove("is-loading");
+            }
+        }
+    }
+
+    async _autoAssociateOutputVideos() {
+        this._outputPickerKind = "video";
+        return this._autoAssociateOutputMedia();
     }
 
     _cancelOutputVideoHoverHide() {
@@ -4476,6 +8485,152 @@ export class CapTimelineEditorApp {
         if (this._outputVideoHoverEl) this._outputVideoHoverEl.hidden = true;
     }
 
+    _ensureResourceGenProgramVideo() {
+        if (this._resourceGenPreview?.video?.isConnected) return this._resourceGenPreview.video;
+        const stage = this.programStage;
+        if (!stage) return null;
+        let video = stage.querySelector(".cat-te-program-gen-preview-video");
+        if (!video) {
+            video = document.createElement("video");
+            video.className = "cat-te-program-gen-preview-video";
+            video.playsInline = true;
+            video.preload = "auto";
+            video.controls = false;
+            video.setAttribute("controlsList", "nodownload");
+            stage.appendChild(video);
+        }
+        return video;
+    }
+
+    _layoutResourceGenProgramVideo() {
+        const video = this._resourceGenPreview?.video;
+        const canvas = this.programCanvas;
+        if (!video || !canvas) return;
+        const w = canvas.style.width || `${canvas.clientWidth}px`;
+        const h = canvas.style.height || `${canvas.clientHeight}px`;
+        video.style.width = w;
+        video.style.height = h;
+    }
+
+    /**
+     * Resource edit: play generated video in the program monitor.
+     * Does not change timeline currentTime / playhead.
+     * @param {string|null} [urlOverride] blob/object URL (e.g. live sampling preview)
+     */
+    _startResourceGenProgramPreview(clip, file, urlOverride = null) {
+        if (!clip || this._isGeneratedEditMode()) return;
+        const url = urlOverride || (file ? this._outputVideoUrl(file) : "");
+        if (!url) return;
+        const fileKey = file || url;
+        this._cancelResourceGenProgramPreviewStop();
+        this._hideOutputVideoHoverPreview();
+        // Pause timeline transport so audio/preview don't fight, but keep seek time.
+        if (this._timeline?._playing) this._timeline.pause();
+        this._stopAudioPlayback?.();
+        this._pauseUnusedPreviewVideos(new Set());
+
+        const same = this._resourceGenPreview?.clipId === clip.id
+            && this._resourceGenPreview?.file === fileKey
+            && this._resourceGenPreview?.video;
+        const video = this._ensureResourceGenProgramVideo();
+        if (!video) return;
+
+        if (same && !video.paused && this._resourceGenPreview?.file === fileKey
+            && video.getAttribute("src") === url) {
+            this._layoutResourceGenProgramVideo();
+            return;
+        }
+
+        const prevClipId = this._resourceGenPreview?.clipId;
+        this._stopResourceGenPreviewLoop();
+        try { video.pause(); } catch { /* ignore */ }
+        video.onended = () => this._stopResourceGenProgramPreview();
+        video.onloadedmetadata = () => {
+            if (this._resourceGenPreview?.file !== fileKey) return;
+            this._layoutResourceGenProgramVideo();
+        };
+        if (this._resourceGenPreview?.file !== fileKey || video.getAttribute("src") !== url) {
+            video.src = url;
+            video.currentTime = 0;
+        }
+        video.muted = false;
+        video.volume = 1;
+        video.hidden = false;
+        this.programStage?.classList.add("is-gen-previewing");
+        if (this.programEmpty) this.programEmpty.hidden = true;
+        this._resourceGenPreview = { clipId: clip.id, file: fileKey, video };
+        this._layoutProgramCanvas();
+        this._layoutResourceGenProgramVideo();
+        if (prevClipId && prevClipId !== clip.id) {
+            const prev = this._findClipById(prevClipId);
+            if (prev) this._decorateClip(prev);
+        }
+        this._decorateClip(clip);
+        void video.play().catch(() => {
+            video.muted = true;
+            void video.play().then(() => {
+                video.muted = false;
+            }).catch(() => { /* ignore */ });
+        });
+        this._startResourceGenPreviewLoop();
+    }
+
+    _cancelResourceGenProgramPreviewStop() {
+        if (this._resourceGenPreviewStopTimer) {
+            clearTimeout(this._resourceGenPreviewStopTimer);
+            this._resourceGenPreviewStopTimer = 0;
+        }
+    }
+
+    _scheduleResourceGenProgramPreviewStop() {
+        this._cancelResourceGenProgramPreviewStop();
+        this._resourceGenPreviewStopTimer = setTimeout(() => {
+            this._resourceGenPreviewStopTimer = 0;
+            this._stopResourceGenProgramPreview();
+        }, 80);
+    }
+
+    _stopResourceGenPreviewLoop() {
+        if (this._resourceGenPreviewRaf) {
+            cancelAnimationFrame(this._resourceGenPreviewRaf);
+            this._resourceGenPreviewRaf = 0;
+        }
+    }
+
+    _startResourceGenPreviewLoop() {
+        this._stopResourceGenPreviewLoop();
+        const tick = () => {
+            this._resourceGenPreviewRaf = 0;
+            if (!this._resourceGenPreview?.video) return;
+            this._layoutResourceGenProgramVideo();
+            this._resourceGenPreviewRaf = requestAnimationFrame(tick);
+        };
+        this._resourceGenPreviewRaf = requestAnimationFrame(tick);
+    }
+
+    _stopResourceGenProgramPreview() {
+        this._cancelResourceGenProgramPreviewStop();
+        this._stopResourceGenPreviewLoop();
+        const prevClipId = this._resourceGenPreview?.clipId;
+        const video = this._resourceGenPreview?.video
+            || this.programStage?.querySelector(".cat-te-program-gen-preview-video");
+        if (video) {
+            try { video.pause(); } catch { /* ignore */ }
+            video.onended = null;
+            video.onloadedmetadata = null;
+            video.removeAttribute("src");
+            try { video.load(); } catch { /* ignore */ }
+            video.hidden = true;
+        }
+        this._resourceGenPreview = null;
+        this.programStage?.classList.remove("is-gen-previewing");
+        if (prevClipId) {
+            const clip = this._findClipById(prevClipId);
+            if (clip) this._decorateClip(clip);
+        }
+        this._scheduleProgramPreview();
+    }
+
     _showOutputVideoHoverPreview(anchorEl, file) {
         if (!anchorEl || !file) return;
         this._cancelOutputVideoHoverHide();
@@ -4515,10 +8670,13 @@ export class CapTimelineEditorApp {
         this._hideOutputVideoHoverPreview();
         this._outputVideosThumbIo?.disconnect();
         this._outputVideosThumbIo = null;
+        const isAudio = this._outputPickerKind === "audio";
         const clip = this._findClipById(this._outputVideosClipId);
         this._syncOutputVideosPickerTitle(clip);
         const have = new Set(
-            this._clipGeneratedVideos(clip ? this._ensureClipMeta(clip) : null)
+            (isAudio
+                ? this._clipGeneratedAudios(clip ? this._ensureClipMeta(clip) : null)
+                : this._clipGeneratedVideos(clip ? this._ensureClipMeta(clip) : null))
                 .map((row) => normalizeOutputVideoPath(row.file) || row.file),
         );
         const q = String(this.outputVideosFilter?.value || "").trim().toLowerCase();
@@ -4532,11 +8690,13 @@ export class CapTimelineEditorApp {
         if (!rows.length) {
             const empty = document.createElement("div");
             empty.className = "cat-te-output-videos-empty";
-            empty.textContent = this._outputVideosCache.length ? T("no_matching_videos") : T("no_videos_in_output_dir");
+            empty.textContent = this._outputVideosCache.length
+                ? T(isAudio ? "no_matching_audios" : "no_matching_videos")
+                : T(isAudio ? "no_audios_in_output_dir" : "no_videos_in_output_dir");
             this.outputVideosBody.appendChild(empty);
             return;
         }
-        const io = new IntersectionObserver((entries) => {
+        const io = isAudio ? null : new IntersectionObserver((entries) => {
             for (const entry of entries) {
                 if (!entry.isIntersecting) continue;
                 const thumb = entry.target;
@@ -4554,22 +8714,34 @@ export class CapTimelineEditorApp {
             const key = normalizeOutputVideoPath(file) || file;
             const item = document.createElement("div");
             item.className = "cat-te-output-video-row";
+            if (isAudio) item.classList.add("is-audio");
             const added = have.has(key);
             if (added) item.classList.add("is-added");
             const thumbWrap = document.createElement("span");
             thumbWrap.className = "cat-te-output-video-thumb-wrap";
-            const thumb = document.createElement("img");
-            thumb.className = "cat-te-output-video-thumb";
-            thumb.alt = "";
-            thumb.dataset.file = file;
-            const playHint = document.createElement("span");
-            playHint.className = "cat-te-output-video-thumb-play";
-            playHint.innerHTML = iconHtml("play", 12);
-            playHint.setAttribute("aria-hidden", "true");
-            thumbWrap.append(thumb, playHint);
-            thumbWrap.title = T("hover_preview_video_title");
-            thumbWrap.addEventListener("mouseenter", () => this._showOutputVideoHoverPreview(thumbWrap, file));
-            thumbWrap.addEventListener("mouseleave", () => this._scheduleOutputVideoHoverHide());
+            if (isAudio) {
+                thumbWrap.classList.add("is-audio");
+                thumbWrap.innerHTML = iconHtml("audio", 16);
+                thumbWrap.title = T("preview_audio_title");
+                thumbWrap.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this._previewOutputAudioFile(file);
+                });
+            } else {
+                const thumb = document.createElement("img");
+                thumb.className = "cat-te-output-video-thumb";
+                thumb.alt = "";
+                thumb.dataset.file = file;
+                const playHint = document.createElement("span");
+                playHint.className = "cat-te-output-video-thumb-play";
+                playHint.innerHTML = iconHtml("play", 12);
+                playHint.setAttribute("aria-hidden", "true");
+                thumbWrap.append(thumb, playHint);
+                thumbWrap.title = T("hover_preview_video_title");
+                thumbWrap.addEventListener("mouseenter", () => this._showOutputVideoHoverPreview(thumbWrap, file));
+                thumbWrap.addEventListener("mouseleave", () => this._scheduleOutputVideoHoverHide());
+                if (io) io.observe(thumb);
+            }
             const name = document.createElement("button");
             name.type = "button";
             name.className = "cat-te-output-video-name";
@@ -4583,8 +8755,11 @@ export class CapTimelineEditorApp {
             if (!added) {
                 const add = () => {
                     const target = this._findClipById(this._outputVideosClipId);
-                    if (!target || target.track?.type === "audio") return;
-                    if (!this._addGeneratedVideosToClip(target, [file])) return;
+                    if (!this._isOutputPickerClip(target, isAudio ? "audio" : "video")) return;
+                    const ok = isAudio
+                        ? this._addGeneratedAudiosToClip(target, [file])
+                        : this._addGeneratedVideosToClip(target, [file]);
+                    if (!ok) return;
                     item.classList.add("is-added");
                     name.disabled = true;
                     tag.textContent = T("added_tag");
@@ -4593,8 +8768,29 @@ export class CapTimelineEditorApp {
                 tag.addEventListener("click", add);
             }
             this.outputVideosBody.appendChild(item);
-            io.observe(thumb);
         }
+    }
+
+    _previewOutputAudioFile(file) {
+        const url = this._generatedAudioUrl(file);
+        if (!url) return;
+        if (!this.mediaPreviewModal || !this.mediaPreviewStage) {
+            const a = new Audio(url);
+            void a.play().catch(() => {});
+            return;
+        }
+        this.mediaPreviewModal.hidden = false;
+        if (this.mediaPreviewTitle) {
+            this.mediaPreviewTitle.textContent = String(file).split(/[\\/]/).pop() || T("gen_audio_label");
+        }
+        this.mediaPreviewStage.replaceChildren();
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        audio.preload = "metadata";
+        audio.src = url;
+        audio.style.maxWidth = "100%";
+        this.mediaPreviewStage.appendChild(audio);
+        void audio.play().catch(() => {});
     }
 
     _isEmptyGroupClip(meta) {
@@ -4650,6 +8846,7 @@ export class CapTimelineEditorApp {
         meta.agent = meta.agent === "other" ? "other" : this._knownClipAgent(meta.agent);
         if (meta.agent !== "other") meta.agentCustom = "";
         else meta.agentCustom = String(meta.agentCustom || "").trim();
+        meta.promptIncludes = normalizePromptIncludes(meta.promptIncludes);
         if (!items.length) {
             clip.thumbnail = null;
             clip.hasAudio = false;
@@ -4664,11 +8861,19 @@ export class CapTimelineEditorApp {
         this._normalizeVisualMeta(clip, m);
         const items = this._clipItems(m);
         const first = items.find((it) => it.enabled !== false) || items[0];
-        const gen = this._clipUsesGeneratedPreview(m) ? this._firstEnabledGeneratedVideo(m) : null;
+        const enabledGen = this._firstEnabledGeneratedVideo(m);
+        const gen = this._clipUsesGeneratedPreview(m) ? enabledGen : null;
         if (isDefaultClipName(clip.name)) {
             clip.name = first?.file?.split(/[\\/]/).pop()
                 || gen?.file?.split(/[\\/]/).pop()
                 || DEFAULT_CLIP_NAME;
+        }
+        // Generated-edit mode without a bound video: empty placeholder Clip.
+        if (this._isGeneratedEditMode() && !enabledGen) {
+            clip.thumbnail = null;
+            this._refreshClipAppearance(clip);
+            if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
+            return;
         }
         if (gen) {
             if (refreshVideo) {
@@ -5569,15 +9774,23 @@ export class CapTimelineEditorApp {
     }
 
     _createInsertTrack(kind) {
-        const type = kind === "audio" ? "audio" : "image";
+        const type = kind === "audio"
+            ? "audio"
+            : kind === "voiceover"
+                ? "voiceover"
+                : "image";
         const track = this._timeline.addTrack({
             type,
-            name: type === "audio" ? T("media_kind_audio") : T("overlay_track_name"),
-            height: TRACK_HEIGHT,
+            name: type === "audio"
+                ? T("audio_track_name")
+                : type === "voiceover"
+                    ? T("voiceover_track_name")
+                    : T("overlay_track_name"),
+            height: trackHeightFor(type),
         });
         this._trackInfo.set(track.id, {
             trackIndex: this._nextTrackIndex(), enabled: true,
-            role: type === "audio" ? "audio" : "overlay",
+            role: type === "audio" ? "audio" : type === "voiceover" ? "voiceover" : "overlay",
         });
         this._setupTrackControls(track);
         return track;
@@ -5613,6 +9826,15 @@ export class CapTimelineEditorApp {
         this._addVideoAtTime(filename, this._timeline.currentTime, null);
     }
 
+    _showInsertClipMenu(e) {
+        const r = e.currentTarget.getBoundingClientRect();
+        this._buildCtxMenu([
+            { label: T("insert_media_clip_menu"), fn: () => this._insertPackageAtTime(this._timeline?.currentTime ?? 0) },
+            { label: T("insert_voiceover_clip_menu"), fn: () => this._insertVoiceoverAtTime(this._timeline?.currentTime ?? 0) },
+            { label: T("insert_subtitle_clip_menu"), fn: () => this._insertSubtitleAtTime(this._timeline?.currentTime ?? 0) },
+        ], r.left, r.bottom + 4);
+    }
+
     /**
      * Empty Clip containers on image/video tracks — used for 文生视频
      * or as a group that later holds multiple stills / videos.
@@ -5620,6 +9842,72 @@ export class CapTimelineEditorApp {
     _insertPackageAtPlayhead() {
         if (!this._timeline) return;
         this._insertPackageAtTime(this._timeline.currentTime);
+    }
+
+    _insertVoiceoverAtTime(atSec, preferredTrack = null) {
+        if (!this._timeline) return;
+        let track = preferredTrack && isVoiceoverTrackType(preferredTrack.type) ? preferredTrack : null;
+        if (track?.locked) track = null;
+        const dur = Math.min(2, this._timeline.duration / 4) || 1;
+        if (!track) {
+            track = this._allVoiceoverTracks().find((t) => !t.locked && this._trackHasRoom(t, atSec, dur));
+        }
+        this._recordUndo();
+        if (!track) {
+            track = this._addUserTrack("voiceover") || this._createInsertTrack("voiceover");
+        }
+        if (!track || track.locked) return;
+        this._ensureTimelineLength(atSec + dur);
+        const clip = this._timeline.addClip(track.id, {
+            name: T("voiceover_clip_default_name"),
+            startTime: atSec,
+            duration: dur,
+            sourceDuration: Infinity,
+            sourceOffset: 0,
+            src: "",
+            color: track.color || "#5bc0de",
+        });
+        this._meta.set(clip.id, {
+            ...defaultVoiceoverMeta(this._trackIndex(track)),
+            resourceStartSec: atSec,
+            resourceDurationSec: dur,
+        });
+        this._timeline.selectClip(clip);
+        this._timeline.setCurrentTime(atSec);
+        this._decorateClip(clip);
+        this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
+    }
+
+    _insertSubtitleAtTime(atSec, preferredTrack = null) {
+        if (!this._timeline) return;
+        let track = preferredTrack && isSubtitleTrackType(preferredTrack.type) ? preferredTrack : null;
+        if (track?.locked) track = null;
+        if (!track) {
+            track = this._allTextTracks().find((t) => !t.locked && this._trackHasRoom(t, atSec, 0.05));
+        }
+        this._recordUndo();
+        if (!track) {
+            track = this._addUserTrack("text");
+        }
+        if (!track || track.locked) return;
+        const dur = Math.min(2, this._timeline.duration / 4) || 1;
+        const text = T("subtitle_default_text");
+        const clip = this._timeline.addClip(track.id, {
+            name: text,
+            startTime: atSec,
+            duration: dur,
+            color: track.color || "#ff9e4a",
+        });
+        this._meta.set(clip.id, {
+            ...defaultSubtitleMeta(this._trackIndex(track)),
+            text,
+        });
+        this._timeline.selectClip(clip);
+        this._timeline.setCurrentTime(atSec);
+        this._decorateClip(clip);
+        this._refreshTimelineDuration();
+        this._scheduleProgramPreview();
     }
 
     _insertPackageAtTime(atSec) {
@@ -6071,13 +10359,113 @@ export class CapTimelineEditorApp {
                     if (!clip.hasAudio) continue;
                     if (track.visible === false || m?.disabled) continue;
                     if (track.muted) continue;
-                    // Generated-video preview owns its own HTML5 audio path.
+                    // Generated-video preview audio is scheduled separately
+                    // via Web Audio (canvas <video> stays muted).
                     if (this._clipUsesGeneratedPreview(m)) continue;
                 }
                 out.push(clip);
             }
         }
         return out;
+    }
+
+    /**
+     * Generated-video audio jobs from `fromTime` onward (absolute timeline secs).
+     * Canvas preview videos stay muted; these feed Web Audio instead.
+     */
+    _collectGeneratedVideoAudioJobs(fromTime) {
+        const jobs = [];
+        const t0 = Math.max(0, Number(fromTime) || 0);
+        const genMode = this._isGeneratedEditMode();
+        for (const track of this._allImageTracks()) {
+            if (track.visible === false || track.muted) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                const m = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (m.disabled || m.visible === false) continue;
+                if (!genMode && !this._clipUsesGeneratedPreview(m)) continue;
+                const gens = genMode
+                    ? this._clipGeneratedVideos(m).filter((g) => g.enabled !== false)
+                    : (() => {
+                        const g = this._firstEnabledGeneratedVideo(m);
+                        return g ? [g] : [];
+                    })();
+                // Newest-first: one unmuted gen per clip (topmost).
+                let picked = null;
+                for (const gen of gens) {
+                    if (gen.muted === true || !gen.file) continue;
+                    const editStart = Math.max(0, Number(gen.edit_start_sec) || 0);
+                    const tin = Math.max(0, Number(gen.trim_in_sec) || 0);
+                    let eff = this._genEffectiveDurationSec(gen);
+                    if (!(eff > 0)) {
+                        const full = Number(gen.duration_sec);
+                        eff = Number.isFinite(full) && full > tin
+                            ? Math.min(full - tin, Math.max(0.05, clip.duration - editStart))
+                            : Math.max(0.05, clip.duration - editStart);
+                    }
+                    const absStart = clip.startTime + editStart;
+                    const absEnd = Math.min(clip.endTime, absStart + eff);
+                    if (absEnd <= t0 + 1e-6) continue;
+                    picked = { file: gen.file, location: "output", tin, absStart, absEnd };
+                    break;
+                }
+                if (picked) jobs.push(picked);
+                // Detached audios from gen-edit modal (saved on the clip).
+                for (const row of this._normalizeGenEditAudioDraft(m.genEditAudios)) {
+                    if (row.muted === true || !row.file) continue;
+                    const absStart = clip.startTime + Math.max(0, Number(row.edit_start_sec) || 0);
+                    const absEnd = absStart + Math.max(0.05, Number(row.duration) || 0.05);
+                    if (absEnd <= t0 + 1e-6) continue;
+                    jobs.push({
+                        file: row.file,
+                        location: "input",
+                        tin: Math.max(0, Number(row.source_offset) || 0),
+                        absStart,
+                        absEnd,
+                    });
+                }
+            }
+        }
+        return jobs;
+    }
+
+    async _scheduleGeneratedVideoWebAudio(startCtxTime, startPlayhead) {
+        const tl = this._timeline;
+        if (!tl?._playing) return;
+        const token = (this._genMainAudioToken = (this._genMainAudioToken || 0) + 1);
+        const ctx = this._ensurePlaybackContext();
+        const jobs = this._collectGeneratedVideoAudioJobs(startPlayhead);
+        for (const job of jobs) {
+            const buffer = await this._ensureGenVideoAudioBuffer(job.file, job.location || "output");
+            if (!buffer || this._genMainAudioToken !== token || !tl._playing) return;
+            const src = ctx.createBufferSource();
+            src.buffer = buffer;
+            const gain = ctx.createGain();
+            src.connect(gain);
+            gain.connect(ctx.destination);
+            gain.gain.setValueAtTime(1, startCtxTime);
+
+            let when;
+            let offset;
+            let dur;
+            if (job.absStart <= startPlayhead) {
+                when = startCtxTime;
+                offset = job.tin + (startPlayhead - job.absStart);
+                dur = job.absEnd - startPlayhead;
+            } else {
+                when = startCtxTime + (job.absStart - startPlayhead);
+                offset = job.tin;
+                dur = job.absEnd - job.absStart;
+            }
+            const maxOff = Math.max(0, buffer.duration - 0.001);
+            offset = Math.max(0, Math.min(offset, maxOff));
+            dur = Math.max(0.001, Math.min(dur, Math.max(0.001, buffer.duration - offset)));
+            try {
+                src.start(when, offset, dur);
+                this._activeAudioSources.push({ src, gain });
+            } catch { /* skip */ }
+        }
     }
 
     /** Linear fade envelope for Web Audio playback of an audio-track clip. */
@@ -6157,9 +10545,12 @@ export class CapTimelineEditorApp {
             } catch { /* clip's buffer/offset out of range — skip it */ }
         }
         this._activeAudioSources = sources;
+        // Generated-video audio (was HTML5 unmute on canvas decoders → noise).
+        void this._scheduleGeneratedVideoWebAudio(startCtxTime, startPlayhead);
     }
 
     _stopAudioPlayback() {
+        this._genMainAudioToken = (this._genMainAudioToken || 0) + 1;
         if (this._seekAudioRaf) {
             cancelAnimationFrame(this._seekAudioRaf);
             this._seekAudioRaf = null;
@@ -6222,7 +10613,10 @@ export class CapTimelineEditorApp {
         project.settings.fps = Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps);
         project.settings.width = Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width);
         project.settings.height = Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height);
-        project.settings.global_prompt = this._readGlobalPrompt();
+        for (const key of SETTING_PROMPT_KEYS) {
+            project.settings[key] = this._readSettingPrompt(key);
+        }
+        project.settings.prompt_concat_order = this._getPromptConcatOrder();
         delete project.settings.ignore_occluded;
         this._writeProjectJson(JSON.stringify(project));
         this._syncProjectScalarDisplay();
@@ -6242,7 +10636,7 @@ export class CapTimelineEditorApp {
             fps,
             timeFormat: "frames",
             zoom: 1.2,
-            addTrackTypes: ["image", "audio"],
+            addTrackTypes: ["image", "voiceover", "audio", "text"],
         });
 
         let project = projectOverride;
@@ -6265,28 +10659,59 @@ export class CapTimelineEditorApp {
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
         this._applyScalarSettings(settings, { applySettingsFromProject });
         this._watermark = this._normalizeWatermark(settings.watermark);
+        this._promptConcatOrder = normalizePromptConcatOrder(settings.prompt_concat_order);
+        this._renderPromptConcatOrderList();
+        this._useClipSpecifiedVideoFilename = settings.use_clip_specified_video_filename !== false;
+        this._timelineEditMode = settings.timeline_edit_mode === "generated" ? "generated" : "resource";
         project.settings = {
             ...settings,
             fps: Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps),
             width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
             height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
-            global_prompt: String(settings.global_prompt ?? this._readGlobalPrompt() ?? ""),
+            ...Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [
+                key,
+                String(settings[key] ?? this._readSettingPrompt(key) ?? ""),
+            ])),
+            prompt_concat_order: this._getPromptConcatOrder(),
+            use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
+            timeline_edit_mode: this._timelineEditMode,
         };
-        if (settings.global_prompt != null) {
-            this._writeGlobalPrompt(settings.global_prompt);
-        } else {
-            this._syncGlobalPromptInput();
+        let wroteAnySettingPrompt = false;
+        this._settingPromptSyncing = true;
+        try {
+            for (const key of SETTING_PROMPT_KEYS) {
+                const input = this._settingPromptInputs?.[key];
+                if (!input) continue;
+                if (settings[key] != null) {
+                    setRichPromptValue(input, String(settings[key]), true);
+                    wroteAnySettingPrompt = true;
+                }
+            }
+        } finally {
+            this._settingPromptSyncing = false;
         }
+        if (wroteAnySettingPrompt) this._syncScalarsToProjectJson();
+        else this._syncSettingPromptInputs();
         this._syncProjectScalarDisplay();
         this._timeline.fps = this.getFps();
 
         const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
-        const tracksCfg = projectTracks.map((track, order) => ({
-            ...track,
-            type: track.type === "audio" ? "audio" : "image",
-            trackIndex: order,
-            isMain: track.role === "main",
-        }));
+        const tracksCfg = projectTracks.map((track, order) => {
+            const rawType = String(track.type || "visual").toLowerCase();
+            const type = rawType === "audio"
+                ? "audio"
+                : rawType === "voiceover"
+                    ? "voiceover"
+                    : (rawType === "subtitle" || rawType === "text")
+                        ? "text"
+                        : "image";
+            return {
+                ...track,
+                type,
+                trackIndex: order,
+                isMain: track.role === "main",
+            };
+        });
 
         if (!tracksCfg.length) {
             this._createDefaultTracks();
@@ -6311,6 +10736,7 @@ export class CapTimelineEditorApp {
         this._configureTimelineUi();
         if (loadSeq !== this._loadSeq) return;
         this._timelineReady = true;
+        void this._applyTimelineEditMode();
         this._saveToWidgets();
         this._ensureProgramPreviewObserver();
         this._scheduleProgramPreview();
@@ -6325,7 +10751,7 @@ export class CapTimelineEditorApp {
             type: "image", name: T("overlay_track_name"), height: TRACK_HEIGHT, color: "#8b4ec8",
         });
         this._audioTrack = tl.addTrack({
-            type: "audio", name: T("audio_track_name"), height: TRACK_HEIGHT, color: "#3dd68c",
+            type: "audio", name: T("audio_track_name"), height: trackHeightFor("audio"), color: "#3dd68c",
         });
         this._trackInfo.set(this._mainTrack.id, { trackIndex: 0, enabled: true, role: "main" });
         this._trackInfo.set(this._overlayTrack.id, { trackIndex: 1, enabled: true, role: "overlay" });
@@ -6344,9 +10770,17 @@ export class CapTimelineEditorApp {
             const track = tl.addTrackAt({
                 id: row.id,
                 type: row.type || "image",
-                name: row.name || (row.type === "audio" ? T("audio_track_name") : T("generic_track_name")),
+                name: row.name || (
+                    row.type === "audio"
+                        ? T("audio_track_name")
+                        : isVoiceoverTrackType(row.type)
+                            ? T("voiceover_track_name")
+                            : isSubtitleTrackType(row.type)
+                                ? T("subtitle_track_name")
+                                : T("generic_track_name")
+                ),
                 isMain,
-                height: TRACK_HEIGHT,
+                height: trackHeightFor(row.type),
                 color: row.color,
                 locked: !!row.locked,
                 visible: row.visible !== false,
@@ -6358,7 +10792,17 @@ export class CapTimelineEditorApp {
             this._trackInfo.set(track.id, {
                 trackIndex: row.trackIndex ?? index,
                 enabled: row.enabled !== false,
-                role: row.role || (isMain ? "main" : (row.type === "audio" ? "audio" : "overlay")),
+                role: row.role || (
+                    isMain
+                        ? "main"
+                        : row.type === "audio"
+                            ? "audio"
+                            : isVoiceoverTrackType(row.type)
+                                ? "voiceover"
+                                : isSubtitleTrackType(row.type)
+                                    ? "subtitle"
+                                    : "overlay"
+                ),
             });
             this._setupTrackControls(track);
         });
@@ -6393,6 +10837,7 @@ export class CapTimelineEditorApp {
         const direct = this._trackByIndex(trackIdx);
         if (direct) return direct;
         if (clipType === "audio") return this._audioTrack;
+        if (clipType === "voiceover") return this._allVoiceoverTracks()[0] ?? null;
         if (trackIdx === 1) return this._overlayTrack ?? this._mainTrack;
         return this._mainTrack;
     }
@@ -6463,6 +10908,83 @@ export class CapTimelineEditorApp {
                 fadeInMs,
                 fadeOutMs,
                 mediaId: audioMedia?.id || "",
+                resourceStartSec: Math.max(0, Number(c.resource_start_sec) || startTime),
+                resourceDurationSec: Math.max(0.05, Number(c.resource_duration_sec) || dur),
+            });
+            this._decorateClip(clip);
+            return;
+        }
+
+        if (clipType === "voiceover" || isVoiceoverTrackType(track.type)) {
+            const name = String(c.name || T("voiceover_clip_default_name"));
+            const clip = this._timeline.addClip(track.id, {
+                id: c.id || uid(),
+                name: name.slice(0, 40) || T("voiceover_clip_default_name"),
+                startTime,
+                duration: dur,
+                sourceDuration: Infinity,
+                sourceOffset: 0,
+                src: "",
+                color: track.color || "#5bc0de",
+            });
+            this._meta.set(clip.id, {
+                ...defaultVoiceoverMeta(trackIdx),
+                muted: !!c.muted,
+                visible: c.visible !== false,
+                disabled: !!c.disabled || c.enabled === false,
+                prompt: String(c.prompt ?? ""),
+                stylePrompt: String(c.style_prompt ?? c.stylePrompt ?? ""),
+                generatedAudios: (Array.isArray(c.generated_audios) ? c.generated_audios : [])
+                    .map((row) => normalizeGeneratedAudio(row))
+                    .filter(Boolean),
+                resourceStartSec: Math.max(0, Number(c.resource_start_sec) || startTime),
+                resourceDurationSec: Math.max(0.05, Number(c.resource_duration_sec) || dur),
+            });
+            this._decorateClip(clip);
+            return;
+        }
+
+        if (clipType === "subtitle" || clipType === "text" || isSubtitleTrackType(track.type)) {
+            const text = String(c.text ?? c.name ?? T("subtitle_default_text"));
+            const clip = this._timeline.addClip(track.id, {
+                id: c.id || uid(),
+                name: text.slice(0, 40) || T("subtitle_default_text"),
+                startTime,
+                duration: dur,
+                color: track.color || "#ff9e4a",
+            });
+            const style = c.style && typeof c.style === "object" ? c.style : c;
+            this._meta.set(clip.id, {
+                ...defaultSubtitleMeta(trackIdx),
+                ...pickSubtitleStyle({
+                    text,
+                    fontFamily: style.font_family ?? style.fontFamily,
+                    fontPath: style.font_path ?? style.fontPath,
+                    fontSize: style.font_size ?? style.fontSize,
+                    letterSpacing: style.letter_spacing ?? style.letterSpacing,
+                    color: style.color,
+                    bold: style.bold,
+                    italic: style.italic,
+                    opacity: style.opacity,
+                    strokeEnabled: style.stroke_enabled ?? style.strokeEnabled,
+                    strokeColor: style.stroke_color ?? style.strokeColor,
+                    strokeWidth: style.stroke_width ?? style.strokeWidth,
+                    shadowEnabled: style.shadow_enabled ?? style.shadowEnabled,
+                    shadowColor: style.shadow_color ?? style.shadowColor,
+                    shadowBlur: style.shadow_blur ?? style.shadowBlur,
+                    shadowOffsetX: style.shadow_offset_x ?? style.shadowOffsetX,
+                    shadowOffsetY: style.shadow_offset_y ?? style.shadowOffsetY,
+                    align: style.align,
+                    vAlign: style.v_align ?? style.vAlign,
+                    offsetX: style.offset_x ?? style.offsetX,
+                    offsetY: style.offset_y ?? style.offsetY,
+                }),
+                text,
+                disabled: !!c.disabled,
+                visible: c.visible !== false,
+                trackIndex: trackIdx,
+                resourceStartSec: Math.max(0, Number(c.resource_start_sec) || startTime),
+                resourceDurationSec: Math.max(0.05, Number(c.resource_duration_sec) || dur),
             });
             this._decorateClip(clip);
             return;
@@ -6498,13 +11020,13 @@ export class CapTimelineEditorApp {
                 thumbnail: first?.kind === "image" && first.file ? this._imgUrl(first.file) : null,
                 color: items.length ? track.color : "#d9a441",
             });
+            const promptIncludes = promptIncludesFromClipJson(c);
             const meta = {
                 ...defaultImageMeta(trackIdx),
                 mediaKind: "clip",
                 prompt: c.prompt ?? "",
                 aiPrompt: c.ai_prompt ?? "",
-                useGlobalPrompt: c.use_global_prompt !== false,
-                useAiPrompt: c.use_ai_prompt !== false,
+                promptIncludes,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
                 items,
@@ -6517,8 +11039,19 @@ export class CapTimelineEditorApp {
                 tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
                 generatePreviewVideo: !!c.generate_preview_video,
                 secondSample: !!c.second_sample,
+                h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
+                saveLatent: !!c.save_latent,
                 generatedVideos: this._generatedVideosFromJson(c),
+                genEditAudios: this._normalizeGenEditAudioDraft(c.gen_edit_audios),
                 previewMode: this._previewModeFromJson(c),
+                resourceDurationSec: Math.max(
+                    0.05,
+                    Number(c.resource_duration_sec) || dur,
+                ),
+                resourceStartSec: Math.max(
+                    0,
+                    Number(c.resource_start_sec) || startTime,
+                ),
             };
             if (first?.kind === "video") {
                 meta.sourceDuration = sourceDur;
@@ -6565,6 +11098,7 @@ export class CapTimelineEditorApp {
                 color: track.color,
             });
             clip._audioBuffer = buffer;
+            const promptIncludes = promptIncludesFromClipJson(c);
             this._meta.set(clip.id, {
                 ...defaultImageMeta(trackIdx),
                 mediaKind: "clip",
@@ -6575,8 +11109,7 @@ export class CapTimelineEditorApp {
                 prompt: c.prompt ?? "",
                 aiPrompt: c.ai_prompt ?? "",
                 endImage: c.end_image ?? null,
-                useGlobalPrompt: c.use_global_prompt !== false,
-                useAiPrompt: c.use_ai_prompt !== false,
+                promptIncludes,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
                 sourceDuration: sourceDur,
@@ -6594,7 +11127,18 @@ export class CapTimelineEditorApp {
                 enabled: mediaFlagAt(c.media_enabled, i),
             })),
                 generatedVideos: this._generatedVideosFromJson(c),
+                genEditAudios: this._normalizeGenEditAudioDraft(c.gen_edit_audios),
                 previewMode: this._previewModeFromJson(c),
+                resourceDurationSec: Math.max(
+                    0.05,
+                    Number(c.resource_duration_sec) || dur,
+                ),
+                resourceStartSec: Math.max(
+                    0,
+                    Number(c.resource_start_sec) || startTime,
+                ),
+                h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
+                saveLatent: !!c.save_latent,
             });
             this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
             this._decorateClip(clip);
@@ -6613,6 +11157,7 @@ export class CapTimelineEditorApp {
             thumbnail: img ? this._imgUrl(img) : null,
             color: track.color,
         });
+        const promptIncludes = promptIncludesFromClipJson(c);
         this._meta.set(clip.id, {
             ...defaultImageMeta(trackIdx),
             mediaKind: "clip",
@@ -6623,8 +11168,7 @@ export class CapTimelineEditorApp {
             prompt: c.prompt ?? "",
             aiPrompt: c.ai_prompt ?? "",
             endImage: c.end_image ?? null,
-            useGlobalPrompt: c.use_global_prompt !== false,
-            useAiPrompt: c.use_ai_prompt !== false,
+            promptIncludes,
             disabled: !!c.disabled,
             visible: c.visible !== false,
             headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
@@ -6640,7 +11184,18 @@ export class CapTimelineEditorApp {
                 enabled: mediaFlagAt(c.media_enabled, i),
             })),
             generatedVideos: this._generatedVideosFromJson(c),
+            genEditAudios: this._normalizeGenEditAudioDraft(c.gen_edit_audios),
             previewMode: this._previewModeFromJson(c),
+            resourceDurationSec: Math.max(
+                0.05,
+                Number(c.resource_duration_sec) || dur,
+            ),
+            resourceStartSec: Math.max(
+                0,
+                Number(c.resource_start_sec) || startTime,
+            ),
+            h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
+            saveLatent: !!c.save_latent,
         });
         this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
         this._decorateClip(clip);
@@ -6697,6 +11252,8 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!tl?.scrollEl) return null;
         const track = tl._findTrackAtY(clientY, "image")
+            || tl._findTrackAtY(clientY, "text")
+            || tl._findTrackAtY(clientY, "voiceover")
             || tl._findTrackAtY(clientY, "audio")
             || tl._findTrackAtY(clientY, "video");
         if (!track) return null;
@@ -6710,16 +11267,60 @@ export class CapTimelineEditorApp {
         if (!clip?.el) return;
         const m = this._ensureClipMeta(clip);
         const track = clip.track;
-        const trackHidden = track.type === "image" && track.visible === false;
-        const trackMuted = track.type === "audio" && track.muted;
+        const trackHidden = (track.type === "image" || isSubtitleTrackType(track.type)) && track.visible === false;
+        const trackMuted = (track.type === "audio" || isVoiceoverTrackType(track.type)) && track.muted;
         const isAudio = m.clipType === "audio" || track.type === "audio";
+        const isVoiceover = isVoiceoverClipMeta(m, track);
+        const isSubtitle = isSubtitleClipMeta(m, track);
         const disabled = !isAudio && (!!m.disabled || trackHidden);
         clip.el.classList.toggle("cat-te-clip-disabled", disabled);
-        clip.el.classList.toggle("cat-te-clip-muted", isAudio && (!!m.muted || trackMuted));
-        clip.el.classList.toggle("cat-te-clip-package", !isAudio && this._isEmptyGroupClip(m));
+        clip.el.classList.toggle("cat-te-clip-muted", (isAudio || isVoiceover) && (!!m.muted || trackMuted));
+        clip.el.classList.toggle("cat-te-clip-package", !isAudio && !isSubtitle && !isVoiceover && this._isEmptyGroupClip(m));
+        clip.el.classList.toggle("cat-te-clip-voiceover", isVoiceover);
+        const runState = (!isAudio && !isSubtitle && !isVoiceover) ? this._clipRunState(clip.id) : null;
+        clip.el.classList.toggle("cat-te-clip-queued", runState === "queued");
+        clip.el.classList.toggle("cat-te-clip-running", runState === "running");
+        let runBar = clip.el.querySelector(".cat-te-clip-run-progress");
+        if (runState === "running") {
+            if (!runBar) {
+                runBar = document.createElement("div");
+                runBar.className = "cat-te-clip-run-progress";
+                runBar.innerHTML = `<div class="cat-te-clip-run-progress-fill"></div>`;
+                clip.el.appendChild(runBar);
+            }
+            const fill = runBar.querySelector(".cat-te-clip-run-progress-fill");
+            const pct = Math.round((this._runningProgress || 0) * 1000) / 10;
+            if (fill) {
+                fill.style.width = `${pct}%`;
+                fill.classList.toggle("is-indeterminate", !(this._runningProgress > 0.01));
+            }
+            runBar.title = T("clip_running_progress_title", { pct: Math.round(pct) });
+        } else if (runBar) {
+            runBar.remove();
+        }
+        if (runState === "queued") {
+            clip.el.title = T("clip_queued_title");
+        } else if (runState === "running") {
+            if (clip.el.getAttribute("title") === T("clip_queued_title")) {
+                clip.el.removeAttribute("title");
+            }
+        } else if (clip.el.getAttribute("title") === T("clip_queued_title")) {
+            clip.el.removeAttribute("title");
+        }
+        if (isSubtitle) {
+            const label = (m.text || clip.name || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+            clip.name = label.slice(0, 40);
+            const labelEl = clip.el.querySelector(".tl-clip-label");
+            if (labelEl) labelEl.textContent = clip.name;
+        } else if (isVoiceover) {
+            const label = (clip.name || T("voiceover_clip_default_name")).trim() || T("voiceover_clip_default_name");
+            clip.name = label.slice(0, 40);
+            const labelEl = clip.el.querySelector(".tl-clip-label");
+            if (labelEl) labelEl.textContent = clip.name;
+        }
 
         let muteBadge = clip.el.querySelector(".cat-te-mute-badge");
-        if (isAudio) {
+        if (isAudio || isVoiceover) {
             if (!muteBadge) {
                 muteBadge = document.createElement("button");
                 muteBadge.type = "button";
@@ -6744,28 +11345,56 @@ export class CapTimelineEditorApp {
         let badge = clip.el.querySelector(".cat-te-end-badge");
         if (badge && !badge.classList.contains("cat-te-clip-preview-badge")) badge.remove();
         let previewBadge = clip.el.querySelector(".cat-te-clip-preview-badge");
-        const enabledGen = !isAudio && track.type === "image" ? this._firstEnabledGeneratedVideo(m) : null;
-        if (enabledGen) {
+        const enabledGen = !isAudio && !isSubtitle && !isVoiceover && track.type === "image"
+            ? this._firstEnabledGeneratedVideo(m)
+            : null;
+        const runPreview = !isAudio && !isSubtitle && !isVoiceover && track.type === "image"
+            ? this._runPreviewByClipId.get(String(clip.id))
+            : null;
+        const genEditEmpty = this._isGeneratedEditMode() && !isAudio && !isSubtitle && !isVoiceover && !enabledGen;
+        clip.el.classList.toggle("cat-te-clip-gen-empty", genEditEmpty);
+        // Video badge in resource edit: hover plays finished generated video, or the
+        // live KJ Model Preview Override mp4 while this clip is sampling.
+        const showPreviewBadge = !this._isGeneratedEditMode() && !!(enabledGen || runPreview?.url);
+        if (showPreviewBadge) {
             if (!previewBadge) {
                 previewBadge = document.createElement("button");
                 previewBadge.type = "button";
                 previewBadge.className = "cat-te-end-badge cat-te-clip-preview-badge";
-                previewBadge.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    this._toggleClipGeneratedPreview(clip);
+                previewBadge.addEventListener("mouseenter", () => {
+                    if (this._isGeneratedEditMode()) return;
+                    const live = this._runPreviewByClipId.get(String(clip.id));
+                    if (live?.url) {
+                        this._startResourceGenProgramPreview(
+                            clip,
+                            this._runPreviewKey(clip.id),
+                            live.url,
+                        );
+                        return;
+                    }
+                    const meta = this._meta.get(clip.id) ?? defaultImageMeta();
+                    const gen = this._firstEnabledGeneratedVideo(meta);
+                    if (gen?.file) this._startResourceGenProgramPreview(clip, gen.file);
+                });
+                previewBadge.addEventListener("mouseleave", () => {
+                    this._scheduleResourceGenProgramPreviewStop();
                 });
                 clip.el.appendChild(previewBadge);
             }
-            const genMode = this._clipUsesGeneratedPreview(m);
-            previewBadge.innerHTML = iconHtml(genMode ? "camera" : "video", 12);
-            previewBadge.title = genMode ? T("switch_to_asset_preview_title") : T("switch_to_generated_preview_title");
+            previewBadge.innerHTML = iconHtml("video", 12);
+            previewBadge.title = runPreview?.url
+                ? T("program_preview_sampling_video_title")
+                : T("program_preview_generated_video_title");
+            previewBadge.classList.toggle("is-sampling", !!runPreview?.url);
+            previewBadge.classList.toggle(
+                "is-previewing",
+                this._resourceGenPreview?.clipId === clip.id,
+            );
         } else if (previewBadge) {
-            previewBadge.remove();
-            if (m.previewMode === "generated") {
-                m.previewMode = "media";
-                this._meta.set(clip.id, m);
+            if (this._resourceGenPreview?.clipId === clip.id) {
+                this._stopResourceGenProgramPreview();
             }
+            previewBadge.remove();
         }
 
         clip.el.querySelector(".cat-te-force-badge")?.remove();
@@ -7316,6 +11945,8 @@ export class CapTimelineEditorApp {
             || (this.mediaPreviewModal && !this.mediaPreviewModal.hidden)
             || (this.clipItemsModal && !this.clipItemsModal.hidden)
             || (this.genVideoModal && !this.genVideoModal.hidden)
+            || (this.genEditModal && !this.genEditModal.hidden)
+            || (this.voEditModal && !this.voEditModal.hidden)
             || (this.settingsModal && !this.settingsModal.hidden)
             || (this.aiOptimizeModal && !this.aiOptimizeModal.hidden)
             || (this.skillPickerModal && !this.skillPickerModal.hidden),
@@ -7773,9 +12404,19 @@ export class CapTimelineEditorApp {
     }
 
     _removeCtxMenu() {
+        let removed = false;
         const m = document.querySelector(".cat-te-ctx-menu");
-        if (m) { m.remove(); return true; }
-        return false;
+        if (m) { m.remove(); removed = true; }
+        const fp = document.querySelector(".cat-te-font-picker");
+        if (fp) {
+            if (typeof fp._capFontKeyHandler === "function") {
+                window.removeEventListener("keydown", fp._capFontKeyHandler, true);
+                fp._capFontKeyHandler = null;
+            }
+            fp.remove();
+            removed = true;
+        }
+        return removed;
     }
 
     _buildCtxMenu(items, x, y) {
@@ -7810,8 +12451,16 @@ export class CapTimelineEditorApp {
             this._timeline.selectClip(clip);
         }
         const m = this._meta.get(clip.id)
-            ?? (clip.track.type === "audio" ? defaultAudioMeta() : defaultImageMeta());
+            ?? (clip.track.type === "audio"
+                ? defaultAudioMeta()
+                : isVoiceoverTrackType(clip.track.type)
+                    ? defaultVoiceoverMeta()
+                    : isSubtitleTrackType(clip.track.type)
+                        ? defaultSubtitleMeta()
+                        : defaultImageMeta());
         const isAudio = clip.track.type === "audio" || m.clipType === "audio";
+        const isVoiceover = isVoiceoverClipMeta(m, clip.track);
+        const isSubtitle = isSubtitleClipMeta(m, clip.track);
         const t = this._timeline.currentTime;
         const canSplit = t > clip.startTime && t < clip.endTime;
         const items = [
@@ -7826,16 +12475,51 @@ export class CapTimelineEditorApp {
                     this._decorateClip(clip);
                 },
             });
-        } else {
+        } else if (isVoiceover) {
             items.push(
-                { label: T("menu_run"), fn: () => void this._runClipDownstream(clip) },
-                { label: T("menu_ai_optimize_prompt"), fn: () => void this._openAiOptimizeModal() },
+                {
+                    label: m.muted ? T("unmute_label") : T("mute_label"),
+                    fn: () => {
+                        m.muted = !m.muted;
+                        this._meta.set(clip.id, m);
+                        this._decorateClip(clip);
+                    },
+                },
+                { label: T("linked_generated_audios_title"), fn: () => void this._openOutputAudiosPicker(clip) },
+                { label: T("voiceover_edit_menu"), fn: () => void this._openVoiceoverEditModal(clip) },
+                { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
+                { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
+            );
+        } else if (isSubtitle) {
+            items.push(
+                { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
+                { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
+            );
+        } else {
+            const runState = this._clipRunState(clip.id);
+            if (runState === "queued" || runState === "running") {
+                items.push({
+                    label: T("menu_abort"),
+                    fn: () => void this._abortClipDownstream(clip),
+                });
+            } else {
+                items.push({ label: T("menu_run"), fn: () => void this._runClipDownstream(clip) });
+            }
+            items.push(
+                { label: T("menu_ai_optimize_prompt"), fn: () => void this._openAiOptimizeModal(clip) },
                 { label: m.disabled ? T("menu_enable_shortcut") : T("menu_disable_shortcut"), strike: !!m.disabled, fn: () => this._toggleDisableClip(clip) },
                 { label: T("menu_disable_others_assets_shortcut"), fn: () => this._disableOthers(clip) },
                 { label: T("menu_set_title"), fn: () => this._renameClip(clip) },
                 { label: T("view_material_title"), fn: () => this._openClipItemsModal(clip) },
                 { label: T("linked_generated_videos_title"), fn: () => void this._openOutputVideosPicker(clip) },
+                { label: T("menu_separate_audio"), fn: () => void this._separateClipAudio(clip) },
             );
+            if (this._isGeneratedEditMode()) {
+                items.splice(2, 0, {
+                    label: T("menu_edit_gen_video"),
+                    fn: () => void this._openGenEditModal(clip),
+                });
+            }
             if (this._clipUsesGeneratedPreview(m)) {
                 const gen = this._firstEnabledGeneratedVideo(m);
                 if (gen) {
@@ -7867,23 +12551,42 @@ export class CapTimelineEditorApp {
                 row && typeof row === "object" ? { ...row } : row
             ));
         }
+        if (Array.isArray(meta?.genEditAudios)) {
+            m.genEditAudios = meta.genEditAudios.map((row) => (
+                row && typeof row === "object" ? { ...row } : row
+            ));
+        }
         return m;
     }
 
     _snapshotClip(clip) {
         const isAudio = clip.track?.type === "audio";
+        const isVoiceover = isVoiceoverTrackType(clip.track?.type);
+        const isSubtitle = isSubtitleTrackType(clip.track?.type);
         const meta = this._meta.get(clip.id)
-            ?? (isAudio ? defaultAudioMeta() : defaultImageMeta());
+            ?? (isAudio
+                ? defaultAudioMeta()
+                : isVoiceover
+                    ? defaultVoiceoverMeta()
+                    : isSubtitle
+                        ? defaultSubtitleMeta()
+                        : defaultImageMeta());
         return {
             trackId: clip.track.id,
-            trackType: isAudio ? "audio" : "image",
+            trackType: isAudio
+                ? "audio"
+                : isVoiceover
+                    ? "voiceover"
+                    : isSubtitle
+                        ? "text"
+                        : "image",
             startTime: clip.startTime,
             duration: clip.duration,
             name: clip.name,
             src: clip.src,
             thumbnail: clip.thumbnail,
             color: clip.color,
-            sourceDuration: clip.sourceDuration,
+            sourceDuration: isVoiceover ? Infinity : clip.sourceDuration,
             sourceOffset: clip.sourceOffset || 0,
             fadeIn: isAudio ? Math.max(0, clip.fadeIn || 0) : 0,
             fadeOut: isAudio ? Math.max(0, clip.fadeOut || 0) : 0,
@@ -7911,14 +12614,31 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         if (!tl || !snap) return null;
         const wantAudio = snap.trackType === "audio";
+        const wantVoiceover = isVoiceoverTrackType(snap.trackType);
+        const wantSub = isSubtitleTrackType(snap.trackType);
         const orig = tl.getTrack(snap.trackId);
         if (orig && !orig.locked && orig.visible !== false) {
-            const ok = wantAudio ? orig.type === "audio" : (orig.type === "image" || orig.type === "video");
+            const ok = wantAudio
+                ? orig.type === "audio"
+                : wantVoiceover
+                    ? isVoiceoverTrackType(orig.type)
+                    : wantSub
+                        ? isSubtitleTrackType(orig.type)
+                        : (orig.type === "image" || orig.type === "video");
             if (ok) return orig;
         }
         if (wantAudio) {
             return this._allAudioTracks().find(t => !t.locked && t.visible !== false)
                 ?? this._createInsertTrack("audio");
+        }
+        if (wantVoiceover) {
+            return this._allVoiceoverTracks().find(t => !t.locked && t.visible !== false)
+                ?? this._addUserTrack("voiceover")
+                ?? this._createInsertTrack("voiceover");
+        }
+        if (wantSub) {
+            return this._allTextTracks().find(t => !t.locked && t.visible !== false)
+                ?? this._addUserTrack("text");
         }
         return this._allImageTracks().find(t => !t.locked && t.visible !== false)
             ?? this._createInsertTrack("image");
@@ -8050,7 +12770,8 @@ export class CapTimelineEditorApp {
 
     /**
      * Queue the workflow so Timeline Editor emits data_json / clips_audio for
-     * only this visual clip (others temporarily disabled for the queue snapshot).
+     * only this visual clip. Uses settings.runtime_only_clip_ids (not temporary
+     * disable flags) so the filter survives queuePrompt flush / restore races.
      */
     async _runClipDownstream(clip) {
         if (!clip || !this.node) return;
@@ -8059,67 +12780,128 @@ export class CapTimelineEditorApp {
             alert(T("audio_clip_not_in_data_json"));
             return;
         }
+        if (isSubtitleTrackType(clip.track?.type) || isSubtitleClipMeta(m, clip.track)) {
+            return;
+        }
+        if (this._isEmptyGroupClip(m)) return;
         if (typeof app?.queuePrompt !== "function") {
             alert(T("queue_prompt_not_found"));
             return;
         }
 
-        // Snapshot enable/disable so the editor UI is restored after queue.
-        const snapshot = [];
-        for (const track of this._allImageTracks()) {
-            for (const c of track.clips) {
-                const meta = this._meta.get(c.id) ?? defaultImageMeta();
-                snapshot.push({ id: c.id, disabled: !!meta.disabled });
-            }
+        CapTimelineEditorApp._installClipRunJobHook();
+        let expectedFile = null;
+        let stamp = null;
+        if (this._useClipSpecifiedVideoFilename !== false) {
+            stamp = this._makeGenVideoStamp();
+            expectedFile = this._clipSpecifiedVideoPath(clip.id, stamp);
         }
-
+        const job = {
+            clipId: String(clip.id),
+            stamp,
+            expectedFile,
+        };
+        CapTimelineEditorApp._clipRunEditor = this;
+        CapTimelineEditorApp._clipRunJobs = [job];
+        this._runtimeOnlyClipIds = [job.clipId];
+        this._genVideoStamp = stamp;
         try {
-            for (const track of this._allImageTracks()) {
-                for (const c of track.clips) {
-                    const meta = this._meta.get(c.id) ?? defaultImageMeta();
-                    const next = c.id !== clip.id;
-                    if (meta.disabled !== next) {
-                        meta.disabled = next;
-                        this._meta.set(c.id, meta);
-                        this._decorateClip(c);
-                    }
-                }
-            }
-            // Ensure the chosen clip itself is enabled and its track is usable.
-            const self = this._meta.get(clip.id) ?? defaultImageMeta();
-            self.disabled = false;
-            self.visible = true;
-            this._meta.set(clip.id, self);
-            if (clip.track?.visible === false) clip.track.setVisible?.(true);
-            this._decorateClip(clip);
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
-
-            // Register after queuePrompt so each run keeps its own prompt_id →
-            // clip mapping (multi-clip queue no longer overwrites one global id).
-            const result = await app.queuePrompt(0);
-            this._pendingGeneratedJobs.push({
+            await this._waitForQueueIdle();
+            this._notePendingGeneratedJob({
                 clipId: clip.id,
-                promptId: this._promptIdFromQueueResult(result),
+                promptId: null,
                 files: [],
+                expectedFile,
+                stamp,
             });
+            const result = await app.queuePrompt(0, 1);
+            if (result === false) {
+                await this._waitForQueueIdle();
+            }
+            const pid = this._promptIdFromQueueResult(result);
+            if (pid) this._bindPromptIdToPendingJob(pid, clip.id);
+            this._schedulePendingJobsQueueReconcile();
         } catch (error) {
+            const idx = CapTimelineEditorApp._clipRunJobs.indexOf(job);
+            if (idx >= 0) CapTimelineEditorApp._clipRunJobs.splice(idx, 1);
+            this._pendingGeneratedJobs = this._pendingGeneratedJobs.filter(
+                (j) => String(j.clipId) !== String(clip.id) || j.promptId || (j.files?.length),
+            );
+            this._clearRunPreview(clip.id);
+            this._syncClipRunDecorations();
             alert(T("run_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
-            for (const row of snapshot) {
-                const c = this._findClipById(row.id);
-                if (!c) continue;
-                const meta = this._meta.get(c.id) ?? defaultImageMeta();
-                if (meta.disabled !== row.disabled) {
-                    meta.disabled = row.disabled;
-                    this._meta.set(c.id, meta);
-                    this._decorateClip(c);
-                }
+            if (CapTimelineEditorApp._clipRunEditor === this
+                && CapTimelineEditorApp._clipRunJobs.length === 0) {
+                CapTimelineEditorApp._clipRunEditor = null;
+            }
+            this._runtimeOnlyClipIds = null;
+            // Keep stamp while this run's pending job is still open.
+            if (!this._pendingGeneratedJobs.some((j) => j.stamp === stamp || j.expectedFile === expectedFile)) {
+                this._genVideoStamp = null;
             }
             this._saveToWidgets();
             this._openedProjectJson = JSON.stringify(this._buildProject());
-            this._updatePromptPanel();
         }
+    }
+
+    /**
+     * Abort this clip's queued/running prompt (interrupt workflow or dequeue).
+     */
+    async _abortClipDownstream(clip) {
+        if (!clip) return;
+        const clipId = String(clip.id);
+        const state = this._clipRunState(clipId);
+        if (state !== "queued" && state !== "running") return;
+
+        const job = this._pendingGeneratedJobs.find((j) => String(j.clipId) === clipId) || null;
+        const promptId = String(
+            job?.promptId
+            || (String(this._runningClipId) === clipId ? this._runningPromptId : "")
+            || "",
+        ).trim() || null;
+        const stamp = job?.stamp || null;
+
+        try {
+            if (state === "running") {
+                if (typeof api?.interrupt === "function") {
+                    await api.interrupt(promptId || undefined);
+                } else if (typeof api?.fetchApi === "function") {
+                    await api.fetchApi("/interrupt", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(promptId ? { prompt_id: promptId } : {}),
+                    });
+                }
+            } else if (promptId) {
+                if (typeof api?.deleteItem === "function") {
+                    await api.deleteItem("queue", promptId);
+                } else if (typeof api?.fetchApi === "function") {
+                    await api.fetchApi("/queue", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ delete: [promptId] }),
+                    });
+                }
+            } else if (typeof api?.interrupt === "function") {
+                // Queued locally but prompt_id not bound yet — best-effort global interrupt.
+                await api.interrupt();
+            }
+        } catch (error) {
+            alert(T("abort_failed", { msg: error instanceof Error ? error.message : String(error) }));
+        }
+
+        this._pendingGeneratedJobs = this._pendingGeneratedJobs.filter(
+            (j) => String(j.clipId) !== clipId,
+        );
+        if (String(this._runningClipId) === clipId) {
+            this._clearRunningForPrompt(this._runningPromptId);
+        }
+        this._clearRunPreview(clipId);
+        if (stamp) this._maybeClearGenVideoStamp(stamp);
+        this._syncClipRunDecorations();
     }
 
     _toggleDisableClip(clip) {
@@ -8506,7 +13288,8 @@ export class CapTimelineEditorApp {
                     entry.seeking = false;
                 }
             }
-            this._scheduleProgramPreview();
+            if (this._isGenEditModalOpen()) this._scheduleGenEditPreview();
+            else this._scheduleProgramPreview();
         }, 450);
     }
 
@@ -8526,14 +13309,19 @@ export class CapTimelineEditorApp {
             } catch {
                 entry.seeking = false;
             }
-            if (this._timeline?._playing && v.paused) {
+            const wantPlay = this._isGenEditModalOpen()
+                ? !!(this._genEditState?.timeline?._playing)
+                : !!this._timeline?._playing;
+            if (wantPlay && v.paused) {
                 void v.play().catch(() => {});
             }
         }
-        this._scheduleProgramPreview();
+        if (this._isGenEditModalOpen()) this._scheduleGenEditPreview();
+        else this._scheduleProgramPreview();
     }
 
     _disposeProgramPreview() {
+        this._stopResourceGenProgramPreview();
         if (this._programPreviewRaf) {
             cancelAnimationFrame(this._programPreviewRaf);
             this._programPreviewRaf = 0;
@@ -8556,8 +13344,14 @@ export class CapTimelineEditorApp {
         this._programOffscreen = null;
     }
 
+    _isGenEditModalOpen() {
+        return !!(this.genEditModal && !this.genEditModal.hidden && this._genEditState);
+    }
+
     _scheduleProgramPreview() {
         if (!this.programCanvas || !this._overlay?.classList.contains("open")) return;
+        // Gen-edit owns the shared preview decoders while its modal is open.
+        if (this._isGenEditModalOpen()) return;
         if (this._programPreviewRaf) return;
         this._programPreviewRaf = requestAnimationFrame(() => {
             this._programPreviewRaf = 0;
@@ -8616,38 +13410,44 @@ export class CapTimelineEditorApp {
         v.muted = true;
         v.playsInline = true;
         v.preload = "auto";
-        entry = { el: v, ready: false, seeking: false, wantTime: 0, _seekTimer: 0 };
+        entry = { el: v, ready: false, seeking: false, wantTime: 0, _seekTimer: 0, _hasDrawn: false };
+        const kickPreview = () => {
+            if (this._isGenEditModalOpen()) this._scheduleGenEditPreview();
+            else this._scheduleProgramPreview();
+        };
         const kick = () => {
             entry.ready = v.readyState >= 2;
-            this._scheduleProgramPreview();
+            kickPreview();
         };
         v.addEventListener("loadeddata", kick);
         v.addEventListener("canplay", kick);
-        v.addEventListener("playing", () => this._scheduleProgramPreview());
+        v.addEventListener("playing", kickPreview);
         v.addEventListener("seeked", () => {
             this._clearPreviewSeekWatch(entry);
             entry.seeking = false;
             entry.ready = v.readyState >= 2;
-            const playing = !!this._timeline?._playing;
+            const playing = this._isGenEditModalOpen()
+                ? !!(this._genEditState?.timeline?._playing)
+                : !!this._timeline?._playing;
             const drift = Math.abs((entry.wantTime || 0) - v.currentTime);
             if (!playing && drift > 0.05) {
                 this._seekPreviewVideo(entry, entry.wantTime);
             } else {
-                this._scheduleProgramPreview();
+                kickPreview();
             }
         });
         v.addEventListener("error", () => { entry.ready = false; });
-        v.addEventListener("stalled", () => this._scheduleProgramPreview());
+        v.addEventListener("stalled", kickPreview);
         v.addEventListener("suspend", () => {
             // Decoder may drop frames under GPU load — retry shortly.
-            setTimeout(() => this._scheduleProgramPreview(), 200);
+            setTimeout(kickPreview, 200);
         });
         v.src = location === "output" ? this._outputVideoUrl(file) : this._videoUrl(file);
         this._previewVideos.set(key, entry);
         return entry;
     }
 
-    _seekPreviewVideo(entry, mediaTime) {
+    _seekPreviewVideo(entry, mediaTime, { force = false } = {}) {
         if (!entry?.el) return;
         const v = entry.el;
         const t = Math.max(0, Number(mediaTime) || 0);
@@ -8656,7 +13456,13 @@ export class CapTimelineEditorApp {
         entry.wantTime = clamped;
         if (!entry.ready && v.readyState < 1) return;
         if (entry.seeking) return;
-        const eps = this._timeline?._playing ? 0.25 : 0.04;
+        const playing = this._isGenEditModalOpen()
+            ? !!(this._genEditState?.timeline?._playing)
+            : !!this._timeline?._playing;
+        // First activation / warm prefetch: tighter tolerance so we don't paint
+        // a wrong near-zero frame before the real in-point seek settles.
+        // While freewheeling, only correct large drift (avoids seek thrash / jumps).
+        const eps = force || !entry._hasDrawn ? 0.04 : (playing ? 1.0 : 0.04);
         if (Math.abs((v.currentTime || 0) - clamped) <= eps) return;
         entry.seeking = true;
         this._armPreviewSeekWatch(entry);
@@ -8668,40 +13474,46 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _syncPreviewVideo(entry, mediaTime, { audible = false } = {}) {
+    _syncPreviewVideo(entry, mediaTime, { audible = false, playing = null } = {}) {
         if (!entry?.el) return;
         const v = entry.el;
         const t = Math.max(0, Number(mediaTime) || 0);
         const dur = Number.isFinite(v.duration) ? v.duration : null;
         const clamped = dur != null && dur > 0 ? Math.min(t, Math.max(0, dur - 0.001)) : t;
         entry.wantTime = clamped;
-        const playing = !!this._timeline?._playing;
-        // Only unmute during timeline play when this layer should be heard.
-        v.muted = !(playing && audible);
-        if (playing) {
+        const isPlaying = playing == null
+            ? (this._isGenEditModalOpen()
+                ? !!(this._genEditState?.timeline?._playing)
+                : !!this._timeline?._playing)
+            : !!playing;
+        // Canvas decoder videos must stay muted. HTML5 unmute + seek/sync
+        // produces crackle/noise; real audio is played via Web Audio.
+        v.muted = true;
+        if (isPlaying) {
             const drift = Math.abs((v.currentTime || 0) - clamped);
-            if (drift > 0.25) this._seekPreviewVideo(entry, clamped);
+            // Freewheel after the first sync — only hard-correct large drift.
+            const needSync = !entry._playSynced || !entry._hasDrawn || drift > 1.0;
+            if (needSync) {
+                this._seekPreviewVideo(entry, clamped, { force: !entry._hasDrawn });
+                entry._playSynced = true;
+            }
             if (v.paused && (entry.ready || v.readyState >= 2)) {
                 void v.play().catch(() => {});
             }
             return;
         }
+        entry._playSynced = false;
         if (!v.paused) v.pause();
-        this._seekPreviewVideo(entry, clamped);
+        this._seekPreviewVideo(entry, clamped, { force: !entry._hasDrawn });
     }
 
     _previewVideoCanDraw(entry) {
         const v = entry?.el;
-        // While a seek is pending, skip drawing rather than paint a stale
-        // pre-seek frame — the canvas keeps the previous good frame instead
-        // of clearing to black. "seeked" / seek-watch already reschedule.
-        return !!(
-            v
-            && !entry.seeking
-            && v.readyState >= 2
-            && v.videoWidth > 0
-            && v.videoHeight > 0
-        );
+        if (!v || v.readyState < 2 || !(v.videoWidth > 0) || !(v.videoHeight > 0)) return false;
+        // Wait for the first in-point seek so we don't flash a wrong frame;
+        // after that, keep painting while freewheeling (even mid-seek).
+        if (entry.seeking && !entry._hasDrawn) return false;
+        return true;
     }
 
     _pauseUnusedPreviewVideos(usedKeys) {
@@ -8712,11 +13524,74 @@ export class CapTimelineEditorApp {
         }
     }
 
+    /** Opening media-time for a generated row when the parent clip local time is 0. */
+    _genPreviewStartMediaTime(gen) {
+        const tin = Math.max(0, Number(gen?.trim_in_sec) || 0);
+        const editStart = Math.max(0, Number(gen?.edit_start_sec) || 0);
+        return tin + Math.max(0, 0 - editStart);
+    }
+
+    /**
+     * Warm-load + preseek upcoming generated videos so clip boundaries do not
+     * flash while the next file buffers / seeks to its in-point.
+     */
+    _prefetchUpcomingGeneratedVideos(t, lookaheadSec = 2.5) {
+        const now = Math.max(0, Number(t) || 0);
+        const horizon = now + Math.max(0.5, Number(lookaheadSec) || 2.5);
+        const genMode = this._isGeneratedEditMode();
+        for (const track of this._allImageTracks()) {
+            if (track.visible === false) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                const start = Math.max(0, Number(clip.startTime) || 0);
+                const end = Math.max(start, Number(clip.endTime) || start);
+                // Current clip and anything starting within the lookahead window.
+                if (end < now - 0.05 || start > horizon) continue;
+                const m = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (m.disabled || m.visible === false) continue;
+                const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
+                if (!gens.length) continue;
+                const rows = genMode ? gens : (this._firstEnabledGeneratedVideo(m) ? [this._firstEnabledGeneratedVideo(m)] : []);
+                for (const gen of rows) {
+                    if (!gen?.file) continue;
+                    const entry = this._ensurePreviewVideo(gen.file, "output");
+                    if (!entry) continue;
+                    // Still upcoming: park decoder at the opening frame, stay paused.
+                    if (start > now + 0.02) {
+                        const mediaTime = this._genPreviewStartMediaTime(gen);
+                        if (!entry.el.paused) {
+                            try { entry.el.pause(); } catch { /* ignore */ }
+                        }
+                        entry.el.muted = true;
+                        this._seekPreviewVideo(entry, mediaTime, { force: true });
+                    }
+                }
+            }
+        }
+    }
+
     _drawCover(ctx, media, cw, ch) {
         const mw = media.videoWidth || media.naturalWidth || media.width || 0;
         const mh = media.videoHeight || media.naturalHeight || media.height || 0;
         if (!mw || !mh) return false;
         const scale = Math.max(cw / mw, ch / mh);
+        const dw = mw * scale;
+        const dh = mh * scale;
+        try {
+            ctx.drawImage(media, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+        } catch {
+            return false;
+        }
+        return true;
+    }
+
+    /** Fit entire media inside the box (letterbox); used by gen-edit preview. */
+    _drawContain(ctx, media, cw, ch) {
+        const mw = media.videoWidth || media.naturalWidth || media.width || 0;
+        const mh = media.videoHeight || media.naturalHeight || media.height || 0;
+        if (!mw || !mh) return false;
+        const scale = Math.min(cw / mw, ch / mh);
         const dw = mw * scale;
         const dh = mh * scale;
         try {
@@ -8747,6 +13622,36 @@ export class CapTimelineEditorApp {
                 if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
                 const m = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (m.disabled || m.visible === false) continue;
+                    const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
+                    if (this._isGeneratedEditMode()) {
+                        if (!gens.length) {
+                            layers.push({ kind: "package", clip, meta: m });
+                            continue;
+                        }
+                        const localT = Math.max(0, t - clip.startTime);
+                        // generatedVideos is newest-first; paint older first so newest ends on top.
+                        for (const gen of [...gens].reverse()) {
+                            const start = Math.max(0, Number(gen.edit_start_sec) || 0);
+                        let eff = this._genEffectiveDurationSec(gen);
+                        if (!(eff > 0)) {
+                            const full = Number(gen.duration_sec);
+                            eff = Number.isFinite(full) && full > 0
+                                ? Math.min(full, Math.max(0.05, clip.duration - start))
+                                : Math.max(0.05, clip.duration - start);
+                        }
+                        if (localT < start - 1e-6 || localT >= start + eff - 1e-9) continue;
+                        layers.push({
+                            kind: "generated",
+                            clip,
+                            meta: m,
+                            file: gen.file,
+                            muted: gen.muted === true || !!track.muted || !!m.muted,
+                            trimInSec: Math.max(0, Number(gen.trim_in_sec) || 0),
+                            editStartSec: start,
+                        });
+                    }
+                    continue;
+                }
                 const gen = this._clipUsesGeneratedPreview(m) ? this._firstEnabledGeneratedVideo(m) : null;
                 if (gen) {
                     layers.push({
@@ -8754,7 +13659,9 @@ export class CapTimelineEditorApp {
                         clip,
                         meta: m,
                         file: gen.file,
-                        muted: gen.muted === true,
+                        muted: gen.muted === true || !!track.muted || !!m.muted,
+                        trimInSec: Math.max(0, Number(gen.trim_in_sec) || 0),
+                        editStartSec: Math.max(0, Number(gen.edit_start_sec) || 0),
                     });
                     continue;
                 }
@@ -8784,10 +13691,14 @@ export class CapTimelineEditorApp {
     /** Draw the timeline's layers (generated/video/image/package) at time `t`
      * into any canvas context — shared by the main program monitor and the
      * compose modal's watermark preview. Does not touch video pause/resume
-     * bookkeeping; pass `onVideoUsed` to track that in the caller. */
-    _drawPreviewLayersOnce(ctx, cw, ch, t, { onVideoUsed } = {}) {
-        const layers = this._collectPreviewLayers(t);
+     * bookkeeping; pass `onVideoUsed` to track that in the caller.
+     * `fit`: "cover" (default, crop to fill) or "contain" (letterbox). */
+    _drawPreviewLayersOnce(ctx, cw, ch, t, { onVideoUsed, layers: layersOpt, fit = "cover" } = {}) {
+        const layers = layersOpt || this._collectPreviewLayers(t);
         const generatedActive = layers.some((layer) => layer.kind === "generated");
+        const drawMedia = fit === "contain"
+            ? (c, m, w, h) => this._drawContain(c, m, w, h)
+            : (c, m, w, h) => this._drawCover(c, m, w, h);
         let drew = false;
 
         for (const layer of layers) {
@@ -8811,15 +13722,19 @@ export class CapTimelineEditorApp {
                 onVideoUsed?.(`${location}:${file}`);
                 const items = layer.items || [];
                 let mediaTime = (layer.clip.sourceOffset || 0) + (t - layer.clip.startTime);
-                if (layer.kind === "generated") mediaTime = t - layer.clip.startTime;
-                else if (items.length > 1) {
+                if (layer.kind === "generated") {
+                    const tin = Math.max(0, Number(layer.trimInSec ?? layer.clip.sourceOffset) || 0);
+                    const editStart = Math.max(0, Number(layer.editStartSec) || 0);
+                    mediaTime = tin + Math.max(0, (t - layer.clip.startTime) - editStart);
+                } else if (items.length > 1) {
                     const slice = layer.clip.duration / items.length;
                     mediaTime = Math.max(0, (t - layer.clip.startTime) - (layer.itemIndex || 0) * slice);
                 }
                 this._syncPreviewVideo(entry, mediaTime, {
                     audible: layer.kind === "generated" && layer.muted !== true,
                 });
-                if (this._previewVideoCanDraw(entry) && this._drawCover(ctx, entry.el, cw, ch)) {
+                if (this._previewVideoCanDraw(entry) && drawMedia(ctx, entry.el, cw, ch)) {
+                    entry._hasDrawn = true;
                     drew = true;
                 }
                 continue;
@@ -8831,13 +13746,35 @@ export class CapTimelineEditorApp {
             const file = layer.item?.file || layer.clip.src;
             const startEntry = this._ensurePreviewImage(file ? this._imgUrl(file) : "");
             if (startEntry?.ready) {
-                if (this._drawCover(ctx, startEntry.el, cw, ch)) drew = true;
+                if (drawMedia(ctx, startEntry.el, cw, ch)) drew = true;
             }
         }
         return drew;
     }
 
+    _hasVisibleSubtitleAt(t) {
+        for (const track of this._allTextTracks()) {
+            if (track.visible === false) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
+                const m = this._meta.get(clip.id) ?? defaultSubtitleMeta();
+                if (m.disabled || m.visible === false) continue;
+                if (String(m.text || "").trim()) return true;
+            }
+        }
+        return false;
+    }
+
     async _renderProgramPreview() {
+        if (this._isGenEditModalOpen()) return;
+        if (this._resourceGenPreview?.video && !this._resourceGenPreview.video.hidden) {
+            this._layoutProgramCanvas();
+            this._layoutResourceGenProgramVideo();
+            if (this.programEmpty) this.programEmpty.hidden = true;
+            return;
+        }
         const layout = this._layoutProgramCanvas();
         const canvas = this.programCanvas;
         if (!layout || !canvas) return;
@@ -8849,14 +13786,26 @@ export class CapTimelineEditorApp {
         this._programCanvasKey = sizeKey;
 
         const t = this._timeline?.currentTime ?? 0;
+        const playing = !!this._timeline?._playing;
+        // Warm the next generated clip(s) before the playhead arrives so the
+        // boundary does not flash while the decoder loads / seeks.
+        this._prefetchUpcomingGeneratedVideos(t, playing ? 2.5 : 0.75);
         const layers = this._collectPreviewLayers(t);
+        const hasSub = this._hasVisibleSubtitleAt(t);
         const usedVideoKeys = new Set();
 
-        if (!layers.length) {
+        if (!layers.length && !hasSub) {
+            this._pauseUnusedPreviewVideos(usedVideoKeys);
+            // During playback, keep the last good frame across tiny gaps / load
+            // holes between abutting clips instead of flashing black.
+            if (playing && this._programHadFrame) {
+                this._scheduleProgramPreview();
+                if (this.programEmpty) this.programEmpty.hidden = true;
+                return;
+            }
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = "#000";
             ctx.fillRect(0, 0, cw, ch);
-            this._pauseUnusedPreviewVideos(usedVideoKeys);
             this._programHadFrame = false;
             if (this.programEmpty) this.programEmpty.hidden = false;
             return;
@@ -8876,21 +13825,25 @@ export class CapTimelineEditorApp {
         octx.setTransform(1, 0, 0, 1, 0, 0);
         octx.fillStyle = "#000";
         octx.fillRect(0, 0, cw, ch);
-        const drew = this._drawPreviewLayersOnce(octx, cw, ch, t, {
+        const drewVisual = this._drawPreviewLayersOnce(octx, cw, ch, t, {
             onVideoUsed: (key) => usedVideoKeys.add(key),
         });
+        this._drawSubtitleOverlays(octx, cw, ch, t);
+        const drew = drewVisual || hasSub;
         this._pauseUnusedPreviewVideos(usedVideoKeys);
 
-        if (drew || sizeChanged || !this._programHadFrame) {
+        if (drew) {
             ctx.setTransform(1, 0, 0, 1, 0, 0);
-            if (drew) {
-                ctx.drawImage(off, 0, 0);
-                this._programHadFrame = true;
-            } else {
-                ctx.fillStyle = "#000";
-                ctx.fillRect(0, 0, cw, ch);
-                this._programHadFrame = false;
-            }
+            ctx.drawImage(off, 0, 0);
+            this._programHadFrame = true;
+        } else if (playing && this._programHadFrame) {
+            // Next clip still seeking/buffering — hold previous pixels.
+            this._scheduleProgramPreview();
+        } else if (sizeChanged || !this._programHadFrame) {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, cw, ch);
+            this._programHadFrame = false;
         }
         if (this.programEmpty) this.programEmpty.hidden = this._programHadFrame;
     }
@@ -8905,23 +13858,33 @@ export class CapTimelineEditorApp {
         packageBtn.className = "tl-btn tl-btn-add-package";
         packageBtn.title = T("insert_empty_clip_title");
         packageBtn.textContent = T("insert_clip_btn");
-        packageBtn.addEventListener("click", () => this._insertPackageAtPlayhead());
+        packageBtn.addEventListener("click", (e) => {
+            this._showInsertClipMenu(e);
+        });
         tl.toolbarEl.appendChild(packageBtn);
+        this.insertClipBtn = packageBtn;
 
-        this.allGenPreviewBtn = document.createElement("button");
-        this.allGenPreviewBtn.type = "button";
-        this.allGenPreviewBtn.className = "tl-btn tl-btn-all-gen-preview";
-        this.allGenPreviewBtn.addEventListener("click", () => this._toggleAllGeneratedPreview());
-        tl.toolbarEl.appendChild(this.allGenPreviewBtn);
-        this._updateAllGeneratedPreviewButton();
+        this.editModeBtn = document.createElement("button");
+        this.editModeBtn.type = "button";
+        this.editModeBtn.className = "tl-btn tl-btn-edit-mode tl-btn-all-gen-preview";
+        this.editModeBtn.addEventListener("click", () => {
+            this._setTimelineEditMode(this._isGeneratedEditMode() ? "resource" : "generated");
+        });
+        tl.toolbarEl.appendChild(this.editModeBtn);
+        this.genEditModeBtn = null;
+        // Keep old alias so lingering call sites still refresh the toolbar.
+        this.allGenPreviewBtn = this.editModeBtn;
 
         this.runMenuBtn = document.createElement("button");
         this.runMenuBtn.type = "button";
         this.runMenuBtn.className = "tl-btn tl-btn-run-menu";
         this.runMenuBtn.textContent = T("run_btn_caret");
         this.runMenuBtn.title = T("run_menu_title");
-        this.runMenuBtn.addEventListener("click", (e) => this._showRunMenu(e));
+        this.runMenuBtn.addEventListener("click", (e) => {
+            this._showRunMenu(e);
+        });
         tl.toolbarEl.appendChild(this.runMenuBtn);
+        this._updateEditModeToolbar();
 
         // Timeline undo/redo: Ctrl/Cmd+Z/Y are intercepted in handleShortcutKey
         // (capture on window) so ComfyUI graph-undo cannot close this editor.
@@ -8942,13 +13905,43 @@ export class CapTimelineEditorApp {
 
         this._updateHistoryButtons();
 
-        // The "+ 轨道" dropdown is built and handled entirely inside
-        // Timeline.js, so there's no app-level call site to record an undo
-        // point right before the new track is actually added. Recording it
-        // here (before the menu even opens) is the closest equivalent —
-        // worst case, a cancelled menu leaves one harmless no-op undo step.
-        tl.toolbarEl.querySelector(".tl-btn-add-track")
-            ?.addEventListener("click", () => this._recordUndo());
+        // Replace Timeline's built-in add-track menu with the same ctx popup as Run.
+        const addTrackBtn = tl.toolbarEl.querySelector(".tl-btn-add-track");
+        if (addTrackBtn) {
+            const neu = addTrackBtn.cloneNode(true);
+            addTrackBtn.replaceWith(neu);
+            neu.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this._recordUndo();
+                this._showAddTrackMenu(e);
+            });
+        }
+
+        tl._tracksEl?.addEventListener("dblclick", (e) => {
+            const clipEl = e.target.closest?.(".tl-clip");
+            if (clipEl) {
+                const clip = this._findClipById(clipEl.dataset.clipId);
+                if (!clip) return;
+                const meta = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (clip.track?.type === "audio" || meta.clipType === "audio") return;
+                if (isVoiceoverTrackType(clip.track?.type) || isVoiceoverClipMeta(meta, clip.track)) return;
+                if (isSubtitleTrackType(clip.track?.type) || isSubtitleClipMeta(meta, clip.track)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                this._timeline.selectClip(clip);
+                void this._openAiOptimizeModal(clip);
+                return;
+            }
+            const trackEl = e.target.closest?.(".tl-track");
+            if (!trackEl) return;
+            const track = tl.tracks.find((row) => row.el === trackEl);
+            if (!isSubtitleTrackType(track?.type) || track.locked) return;
+            const rect = tl.scrollEl.getBoundingClientRect();
+            const x = e.clientX - rect.left + tl.scrollEl.scrollLeft;
+            const at = Math.max(0, x / Math.max(1e-6, tl.pixelsPerSecond));
+            this._insertSubtitleAtTime(at, track);
+        });
 
         const scroll = tl.scrollEl;
         scroll.addEventListener("dragover", (e) => {
@@ -8991,9 +13984,15 @@ export class CapTimelineEditorApp {
         tl.on("clip:select", ({ selected }) => {
             this._selClips = selected ?? tl.getSelectedClips();
             this._syncSelectedClip();
-            this._updatePromptPanel();
-            this._retargetOutputVideosPickerFromSelection();
-            this._overlay?.focus();
+            // Do not focus the overlay here: focus during clip mousedown aborts
+            // the mouse sequence and can leave drag listeners stuck, which then
+            // eat sidebar clicks (settings look dead, drag feels broken).
+            try {
+                this._updatePromptPanel();
+                this._retargetOutputVideosPickerFromSelection();
+            } catch (err) {
+                console.error("[CapTE] clip settings panel sync failed", err);
+            }
         });
         tl.on("clip:add", ({ clip }) => {
             this._decorateClip(clip);
@@ -9016,9 +14015,14 @@ export class CapTimelineEditorApp {
         });
         tl.on("clip:trackchange", ({ clip, from, to }) => {
             const m = this._meta.get(clip.id)
-                ?? (to.type === "audio" ? defaultAudioMeta() : defaultImageMeta());
+                ?? (to.type === "audio"
+                    ? defaultAudioMeta()
+                    : isSubtitleTrackType(to.type)
+                        ? defaultSubtitleMeta()
+                        : defaultImageMeta());
             m.trackIndex = this._trackIndex(to);
             if (to.type === "audio") m.clipType = "audio";
+            else if (isSubtitleTrackType(to.type)) m.clipType = "subtitle";
             else m.clipType = "image";
             this._meta.set(clip.id, m);
             this._updateClipInfoPanel(clip);
@@ -9029,25 +14033,62 @@ export class CapTimelineEditorApp {
             this._trackInfo.delete(trackId);
             this._scheduleProgramPreview();
         });
+        // Per-frame move/resize: only refresh the info readout. Duration /
+        // program preview run on gesture end - refreshing duration every
+        // frame can clamp the live drag against a shrinking timeline.
         tl.on("clip:move", ({ clip }) => {
             if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
-            this._refreshTimelineDuration();
-            this._scheduleProgramPreview();
         });
         tl.on("clip:resize", ({ clip }) => {
             if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
-            this._refreshTimelineDuration();
-            this._scheduleProgramPreview();
         });
         // A drag (move/trim) fires many per-frame events; only the gesture
         // as a whole should become one undo step, and only if it actually
         // changed anything.
         tl.on("clip:movestart", () => this._beginPendingUndo());
-        tl.on("clip:moveend", ({ moved }) => this._commitPendingUndo(moved));
+        tl.on("clip:moveend", ({ clip, moved }) => {
+            if (moved && clip?.track?.type === "image") this._rememberResourceTiming(clip);
+            else if (moved && clip && (
+                clip.track?.type === "audio"
+                || isVoiceoverTrackType(clip.track?.type)
+                || isSubtitleTrackType(clip.track?.type)
+            )) {
+                if (!this._isGeneratedEditMode()) {
+                    const m = this._ensureClipMeta(clip);
+                    m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
+                    this._meta.set(clip.id, m);
+                }
+            }
+            this._commitPendingUndo(moved);
+            this._refreshTimelineDuration();
+            this._scheduleProgramPreview();
+        });
         tl.on("clip:resizestart", () => this._beginPendingUndo());
         tl.on("clip:resizeend", ({ clip, moved }) => {
             this._syncAudioFadeMeta(clip);
-            this._commitPendingUndo(moved);
+            if (moved && this._isGeneratedEditMode() && clip?.track?.type === "image") {
+                // Clip duration is resource-locked in gen mode — revert any resize.
+                const m = this._ensureClipMeta(clip);
+                const dur = this._ensureResourceDuration(clip, m);
+                const start = this._ensureResourceStart(clip, m);
+                clip.duration = dur;
+                clip.startTime = start;
+                clip._applyPosition?.();
+                this._commitPendingUndo(false);
+            } else if (moved && !this._isGeneratedEditMode() && clip?.track?.type === "image") {
+                this._rememberResourceTiming(clip);
+                this._commitPendingUndo(moved);
+            } else {
+                if (moved && clip && isVoiceoverTrackType(clip.track?.type) && !this._isGeneratedEditMode()) {
+                    const m = this._ensureClipMeta(clip);
+                    m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
+                    m.resourceDurationSec = Math.max(0.05, Number(clip.duration) || 0.05);
+                    this._meta.set(clip.id, m);
+                }
+                this._commitPendingUndo(moved);
+            }
+            this._refreshTimelineDuration();
+            this._scheduleProgramPreview();
         });
         tl.on("clip:fadestart", () => this._beginPendingUndo());
         tl.on("clip:fadeend", ({ clip, moved }) => {
@@ -9055,20 +14096,22 @@ export class CapTimelineEditorApp {
             this._commitPendingUndo(moved);
         });
         tl.on("clip:fade", ({ clip }) => {
-            if (this._selClip?.id === clip.id) this._updateClipInfoView(clip);
+            if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
             if (this._timeline?._playing) this._startAudioPlayback();
         });
         tl.on("track:add", ({ track }) => {
             if (!this._trackInfo.has(track.id)) {
                 this._trackInfo.set(track.id, { trackIndex: this._nextTrackIndex() });
             }
-            track.height = TRACK_HEIGHT;
-            track.el.style.height = `${TRACK_HEIGHT}px`;
-            track.headerEl.style.height = `${TRACK_HEIGHT}px`;
+            const h = trackHeightFor(track.type);
+            track.height = h;
+            track.el.style.height = `${h}px`;
+            track.headerEl.style.height = `${h}px`;
             this._setupTrackControls(track);
         });
         tl.on("zoomchange", () => this._refreshTimelineDuration());
         tl.on("play", () => {
+            this._stopResourceGenProgramPreview();
             this._startAudioPlayback();
             this._scheduleProgramPreview();
         });
@@ -9079,6 +14122,7 @@ export class CapTimelineEditorApp {
         });
         tl.on("timechange", () => this._scheduleProgramPreview());
         tl.on("seek", () => {
+            this._stopResourceGenProgramPreview();
             this._updateMediaPreviewInsertBtn();
             this._scheduleProgramPreview();
             if (!tl._playing) return;
@@ -9100,16 +14144,29 @@ export class CapTimelineEditorApp {
     }
 
     _clearClipInfoPanel() {
-        this.clipInfoDetail.hidden = true;
-        this.clipThumb.removeAttribute("src");
-        this.clipThumb.style.display = "";
-        this.clipThumb.parentElement.classList.remove("cat-te-clip-thumb-audio");
-        this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-clickable");
+        if (this.clipInfoDetail) this.clipInfoDetail.hidden = true;
+        if (this.clipThumb) {
+            this.clipThumb.removeAttribute("src");
+            this.clipThumb.style.display = "";
+            this.clipThumb.parentElement?.classList.remove("cat-te-clip-thumb-audio");
+        }
+        this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-clickable", "cat-te-clip-thumb-audio");
         this.clipThumbWrap?.removeAttribute("title");
-        this.clipNameEl.textContent = "";
-        this.clipStartEl.textContent = "";
-        this.clipEndEl.textContent = "";
-        this.clipDurEl.textContent = "";
+        if (this.clipNameEl) this.clipNameEl.textContent = "";
+        if (this.clipIdEl) {
+            this.clipIdEl.hidden = true;
+            this.clipIdEl.textContent = "";
+        }
+        if (this.clipStartEl) this.clipStartEl.textContent = "";
+        if (this.clipEndEl) this.clipEndEl.textContent = "";
+        if (this.clipSourceTrimEl) this.clipSourceTrimEl.hidden = true;
+        if (this.clipSourceInEl) this.clipSourceInEl.textContent = "";
+        if (this.clipSourceOutEl) this.clipSourceOutEl.textContent = "";
+        if (this.clipSourceDurEl) {
+            this.clipSourceDurEl.hidden = true;
+            this.clipSourceDurEl.textContent = "";
+        }
+        if (this.clipDurEl) this.clipDurEl.textContent = "";
         if (this.clipItemIndexEl) this.clipItemIndexEl.textContent = "";
         if (this.clipThumbVideo) {
             this.clipThumbVideo.pause();
@@ -9117,15 +14174,15 @@ export class CapTimelineEditorApp {
             this.clipThumbVideo.hidden = true;
         }
         if (this.clipThumbEmpty) this.clipThumbEmpty.hidden = true;
-        this.clipSwiperPrev && (this.clipSwiperPrev.hidden = true);
-        this.clipSwiperNext && (this.clipSwiperNext.hidden = true);
+        if (this.clipThumbSubtitle) this.clipThumbSubtitle.hidden = true;
+        if (this.clipSwiperPrev) this.clipSwiperPrev.hidden = true;
+        if (this.clipSwiperNext) this.clipSwiperNext.hidden = true;
         if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = true;
         if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = true;
         if (this.clipVideosHost) this.clipVideosHost.hidden = true;
         this.clipVideosList?.replaceChildren();
         this._syncCurrentMediaPromptUi(null, false);
     }
-
     _stepClipPreview(delta) {
         const clip = this._selClip;
         if (!clip) return;
@@ -9144,60 +14201,117 @@ export class CapTimelineEditorApp {
         const tl = this._timeline;
         const track = clip.track;
         const isAudio = track.type === "audio";
-        const m = this._ensureClipMeta(clip);
-        const items = isAudio ? [] : this._clipItems(m);
-        const idx = this._clipPreviewItemIndex(clip, m);
-        const current = items[idx] || null;
-        this.clipInfoDetail.hidden = false;
-
+        const isVoiceover = isVoiceoverTrackType(track.type);
+        const isSubtitle = isSubtitleTrackType(track.type);
+        // Reset thumb overlays before any meta work that might throw.
         if (this.clipThumbVideo) {
             this.clipThumbVideo.pause();
             this.clipThumbVideo.hidden = true;
         }
         if (this.clipThumbEmpty) this.clipThumbEmpty.hidden = true;
-        this.clipThumb.style.display = "";
-        this.clipThumb.parentElement.classList.remove("cat-te-clip-thumb-audio");
+        if (this.clipThumbSubtitle) this.clipThumbSubtitle.hidden = true;
+        this.clipThumbWrap?.classList.remove("cat-te-clip-thumb-audio");
+        if (this.clipThumb) {
+            this.clipThumb.style.display = "";
+            this.clipThumb.parentElement?.classList.remove("cat-te-clip-thumb-audio");
+        }
 
-        if (isAudio) {
-            this.clipThumb.removeAttribute("src");
-            this.clipThumb.style.display = "none";
-            this.clipThumb.parentElement.classList.add("cat-te-clip-thumb-audio");
+        const m = this._ensureClipMeta(clip);
+        const items = (isAudio || isVoiceover || isSubtitle) ? [] : this._clipItems(m);
+        const idx = this._clipPreviewItemIndex(clip, m);
+        const current = items[idx] || null;
+        if (this.clipInfoDetail) this.clipInfoDetail.hidden = false;
+
+        if (isAudio || isVoiceover) {
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+                this.clipThumb.parentElement?.classList.add("cat-te-clip-thumb-audio");
+            }
+            this.clipThumbWrap?.classList.add("cat-te-clip-thumb-audio");
+        } else if (isSubtitle) {
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+            }
+            if (this.clipThumbSubtitle) this.clipThumbSubtitle.hidden = false;
         } else if (!current) {
-            this.clipThumb.removeAttribute("src");
-            this.clipThumb.style.display = "none";
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+            }
             if (this.clipThumbEmpty) this.clipThumbEmpty.hidden = false;
         } else if (current.kind === "video") {
-            this.clipThumb.removeAttribute("src");
-            this.clipThumb.style.display = "none";
+            if (this.clipThumb) {
+                this.clipThumb.removeAttribute("src");
+                this.clipThumb.style.display = "none";
+            }
             if (this.clipThumbVideo) {
                 this.clipThumbVideo.hidden = false;
                 const url = this._videoUrl(current.file);
                 if (this.clipThumbVideo.src !== url) this.clipThumbVideo.src = url;
             }
-        } else {
+        } else if (this.clipThumb) {
             this.clipThumb.style.display = "";
             this.clipThumb.src = this._imgUrl(current.file);
         }
 
-        const canPreview = isAudio ? !!clip.src : !!current;
-        this.clipThumbWrap.classList.toggle("cat-te-clip-thumb-clickable", canPreview);
-        this.clipThumbWrap.title = canPreview ? T("click_to_preview_asset_title") : "";
-        this.clipNameEl.textContent = current?.file?.split(/[\\/]/).pop() || clip.name || DEFAULT_CLIP_NAME;
-        this.clipStartEl.textContent = tl.formatTime(clip.startTime);
-        this.clipEndEl.textContent = tl.formatTime(clip.endTime);
+        const canPreview = isAudio ? !!clip.src : (isSubtitle || isVoiceover) ? false : !!current;
+        if (this.clipThumbWrap) {
+            this.clipThumbWrap.classList.toggle("cat-te-clip-thumb-clickable", canPreview);
+            this.clipThumbWrap.title = canPreview ? T("click_to_preview_asset_title") : "";
+        }
+        if (this.clipNameEl) {
+            this.clipNameEl.textContent = isSubtitle
+                ? ((m.text || clip.name || T("subtitle_default_text")).trim() || T("subtitle_default_text"))
+                : (current?.file?.split(/[\\/]/).pop() || clip.name || DEFAULT_CLIP_NAME);
+        }
+        if (this.clipIdEl) {
+            const id = String(clip.id || "").trim();
+            this.clipIdEl.hidden = !id;
+            this.clipIdEl.textContent = id ? T("clip_id_label", { id }) : "";
+        }
+        if (this.clipStartEl) this.clipStartEl.textContent = tl.formatTime(clip.startTime);
+        if (this.clipEndEl) this.clipEndEl.textContent = tl.formatTime(clip.endTime);
         const fps = this.getFps();
         const totalFrames = Math.max(0, frameIndexFromSecs(clip.endTime, fps) - frameIndexFromSecs(clip.startTime, fps));
-        this.clipDurEl.textContent = T("clip_duration_frames", { duration: tl.formatTime(clip.duration), frames: totalFrames });
+        if (this.clipDurEl) {
+            this.clipDurEl.textContent = T("clip_duration_frames", { duration: tl.formatTime(clip.duration), frames: totalFrames });
+        }
+        if (isAudio) {
+            const srcIn = Math.max(0, Number(clip.sourceOffset) || Number(m.trimIn) || 0);
+            const srcOut = srcIn + Math.max(0, Number(clip.duration) || 0);
+            const srcDur = Math.max(0, Number(clip.sourceDuration ?? m.sourceDuration) || 0);
+            if (this.clipSourceTrimLabelEl) this.clipSourceTrimLabelEl.textContent = T("clip_source_trim_label");
+            if (this.clipSourceInEl) this.clipSourceInEl.textContent = tl.formatTime(srcIn);
+            if (this.clipSourceOutEl) this.clipSourceOutEl.textContent = tl.formatTime(srcOut);
+            if (this.clipSourceTrimEl) this.clipSourceTrimEl.hidden = false;
+            if (this.clipSourceDurEl) {
+                if (srcDur > 0) {
+                    this.clipSourceDurEl.hidden = false;
+                    this.clipSourceDurEl.textContent = T("clip_source_duration", { duration: tl.formatTime(srcDur) });
+                } else {
+                    this.clipSourceDurEl.hidden = true;
+                    this.clipSourceDurEl.textContent = "";
+                }
+            }
+        } else {
+            if (this.clipSourceTrimEl) this.clipSourceTrimEl.hidden = true;
+            if (this.clipSourceDurEl) {
+                this.clipSourceDurEl.hidden = true;
+                this.clipSourceDurEl.textContent = "";
+            }
+        }
         if (this.clipItemIndexEl) {
             this.clipItemIndexEl.textContent = current ? `${idx + 1}/${items.length}` : "";
         }
         const multi = items.length > 1;
         if (this.clipSwiperPrev) this.clipSwiperPrev.hidden = !multi;
         if (this.clipSwiperNext) this.clipSwiperNext.hidden = !multi;
-        if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = isAudio;
-        if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = isAudio || !current;
-        this._renderClipGeneratedVideosList(clip, m, isAudio);
-        this._syncCurrentMediaPromptUi(current, !isAudio);
+        if (this.clipThumbSortBtn) this.clipThumbSortBtn.hidden = isAudio || isSubtitle;
+        if (this.clipThumbDeleteBtn) this.clipThumbDeleteBtn.hidden = isAudio || isSubtitle || !current;
+        this._renderClipGeneratedVideosList(clip, m, isAudio || isSubtitle);
+        this._syncCurrentMediaPromptUi(current, !isAudio && !isSubtitle);
     }
 
     _syncCurrentMediaPromptUi(current, enabled) {
@@ -9229,10 +14343,19 @@ export class CapTimelineEditorApp {
         let m = this._meta.get(clip.id);
         if (!m) {
             const ti = this._trackIndex(clip.track);
-            m = clip.track?.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti);
+            if (clip.track?.type === "audio") m = defaultAudioMeta(ti);
+            else if (isVoiceoverTrackType(clip.track?.type)) m = defaultVoiceoverMeta(ti);
+            else if (isSubtitleTrackType(clip.track?.type)) m = defaultSubtitleMeta(ti);
+            else m = defaultImageMeta(ti);
             this._meta.set(clip.id, m);
         }
-        if (clip.track?.type !== "audio") this._normalizeVisualMeta(clip, m);
+        if (
+            clip.track?.type !== "audio"
+            && !isVoiceoverClipMeta(m, clip.track)
+            && !isSubtitleClipMeta(m, clip.track)
+        ) {
+            this._normalizeVisualMeta(clip, m);
+        }
         return m;
     }
 
@@ -9244,6 +14367,8 @@ export class CapTimelineEditorApp {
         const tail = el.querySelector(".cat-te-tail-extend");
         const gen = el.querySelector(".cat-te-gen-preview-video");
         const secondSample = el.querySelector(".cat-te-second-sample");
+        const h3Motion = el.querySelector(".cat-te-h3-motion-context");
+        const saveLatent = el.querySelector(".cat-te-save-latent");
         const role = el.querySelector(".cat-te-clip-role");
         const agent = el.querySelector(".cat-te-clip-agent");
         if (!head) return;
@@ -9251,6 +14376,8 @@ export class CapTimelineEditorApp {
         this.tailExtendInput = tail;
         this.genPreviewVideoCb = gen;
         this.secondSampleCb = secondSample;
+        this.h3MotionContextInput = h3Motion;
+        this.saveLatentCb = saveLatent;
         this.clipRoleSelect = role;
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
@@ -9263,6 +14390,8 @@ export class CapTimelineEditorApp {
             tail?.addEventListener("change", () => this._onTailExtendChange());
             gen?.addEventListener("change", () => this._onGenPreviewVideoChange());
             secondSample?.addEventListener("change", () => this._onSecondSampleChange());
+            h3Motion?.addEventListener("change", () => this._onH3MotionContextChange());
+            saveLatent?.addEventListener("change", () => this._onSaveLatentChange());
         }
     }
 
@@ -9288,6 +14417,21 @@ export class CapTimelineEditorApp {
             this.secondSampleCb.disabled = disabled;
             this.secondSampleCb.checked = enabled && !!m?.secondSample;
         }
+        if (this.h3MotionContextInput) {
+            const fps = Math.max(1, Math.round(Number(this.getFps?.() || 24) || 24));
+            const max = 3 * fps;
+            this.h3MotionContextInput.disabled = disabled;
+            this.h3MotionContextInput.min = "0";
+            this.h3MotionContextInput.step = String(fps);
+            this.h3MotionContextInput.max = String(max);
+            this.h3MotionContextInput.value = enabled
+                ? String(this._clampH3MotionContextLength(m?.h3MotionContextLength))
+                : "0";
+        }
+        if (this.saveLatentCb) {
+            this.saveLatentCb.disabled = disabled;
+            this.saveLatentCb.checked = enabled && !!m?.saveLatent;
+        }
         if (this.clipRoleSelect) {
             this.clipRoleSelect.disabled = disabled;
             this.clipRoleSelect.value = enabled ? this._knownClipRole(m?.clipRole) : "multi_ref";
@@ -9311,59 +14455,363 @@ export class CapTimelineEditorApp {
         if (this.aiOptimizeBtn) this.aiOptimizeBtn.disabled = !enabled;
     }
 
+    _disableVisualPromptControls() {
+        this._setVisualSettingsEnabled(false);
+        if (this.promptInput) this.promptInput.disabled = true;
+        if (this.aiPromptInput) this.aiPromptInput.disabled = true;
+        this._setPromptIncludesEnabled(false);
+        if (this.useMediaPromptCb) {
+            this.useMediaPromptCb.disabled = true;
+            this.useMediaPromptCb.checked = true;
+        }
+        try {
+            setRichPromptValue(this.promptInput, "", false);
+            setRichPromptValue(this.aiPromptInput, "", false);
+        } catch (err) {
+            console.error("[CapTE] clear prompt failed", err);
+        }
+    }
+
+    _setPromptIncludesEnabled(enabled, includes = null) {
+        const selected = normalizePromptIncludes(includes);
+        this.promptIncludeChips?.forEach((chip) => {
+            chip.disabled = !enabled;
+            const key = chip.dataset.include;
+            chip.classList.toggle("is-active", enabled && selected.includes(key));
+        });
+        this.promptIncludesHost?.classList.toggle("is-disabled", !enabled);
+    }
+
+    _syncPromptIncludesUi(meta) {
+        this._setPromptIncludesEnabled(true, normalizePromptIncludes(meta?.promptIncludes));
+    }
+
     _updatePromptPanel() {
         const clip = this._syncSelectedClip();
         this._syncClipSettingRefs();
         this._syncSidebarMode(!!clip);
-        this._updateClipInfoPanel(clip);
         const isAudio = clip?.track?.type === "audio";
-        const m = clip ? this._ensureClipMeta(clip) : null;
-        if (!clip) {
-            this._setVisualSettingsEnabled(false);
-            if (this.promptInput) this.promptInput.disabled = true;
-            if (this.aiPromptInput) this.aiPromptInput.disabled = true;
-            if (this.useGlobalCb) this.useGlobalCb.disabled = true;
-            if (this.useAiPromptCb) {
-                this.useAiPromptCb.disabled = true;
-                this.useAiPromptCb.checked = true;
+        const isVoiceover = isVoiceoverTrackType(clip?.track?.type);
+        const isSubtitle = isSubtitleTrackType(clip?.track?.type);
+        const isVisual = !!clip && !isAudio && !isVoiceover && !isSubtitle;
+        // Unlock / show panels before any meta / info work. Controls ship as
+        // HTML `disabled`; a throw in _ensureClipMeta or info view used to
+        // leave the sidebar looking interactive but dead.
+        if (this.visualClipBody) this.visualClipBody.hidden = !isVisual;
+        if (this.subtitlePanel) this.subtitlePanel.hidden = !clip || !isSubtitle;
+        if (this.voiceoverPanel) this.voiceoverPanel.hidden = !clip || !isVoiceover;
+        if (!clip || isAudio || isSubtitle) {
+            this._disableVisualPromptControls();
+            if (!clip) {
+                this._setClipPromptTab("clip");
             }
-            if (this.useMediaPromptCb) {
-                this.useMediaPromptCb.disabled = true;
-                this.useMediaPromptCb.checked = true;
+        } else if (isVoiceover) {
+            this._disableVisualPromptControls();
+            try {
+                const m = this._ensureClipMeta(clip);
+                this._fillVoiceoverPanel(m);
+            } catch (err) {
+                console.error("[CapTE] voiceover panel fill failed", err);
             }
-            setRichPromptValue(this.promptInput, "", false);
-            setRichPromptValue(this.aiPromptInput, "", false);
-            this._setClipPromptTab("clip");
-            return;
-        }
-        const isVisual = !isAudio;
-        if (isVisual) {
+        } else {
+            // Enable immediately with whatever meta we already have (or defaults).
+            // Full normalize can throw on corrupt media rows — do that after unlock.
+            let m = this._meta.get(clip.id) || defaultImageMeta(this._trackIndex(clip.track));
             this._setVisualSettingsEnabled(true, m);
             if (this.promptInput) this.promptInput.disabled = false;
             if (this.aiPromptInput) this.aiPromptInput.disabled = false;
-            if (this.useGlobalCb) {
-                this.useGlobalCb.disabled = false;
-                this.useGlobalCb.checked = m.useGlobalPrompt !== false;
+            this._syncPromptIncludesUi(m);
+            try {
+                m = this._ensureClipMeta(clip) || m;
+                this._setVisualSettingsEnabled(true, m);
+                this._syncPromptIncludesUi(m);
+                setRichPromptValue(this.promptInput, m.prompt ?? "", true);
+                setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
+            } catch (err) {
+                console.error("[CapTE] clip meta / prompt fill failed", err);
+                try {
+                    setRichPromptValue(this.promptInput, m.prompt ?? "", true);
+                    setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
+                } catch { /* keep controls enabled */ }
             }
-            if (this.useAiPromptCb) {
-                this.useAiPromptCb.disabled = false;
-                this.useAiPromptCb.checked = m.useAiPrompt !== false;
-            }
-            setRichPromptValue(this.promptInput, m.prompt ?? "", true);
-            setRichPromptValue(this.aiPromptInput, m.aiPrompt ?? "", true);
-        } else {
-            this._setVisualSettingsEnabled(false);
-            if (this.promptInput) this.promptInput.disabled = true;
-            if (this.aiPromptInput) this.aiPromptInput.disabled = true;
-            if (this.useGlobalCb) this.useGlobalCb.disabled = true;
-            if (this.useAiPromptCb) this.useAiPromptCb.disabled = true;
-            if (this.useMediaPromptCb) {
-                this.useMediaPromptCb.disabled = true;
-                this.useMediaPromptCb.checked = true;
-            }
-            setRichPromptValue(this.promptInput, "", false);
-            setRichPromptValue(this.aiPromptInput, "", false);
         }
+        if (isSubtitle) {
+            try {
+                this._fillSubtitlePanel(this._ensureClipMeta(clip));
+            } catch (err) {
+                console.error("[CapTE] subtitle panel fill failed", err);
+            }
+        }
+        try {
+            this._updateClipInfoPanel(clip);
+        } catch (err) {
+            console.error("[CapTE] clip info view failed", err);
+        }
+    }
+
+
+    _bindSubtitlePanelEvents() {
+        const bind = (el, ev, fn) => el?.addEventListener(ev, fn);
+        bind(this.subTextInput, "focus", () => { this._subUndoArmed = true; });
+        bind(this.subTextInput, "blur", () => { this._subUndoArmed = false; });
+        bind(this.subTextInput, "input", () => this._onSubtitleFieldChange({ text: true }));
+        for (const [el, key, cast] of [
+            [this.subFontSelect, "fontFamily", "str"],
+            [this.subSizeInput, "fontSize", "num"],
+            [this.subLetterSpacingInput, "letterSpacing", "num"],
+            [this.subColorInput, "color", "str"],
+            [this.subBoldCb, "bold", "bool"],
+            [this.subItalicCb, "italic", "bool"],
+            [this.subOpacityInput, "opacity", "opacity"],
+            [this.subStrokeCb, "strokeEnabled", "bool"],
+            [this.subStrokeColorInput, "strokeColor", "str"],
+            [this.subStrokeWidthInput, "strokeWidth", "num"],
+            [this.subShadowCb, "shadowEnabled", "bool"],
+            [this.subShadowColorInput, "shadowColor", "str"],
+            [this.subShadowBlurInput, "shadowBlur", "num"],
+            [this.subShadowXInput, "shadowOffsetX", "num"],
+            [this.subShadowYInput, "shadowOffsetY", "num"],
+            [this.subAlignSelect, "align", "str"],
+            [this.subVAlignSelect, "vAlign", "str"],
+            [this.subOffsetXInput, "offsetX", "num"],
+            [this.subOffsetYInput, "offsetY", "num"],
+        ]) {
+            const isSelect = el?.tagName === "SELECT";
+            const ev = el?.type === "checkbox" || el?.type === "range" || isSelect || el?.type === "color"
+                ? "input"
+                : "change";
+            bind(el, ev === "input" ? "input" : "change", () => this._onSubtitleFieldChange({ [key]: cast }));
+            // Custom font picker dispatches both; native select needs change too.
+            if (isSelect) bind(el, "change", () => this._onSubtitleFieldChange({ [key]: cast }));
+            if (ev === "input" && (el?.type === "number")) {
+                bind(el, "change", () => this._onSubtitleFieldChange({ [key]: cast }));
+            }
+        }
+        bind(this.subApplyTrackBtn, "click", () => this._applySubtitleStyleToTrack());
+        bind(this.subApplyAllBtn, "click", () => this._applySubtitleStyleToAllUnlocked());
+    }
+
+    _fillSubtitlePanel(m) {
+        if (!m) return;
+        this._subPanelFilling = true;
+        try {
+            if (this.subTextInput) this.subTextInput.value = m.text ?? "";
+            if (this.subFontSelect) {
+                let font = String(m.fontFamily || "").trim();
+                if (!font && this._systemFonts?.length) {
+                    font = this._systemFonts[0].family;
+                    m.fontFamily = font;
+                    m.fontPath = this._systemFonts[0].path || "";
+                }
+                this._fillSystemFontSelect(this.subFontSelect, font || "sans-serif", { autoPickFirst: true });
+                if (!m.fontPath) {
+                    m.fontPath = this.subFontSelect.selectedOptions?.[0]?.dataset?.path || "";
+                }
+                void this._ensureFontList();
+            }
+            if (this.subSizeInput) this.subSizeInput.value = String(Math.max(8, Math.round(Number(m.fontSize) || 48)));
+            if (this.subLetterSpacingInput) {
+                this.subLetterSpacingInput.value = String(Math.max(-50, Math.min(200, Math.round(Number(m.letterSpacing) || 0))));
+            }
+            if (this.subColorInput) this.subColorInput.value = /^#[0-9a-fA-F]{6}$/.test(m.color) ? m.color : "#ffffff";
+            if (this.subBoldCb) this.subBoldCb.checked = !!m.bold;
+            if (this.subItalicCb) this.subItalicCb.checked = !!m.italic;
+            const opacityPct = Math.round(Math.max(0, Math.min(1, Number(m.opacity) || 1)) * 100);
+            if (this.subOpacityInput) this.subOpacityInput.value = String(opacityPct);
+            if (this.subOpacityVal) this.subOpacityVal.textContent = `${opacityPct}%`;
+            if (this.subStrokeCb) this.subStrokeCb.checked = m.strokeEnabled !== false;
+            if (this.subStrokeColorInput) {
+                this.subStrokeColorInput.value = /^#[0-9a-fA-F]{6}$/.test(m.strokeColor) ? m.strokeColor : "#000000";
+            }
+            if (this.subStrokeWidthInput) this.subStrokeWidthInput.value = String(Number(m.strokeWidth) || 0);
+            if (this.subShadowCb) this.subShadowCb.checked = m.shadowEnabled !== false;
+            const shadowHex = String(m.shadowColor || "#000000");
+            if (this.subShadowColorInput) {
+                this.subShadowColorInput.value = /^#[0-9a-fA-F]{6}$/.test(shadowHex) ? shadowHex : "#000000";
+            }
+            if (this.subShadowBlurInput) this.subShadowBlurInput.value = String(Number(m.shadowBlur) || 0);
+            if (this.subShadowXInput) this.subShadowXInput.value = String(Number(m.shadowOffsetX) || 0);
+            if (this.subShadowYInput) this.subShadowYInput.value = String(Number(m.shadowOffsetY) || 0);
+            if (this.subAlignSelect) this.subAlignSelect.value = ["left", "center", "right"].includes(m.align) ? m.align : "center";
+            if (this.subVAlignSelect) this.subVAlignSelect.value = ["top", "middle", "bottom"].includes(m.vAlign) ? m.vAlign : "bottom";
+            if (this.subOffsetXInput) this.subOffsetXInput.value = String(Number(m.offsetX) || 0);
+            if (this.subOffsetYInput) this.subOffsetYInput.value = String(Number(m.offsetY) || 0);
+        } finally {
+            this._subPanelFilling = false;
+        }
+    }
+
+    _readSubtitlePanelInto(meta) {
+        if (!meta) return meta;
+        meta.text = String(this.subTextInput?.value ?? meta.text ?? "");
+        meta.fontFamily = String(this.subFontSelect?.value || meta.fontFamily || "sans-serif");
+        meta.fontPath = String(
+            this.subFontSelect?.selectedOptions?.[0]?.dataset?.path
+            || meta.fontPath
+            || "",
+        );
+        meta.fontSize = Math.max(8, Math.round(Number(this.subSizeInput?.value) || meta.fontSize || 48));
+        meta.letterSpacing = Math.max(-50, Math.min(200, Math.round(Number(this.subLetterSpacingInput?.value) || 0)));
+        meta.color = String(this.subColorInput?.value || meta.color || "#ffffff");
+        meta.bold = !!this.subBoldCb?.checked;
+        meta.italic = !!this.subItalicCb?.checked;
+        const opacityPct = Math.max(0, Math.min(100, Number(this.subOpacityInput?.value) || 100));
+        meta.opacity = opacityPct / 100;
+        if (this.subOpacityVal) this.subOpacityVal.textContent = `${Math.round(opacityPct)}%`;
+        meta.strokeEnabled = !!this.subStrokeCb?.checked;
+        meta.strokeColor = String(this.subStrokeColorInput?.value || meta.strokeColor || "#000000");
+        meta.strokeWidth = Math.max(0, Number(this.subStrokeWidthInput?.value) || 0);
+        meta.shadowEnabled = !!this.subShadowCb?.checked;
+        meta.shadowColor = String(this.subShadowColorInput?.value || meta.shadowColor || "#000000");
+        meta.shadowBlur = Math.max(0, Number(this.subShadowBlurInput?.value) || 0);
+        meta.shadowOffsetX = Number(this.subShadowXInput?.value) || 0;
+        meta.shadowOffsetY = Number(this.subShadowYInput?.value) || 0;
+        meta.align = String(this.subAlignSelect?.value || "center");
+        meta.vAlign = String(this.subVAlignSelect?.value || "bottom");
+        meta.offsetX = Number(this.subOffsetXInput?.value) || 0;
+        meta.offsetY = Number(this.subOffsetYInput?.value) || 0;
+        return meta;
+    }
+
+    _onSubtitleFieldChange() {
+        if (this._subPanelFilling) return;
+        const clip = this._selClip;
+        if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
+        if (this._subUndoArmed) {
+            this._recordUndo();
+            this._subUndoArmed = false;
+        } else if (!this._subStyleUndoArmed) {
+            this._recordUndo();
+            this._subStyleUndoArmed = true;
+            clearTimeout(this._subStyleUndoTimer);
+            this._subStyleUndoTimer = setTimeout(() => { this._subStyleUndoArmed = false; }, 600);
+        }
+        const m = this._ensureClipMeta(clip);
+        this._readSubtitlePanelInto(m);
+        this._syncFontSelectPreview(this.subFontSelect);
+        const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+        clip.name = label.slice(0, 40);
+        const labelEl = clip.el?.querySelector?.(".tl-clip-label");
+        if (labelEl) labelEl.textContent = clip.name;
+        this._meta.set(clip.id, m);
+        if (this.clipNameEl) this.clipNameEl.textContent = clip.name;
+        this._decorateClip(clip);
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+    }
+
+    _applySubtitleStyleToTrack() {
+        const clip = this._selClip;
+        if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
+        const style = pickSubtitleStyle(this._ensureClipMeta(clip));
+        this._recordUndo();
+        for (const other of clip.track.clips) {
+            if (other.id === clip.id) continue;
+            const m = this._ensureClipMeta(other);
+            Object.assign(m, style);
+            const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+            other.name = label.slice(0, 40);
+            const labelEl = other.el?.querySelector?.(".tl-clip-label");
+            if (labelEl) labelEl.textContent = other.name;
+            this._meta.set(other.id, m);
+            this._decorateClip(other);
+        }
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+    }
+
+    _applySubtitleStyleToAllUnlocked() {
+        const clip = this._selClip;
+        if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
+        const style = pickSubtitleStyle(this._ensureClipMeta(clip));
+        this._recordUndo();
+        for (const track of this._allTextTracks()) {
+            if (track.locked) continue;
+            for (const other of track.clips) {
+                const m = this._ensureClipMeta(other);
+                Object.assign(m, style);
+                const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
+                other.name = label.slice(0, 40);
+                const labelEl = other.el?.querySelector?.(".tl-clip-label");
+                if (labelEl) labelEl.textContent = other.name;
+                this._meta.set(other.id, m);
+                this._decorateClip(other);
+            }
+        }
+        this._saveToWidgets();
+        this._scheduleProgramPreview();
+    }
+
+    _drawSubtitleOverlays(ctx, cw, ch, t) {
+        const tracks = [...this._allTextTracks()].reverse();
+        for (const track of tracks) {
+            if (track.visible === false) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const clip of track.clips) {
+                if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
+                const m = this._meta.get(clip.id) ?? defaultSubtitleMeta();
+                if (m.disabled || m.visible === false) continue;
+                this._paintSubtitle(ctx, cw, ch, m);
+            }
+        }
+    }
+
+    _paintSubtitle(ctx, cw, ch, m) {
+        const text = String(m.text || "").trim();
+        if (!text) return;
+        const scale = ch / Math.max(1, Number(this._w("height")?.value) || ch);
+        const fontSize = Math.max(8, Number(m.fontSize) || 48) * scale;
+        const letterSpacing = (Number(m.letterSpacing) || 0) * scale;
+        const weight = m.bold ? "700" : "400";
+        const style = m.italic ? "italic" : "normal";
+        const family = m.fontFamily ? `"${String(m.fontFamily).replace(/"/g, "")}", sans-serif` : "sans-serif";
+        ctx.save();
+        ctx.font = `${style} ${weight} ${fontSize}px ${family}`;
+        ctx.textAlign = m.align === "left" || m.align === "right" ? m.align : "center";
+        ctx.textBaseline = "middle";
+        ctx.globalAlpha = Math.max(0, Math.min(1, Number(m.opacity) || 1));
+
+        const lines = text.split(/\r?\n/);
+        const lineHeight = fontSize * 1.25;
+        const blockH = lineHeight * lines.length;
+        const padX = cw * 0.04;
+        let x = cw / 2;
+        if (m.align === "left") x = padX;
+        else if (m.align === "right") x = cw - padX;
+        x += (Number(m.offsetX) || 0) / 100 * cw;
+
+        let y;
+        const oy = (Number(m.offsetY) || 0) / 100 * ch;
+        if (m.vAlign === "top") y = padX + blockH / 2 + oy;
+        else if (m.vAlign === "middle") y = ch / 2 + oy;
+        else y = ch - padX - blockH / 2 - oy;
+
+        if (m.shadowEnabled !== false) {
+            ctx.shadowColor = m.shadowColor || "rgba(0,0,0,0.75)";
+            ctx.shadowBlur = Math.max(0, Number(m.shadowBlur) || 0);
+            ctx.shadowOffsetX = Number(m.shadowOffsetX) || 0;
+            ctx.shadowOffsetY = Number(m.shadowOffsetY) || 0;
+        } else {
+            ctx.shadowColor = "transparent";
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+
+        const startY = y - (blockH - lineHeight) / 2;
+        for (let i = 0; i < lines.length; i++) {
+            const ly = startY + i * lineHeight;
+            if (m.strokeEnabled !== false && Number(m.strokeWidth) > 0) {
+                ctx.lineWidth = Number(m.strokeWidth) || 1;
+                ctx.strokeStyle = m.strokeColor || "#000";
+                ctx.lineJoin = "round";
+                this._drawTextWithLetterSpacing(ctx, lines[i], x, ly, letterSpacing, "stroke");
+            }
+            ctx.fillStyle = m.color || "#fff";
+            this._drawTextWithLetterSpacing(ctx, lines[i], x, ly, letterSpacing, "fill");
+        }
+        ctx.restore();
     }
 
     _syncSidebarMode(hasClip) {
@@ -9405,47 +14853,69 @@ export class CapTimelineEditorApp {
         if (this.projectScalarsEl) this.projectScalarsEl.textContent = `${sizeText} · ${fpsLabel}`;
     }
 
-    _readGlobalPrompt() {
-        if (this.globalPromptInput && (document.activeElement === this.globalPromptInput || typeof this.globalPromptInput.value === "string")) {
-            return String(this.globalPromptInput.value ?? "");
+    _readSettingPrompt(key) {
+        const input = this._settingPromptInputs?.[key];
+        if (input && (document.activeElement === input || typeof input.value === "string")) {
+            return String(input.value ?? "");
         }
         const parsed = this._parseProjectWidgetValue();
         const settings = parsed?.project?.settings;
-        if (settings && typeof settings === "object" && settings.global_prompt != null) {
-            return String(settings.global_prompt);
+        if (settings && typeof settings === "object" && settings[key] != null) {
+            return String(settings[key]);
         }
         return "";
     }
 
-    _writeGlobalPrompt(text) {
+    _readGlobalPrompt() {
+        return this._readSettingPrompt("global_prompt");
+    }
+
+    _writeSettingPrompt(key, text) {
         const next = String(text ?? "");
-        this._globalPromptSyncing = true;
+        this._settingPromptSyncing = true;
         try {
-            if (this.globalPromptInput) setRichPromptValue(this.globalPromptInput, next, true);
+            const input = this._settingPromptInputs?.[key];
+            if (input) setRichPromptValue(input, next, true);
             this._syncScalarsToProjectJson();
             this.node.setDirtyCanvas?.(true, true);
         } finally {
-            this._globalPromptSyncing = false;
+            this._settingPromptSyncing = false;
+        }
+    }
+
+    _writeGlobalPrompt(text) {
+        this._writeSettingPrompt("global_prompt", text);
+    }
+
+    _syncSettingPromptInputs() {
+        if (this._settingPromptSyncing) return;
+        for (const key of SETTING_PROMPT_KEYS) {
+            const input = this._settingPromptInputs?.[key];
+            if (!input) continue;
+            if (document.activeElement === input) continue;
+            const value = this._readSettingPrompt(key);
+            if (input.value === value) {
+                updateRichPromptMirror(input);
+                continue;
+            }
+            setRichPromptValue(input, value, true);
         }
     }
 
     _syncGlobalPromptInput() {
-        if (!this.globalPromptInput || this._globalPromptSyncing) return;
-        if (document.activeElement === this.globalPromptInput) return;
-        const value = this._readGlobalPrompt();
-        if (this.globalPromptInput.value === value) {
-            updateRichPromptMirror(this.globalPromptInput);
-            return;
+        this._syncSettingPromptInputs();
+    }
+
+    _onSettingPromptInput(key) {
+        if (this._settingPromptUndoArmed?.[key]) {
+            this._recordUndo();
+            this._settingPromptUndoArmed[key] = false;
         }
-        setRichPromptValue(this.globalPromptInput, value, true);
+        this._writeSettingPrompt(key, this._settingPromptInputs?.[key]?.value ?? "");
     }
 
     _onGlobalPromptInput() {
-        if (this._globalPromptUndoArmed) {
-            this._recordUndo();
-            this._globalPromptUndoArmed = false;
-        }
-        this._writeGlobalPrompt(this.globalPromptInput?.value ?? "");
+        this._onSettingPromptInput("global_prompt");
     }
 
     _parseExtendSec(input) {
@@ -9536,7 +15006,7 @@ export class CapTimelineEditorApp {
         if (globalTab) {
             const clip = this._findClipById(this._aiOptimizeClipId);
             const meta = clip ? this._ensureClipMeta(clip) : null;
-            globalTab.hidden = !clip || meta?.useGlobalPrompt === false;
+            globalTab.hidden = !clip || !normalizePromptIncludes(meta?.promptIncludes).includes("global");
             if (globalTab.hidden && next === "global") {
                 this._aiOptimizeSrc = "media";
                 this.aiSrcTabs?.forEach((btn) => {
@@ -9572,12 +15042,44 @@ export class CapTimelineEditorApp {
         return AI_PROMPT_LANGUAGES.includes(value) ? value : "简体中文";
     }
 
-    async _openAiOptimizeModal() {
-        const clip = this._selClip;
-        if (!clip || clip.track?.type === "audio" || !this.aiOptimizeModal) return;
+    async _openAiOptimizeModal(clip = this._selClip) {
+        if (!clip || clip.track?.type === "audio" || isSubtitleTrackType(clip.track?.type) || !this.aiOptimizeModal) return;
+        this.aiOptimizeModal.hidden = false;
+        this._aiOptimizeSrc = "clip";
+        await this._bindAiOptimizeToClip(clip, { reloadModels: true });
+    }
+
+    _closeAiOptimizeModal() {
+        this._cancelAiOptimize();
+        if (!this.aiOptimizeModal) return;
+        this.aiOptimizeModal.hidden = true;
+        this._aiOptimizeClipId = null;
+        this._syncAiOptimizeNavButtons();
+    }
+
+    _aiOptimizeEligibleClips() {
+        const out = [];
+        for (const track of this._timeline?.tracks ?? []) {
+            if (track.type === "audio" || isVoiceoverTrackType(track.type) || isSubtitleTrackType(track.type)) continue;
+            const clips = [...track.clips].sort((a, b) => a.startTime - b.startTime || String(a.id).localeCompare(String(b.id)));
+            out.push(...clips);
+        }
+        return out;
+    }
+
+    _syncAiOptimizeNavButtons() {
+        const open = !!(this.aiOptimizeModal && !this.aiOptimizeModal.hidden);
+        const clips = open ? this._aiOptimizeEligibleClips() : [];
+        const multi = clips.length > 1;
+        if (this.aiOptimizePrevBtn) this.aiOptimizePrevBtn.disabled = !multi;
+        if (this.aiOptimizeNextBtn) this.aiOptimizeNextBtn.disabled = !multi;
+    }
+
+    async _bindAiOptimizeToClip(clip, { reloadModels = false } = {}) {
+        if (!clip || !this.aiOptimizeModal) return;
+        this._cancelAiOptimize();
         const meta = this._ensureClipMeta(clip);
         this._aiOptimizeClipId = clip.id;
-        this.aiOptimizeModal.hidden = false;
         if (this.aiOptimizeTitle) {
             this.aiOptimizeTitle.textContent = T("ai_optimize_title_dynamic", { name: clip.name || DEFAULT_CLIP_NAME });
         }
@@ -9586,16 +15088,22 @@ export class CapTimelineEditorApp {
             this.aiSkillInput.value = localStorage.getItem(STORAGE_AI_PROMPT_SKILL) || "";
         }
         this._restoreAiOutputLanguage();
-        this._setAiOptimizeSrcTab("clip");
-        await this._loadAiOptimizeModels();
+        this._setAiOptimizeSrcTab(this._aiOptimizeSrc || "clip");
+        if (reloadModels) await this._loadAiOptimizeModels();
         await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
+        this._syncAiOptimizeNavButtons();
     }
 
-    _closeAiOptimizeModal() {
-        this._cancelAiOptimize();
-        if (!this.aiOptimizeModal) return;
-        this.aiOptimizeModal.hidden = true;
-        this._aiOptimizeClipId = null;
+    async _stepAiOptimizeClip(delta) {
+        if (!this.aiOptimizeModal || this.aiOptimizeModal.hidden) return;
+        const clips = this._aiOptimizeEligibleClips();
+        if (clips.length < 2) return;
+        let idx = clips.findIndex((c) => c.id === this._aiOptimizeClipId);
+        if (idx < 0) idx = 0;
+        const next = clips[(idx + delta + clips.length * 10) % clips.length];
+        if (!next || next.id === this._aiOptimizeClipId) return;
+        this._timeline?.selectClip(next);
+        await this._bindAiOptimizeToClip(next, { reloadModels: false });
     }
 
     _cancelAiOptimize() {
@@ -9734,7 +15242,9 @@ export class CapTimelineEditorApp {
                 lyrics: "",
                 duration_sec: Number(clip.duration) || 0,
                 clip_prompt: String(meta.prompt || ""),
-                global_prompt: meta.useGlobalPrompt === false ? "" : this._readGlobalPrompt(),
+                global_prompt: normalizePromptIncludes(meta.promptIncludes).includes("global")
+                    ? this._readGlobalPrompt()
+                    : "",
                 files: this._clipAiOptimizeFiles(clip),
                 keep_loaded: false,
             };
@@ -9876,20 +15386,92 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _onUseGlobalChange() {
-        if (!this._selClip) return;
+    _onPromptIncludeToggle(key) {
+        if (!this._selClip || !PROMPT_PART_KEY_SET.has(key)) return;
         this._recordUndo();
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
-        m.useGlobalPrompt = !!this.useGlobalCb.checked;
+        const current = normalizePromptIncludes(m.promptIncludes);
+        const next = current.includes(key)
+            ? current.filter((k) => k !== key)
+            : [...current, key];
+        m.promptIncludes = PROMPT_PART_KEYS.filter((k) => next.includes(k));
         this._meta.set(this._selClip.id, m);
+        this._syncPromptIncludesUi(m);
     }
 
-    _onUseAiPromptChange() {
-        if (!this._selClip) return;
-        this._recordUndo();
-        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
-        m.useAiPrompt = !!this.useAiPromptCb?.checked;
-        this._meta.set(this._selClip.id, m);
+    _promptPartLabel(key) {
+        switch (key) {
+            case "global": return T("prompt_include_global");
+            case "style": return T("prompt_include_style");
+            case "clip": return T("prompt_include_clip");
+            case "ai": return T("prompt_include_ai");
+            case "non_diegetic_music": return T("prompt_include_music");
+            case "negative": return T("prompt_include_negative");
+            default: return key;
+        }
+    }
+
+    _getPromptConcatOrder() {
+        return normalizePromptConcatOrder(this._promptConcatOrder);
+    }
+
+    _setPromptConcatOrder(order, { recordUndo = true } = {}) {
+        const next = normalizePromptConcatOrder(order);
+        const prev = this._getPromptConcatOrder().join(",");
+        if (next.join(",") === prev) return;
+        if (recordUndo) this._recordUndo();
+        this._promptConcatOrder = next;
+        this._renderPromptConcatOrderList();
+        this._saveToWidgets();
+    }
+
+    _movePromptConcatOrder(index, delta) {
+        const order = this._getPromptConcatOrder();
+        const to = index + delta;
+        if (to < 0 || to >= order.length) return;
+        const next = order.slice();
+        const [row] = next.splice(index, 1);
+        next.splice(to, 0, row);
+        this._setPromptConcatOrder(next);
+    }
+
+    _renderPromptConcatOrderList() {
+        if (!this.promptOrderList) return;
+        const order = this._getPromptConcatOrder();
+        this.promptOrderList.replaceChildren();
+        order.forEach((key, index) => {
+            const row = document.createElement("div");
+            row.className = "cat-te-prompt-order-row";
+            row.dataset.key = key;
+            const label = document.createElement("span");
+            label.className = "cat-te-prompt-order-name";
+            label.textContent = this._promptPartLabel(key);
+            const actions = document.createElement("div");
+            actions.className = "cat-te-prompt-order-actions";
+            const up = document.createElement("button");
+            up.type = "button";
+            up.className = "cat-te-prompt-order-btn";
+            up.title = T("move_up_title");
+            up.disabled = index === 0;
+            up.innerHTML = iconHtml("arrowUp", 12);
+            up.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._movePromptConcatOrder(index, -1);
+            });
+            const down = document.createElement("button");
+            down.type = "button";
+            down.className = "cat-te-prompt-order-btn";
+            down.title = T("move_down_title");
+            down.disabled = index === order.length - 1;
+            down.innerHTML = iconHtml("arrowDown", 12);
+            down.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this._movePromptConcatOrder(index, 1);
+            });
+            actions.append(up, down);
+            row.append(label, actions);
+            this.promptOrderList.appendChild(row);
+        });
     }
 
     _onClipRoleChange() {
@@ -9965,6 +15547,31 @@ export class CapTimelineEditorApp {
         this._meta.set(this._selClip.id, m);
     }
 
+    _clampH3MotionContextLength(frames) {
+        const fps = Math.max(1, Math.round(Number(this.getFps?.() || 24) || 24));
+        const max = 3 * fps;
+        let n = Math.max(0, Math.round(Number(frames) || 0));
+        n = Math.min(max, n);
+        return Math.round(n / fps) * fps;
+    }
+
+    _onH3MotionContextChange() {
+        if (!this._selClip || this.h3MotionContextInput?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.h3MotionContextLength = this._clampH3MotionContextLength(this.h3MotionContextInput.value);
+        this.h3MotionContextInput.value = String(m.h3MotionContextLength);
+        this._meta.set(this._selClip.id, m);
+    }
+
+    _onSaveLatentChange() {
+        if (!this._selClip || this.saveLatentCb?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.saveLatent = !!this.saveLatentCb.checked;
+        this._meta.set(this._selClip.id, m);
+    }
+
     /** Persist audio fade seconds from the Clip onto clip meta (ms). */
     _syncAudioFadeMeta(clip) {
         if (!clip || clip.track?.type !== "audio") return;
@@ -9980,12 +15587,87 @@ export class CapTimelineEditorApp {
         const fps = this.getFps();
         const tracks = (this._timeline?.tracks ?? []).map((track, order) => {
             const ti = this._trackIndex(track);
+            const isSubTrack = isSubtitleTrackType(track.type);
+            const isVoiceoverTrack = isVoiceoverTrackType(track.type);
             const clips = track.clips.map(clip => {
                 const m = this._meta.get(clip.id)
-                    ?? (track.type === "audio" ? defaultAudioMeta(ti) : defaultImageMeta(ti));
-                if (track.type !== "audio") this._normalizeVisualMeta(clip, m);
+                    ?? (track.type === "audio"
+                        ? defaultAudioMeta(ti)
+                        : isVoiceoverTrack
+                            ? defaultVoiceoverMeta(ti)
+                            : isSubTrack
+                                ? defaultSubtitleMeta(ti)
+                                : defaultImageMeta(ti));
+                if (track.type !== "audio" && !isVoiceoverTrack && !isSubTrack) {
+                    this._normalizeVisualMeta(clip, m);
+                }
                 // Frame-grid ms so abutting clips share boundaries on reload.
                 const { startMs, durationMs } = encodeClipTimingMs(clip.startTime, clip.duration, fps);
+                if (isVoiceoverTrack) {
+                    const voRow = {
+                        id: clip.id,
+                        type: "voiceover",
+                        enabled: !m.disabled,
+                        visible: m.visible !== false,
+                        muted: !!m.muted,
+                        start_ms: startMs,
+                        duration_ms: durationMs,
+                        name: clip.name || T("voiceover_clip_default_name"),
+                        prompt: m.prompt ?? "",
+                        style_prompt: m.stylePrompt ?? "",
+                    };
+                    const generated = this._clipGeneratedAudios(m)
+                        .map((row) => serializeGeneratedAudio(row))
+                        .filter(Boolean);
+                    if (generated.length) voRow.generated_audios = generated;
+                    if (Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0) {
+                        voRow.resource_start_sec = Number(m.resourceStartSec);
+                    }
+                    if (Number.isFinite(Number(m.resourceDurationSec)) && m.resourceDurationSec > 0) {
+                        voRow.resource_duration_sec = Number(m.resourceDurationSec);
+                    }
+                    return voRow;
+                }
+                if (isSubTrack) {
+                    const style = pickSubtitleStyle(m);
+                    const subRow = {
+                        id: clip.id,
+                        type: "subtitle",
+                        enabled: !m.disabled,
+                        visible: m.visible !== false,
+                        start_ms: startMs,
+                        duration_ms: durationMs,
+                        name: clip.name || T("subtitle_default_text"),
+                        text: m.text ?? "",
+                        font_family: style.fontFamily,
+                        font_path: style.fontPath || "",
+                        font_size: style.fontSize,
+                        letter_spacing: style.letterSpacing ?? 0,
+                        color: style.color,
+                        bold: !!style.bold,
+                        italic: !!style.italic,
+                        opacity: style.opacity,
+                        stroke_enabled: style.strokeEnabled !== false,
+                        stroke_color: style.strokeColor,
+                        stroke_width: style.strokeWidth,
+                        shadow_enabled: style.shadowEnabled !== false,
+                        shadow_color: style.shadowColor,
+                        shadow_blur: style.shadowBlur,
+                        shadow_offset_x: style.shadowOffsetX,
+                        shadow_offset_y: style.shadowOffsetY,
+                        align: style.align,
+                        v_align: style.vAlign,
+                        offset_x: style.offsetX,
+                        offset_y: style.offsetY,
+                    };
+                    if (Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0) {
+                        subRow.resource_start_sec = Number(m.resourceStartSec);
+                    }
+                    if (Number.isFinite(Number(m.resourceDurationSec)) && m.resourceDurationSec > 0) {
+                        subRow.resource_duration_sec = Number(m.resourceDurationSec);
+                    }
+                    return subRow;
+                }
                 const sourceInFrames = Math.max(0, Math.round((clip.sourceOffset || 0) * fps));
                 const sourceInMs = Math.round((sourceInFrames * 1000) / fps);
                 const items = track.type === "audio" ? [] : this._clipItems(m);
@@ -10031,18 +15713,25 @@ export class CapTimelineEditorApp {
                     if (fadeOutMs > 0) row.fade_out_ms = fadeOutMs;
                     m.fadeInMs = fadeInMs;
                     m.fadeOutMs = fadeOutMs;
+                    if (Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0) {
+                        row.resource_start_sec = Number(m.resourceStartSec);
+                    }
+                    if (Number.isFinite(Number(m.resourceDurationSec)) && m.resourceDurationSec > 0) {
+                        row.resource_duration_sec = Number(m.resourceDurationSec);
+                    }
                 } else {
                     row.name = clip.name || DEFAULT_CLIP_NAME;
                     row.prompt = m.prompt ?? "";
                     row.ai_prompt = m.aiPrompt ?? "";
-                    row.use_global_prompt = m.useGlobalPrompt !== false;
-                    row.use_ai_prompt = m.useAiPrompt !== false;
+                    row.prompt_includes = normalizePromptIncludes(m.promptIncludes);
                     row.use_media_prompts = items.map((item) => item.useMediaPrompt !== false);
                     row.media_enabled = items.map((item) => item.enabled !== false);
                     row.head_extend_sec = Math.max(0, Math.round(Number(m.headExtendSec) || 0));
                     row.tail_extend_sec = Math.max(0, Math.round(Number(m.tailExtendSec) || 0));
                     row.generate_preview_video = !!m.generatePreviewVideo;
                     row.second_sample = !!m.secondSample;
+                    row.h3_motion_context_length = this._clampH3MotionContextLength(m.h3MotionContextLength);
+                    row.save_latent = !!m.saveLatent;
                     row.clip_role = m.clipRole || "multi_ref";
                     row.clip_role_custom = m.clipRole === "other" ? (m.clipRoleCustom || "") : "";
                     row.agent = m.agent || "MiniMaxH3";
@@ -10055,7 +15744,37 @@ export class CapTimelineEditorApp {
                             enabled: v.enabled !== false,
                             muted: v.muted === true,
                             note: v.note || "",
+                            ...(v.prompt ? { prompt: String(v.prompt) } : {}),
+                            ...(Number.isFinite(Number(v.duration_sec)) && v.duration_sec > 0
+                                ? { duration_sec: Number(v.duration_sec) }
+                                : {}),
+                            ...(Number(v.trim_in_sec) > 0 ? { trim_in_sec: Number(v.trim_in_sec) } : {}),
+                            ...(v.trim_out_sec != null && Number.isFinite(Number(v.trim_out_sec))
+                                ? { trim_out_sec: Number(v.trim_out_sec) }
+                                : {}),
+                            ...(Number(v.edit_start_sec) > 0
+                                ? { edit_start_sec: Number(v.edit_start_sec) }
+                                : {}),
                         }));
+                    }
+                    const genAudios = this._normalizeGenEditAudioDraft(m.genEditAudios);
+                    if (genAudios.length) {
+                        row.gen_edit_audios = genAudios.map((a) => ({
+                            id: a.id,
+                            file: a.file,
+                            edit_start_sec: a.edit_start_sec,
+                            duration: a.duration,
+                            source_offset: a.source_offset,
+                            ...(a.source_duration != null ? { source_duration: a.source_duration } : {}),
+                            muted: a.muted === true,
+                            ...(a.from_gen_id ? { from_gen_id: a.from_gen_id } : {}),
+                        }));
+                    }
+                    if (Number.isFinite(Number(m.resourceDurationSec)) && m.resourceDurationSec > 0) {
+                        row.resource_duration_sec = Number(m.resourceDurationSec);
+                    }
+                    if (Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0) {
+                        row.resource_start_sec = Number(m.resourceStartSec);
                     }
                     if (m.previewMode === "generated") row.preview_mode = "generated";
                     if (firstKind === "video") {
@@ -10068,8 +15787,24 @@ export class CapTimelineEditorApp {
             const trackInfo = this._trackInfo.get(track.id) || {};
             return {
                 id: track.id,
-                type: track.type === "audio" ? "audio" : "visual",
-                role: track.isMain ? "main" : (trackInfo.role || (track.type === "audio" ? "audio" : "overlay")),
+                type: track.type === "audio"
+                    ? "audio"
+                    : isVoiceoverTrack
+                        ? "voiceover"
+                        : isSubTrack
+                            ? "subtitle"
+                            : "visual",
+                role: track.isMain
+                    ? "main"
+                    : (trackInfo.role || (
+                        track.type === "audio"
+                            ? "audio"
+                            : isVoiceoverTrack
+                                ? "voiceover"
+                                : isSubTrack
+                                    ? "subtitle"
+                                    : "overlay"
+                    )),
                 name: track.name,
                 order,
                 enabled: trackInfo.enabled !== false,
@@ -10089,19 +15824,41 @@ export class CapTimelineEditorApp {
                 fps: Number(this._w("fps")?.value ?? 24),
                 width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
                 height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
-                global_prompt: this._readGlobalPrompt(),
+                ...Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [
+                    key,
+                    this._readSettingPrompt(key),
+                ])),
+                prompt_concat_order: this._getPromptConcatOrder(),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
                 current_time: Number(this._timeline?.currentTime ?? 0) || 0,
                 timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,
                 timeline_scroll_top: Number(this._timeline?.scrollEl?.scrollTop ?? 0) || 0,
                 watermark: this._watermark,
+                use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
+                timeline_edit_mode: this._timelineEditMode === "generated" ? "generated" : "resource",
+                ...(this._genVideoStamp
+                    ? { gen_video_stamp: String(this._genVideoStamp) }
+                    : {}),
+                ...(Array.isArray(this._runtimeOnlyClipIds) && this._runtimeOnlyClipIds.length
+                    ? { runtime_only_clip_ids: this._runtimeOnlyClipIds.map(String) }
+                    : {}),
             },
             tracks,
         };
     }
 
+    /** True when this editor's node still belongs to the live root graph. */
+    _isNodeOnLiveGraph() {
+        if (this._destroyed || !this.node?.graph) return false;
+        const live = app.rootGraph ?? app.graph;
+        if (!live) return false;
+        return CapTimelineEditorApp._graphRoot(this.node.graph)
+            === CapTimelineEditorApp._graphRoot(live);
+    }
+
     _saveToWidgets() {
         if (this._destroyed) return;
+        if (!this._isNodeOnLiveGraph()) return;
         if (!this._timeline || !this._timelineReady) return;
         this._writeProjectJson(JSON.stringify(this._buildProject()));
         try { this._persistViewToLocalCache(); } catch { /* ignore */ }
@@ -10110,11 +15867,16 @@ export class CapTimelineEditorApp {
 
     /** Write project_json to the widget and keep workflow restore mirrors in sync. */
     _writeProjectJson(json) {
+        if (this._destroyed) return;
+        const node = this.node;
+        // Detached / other-tab nodes must not receive writes (dual Timeline Editor
+        // workflows share one rootGraph object across tab switches).
+        if (!this._isNodeOnLiveGraph()) return;
+
         const projectW = this._w("project_json");
         if (projectW) projectW.value = json;
 
-        const node = this.node;
-        if (node && Array.isArray(node.widgets)) {
+        if (Array.isArray(node.widgets)) {
             const values = [];
             for (const w of node.widgets) {
                 if (w.serialize === false) continue;
@@ -10131,7 +15893,7 @@ export class CapTimelineEditorApp {
             node.properties.cat_named = named;
         }
 
-        this.node?.setDirtyCanvas?.(true, true);
+        node.setDirtyCanvas?.(true, true);
     }
 
     /**
@@ -10268,19 +16030,38 @@ export class CapTimelineEditorApp {
             this.projectNameInput.value = String(project.name || T("untitled_project")).trim() || T("untitled_project");
             this._syncBrandProjectName();
             const snapSettings = snapshot.project?.settings ?? {};
-            if (snapSettings.global_prompt != null) {
-                this._writeGlobalPrompt(snapSettings.global_prompt);
-            } else {
-                this._syncGlobalPromptInput();
+            let wroteAnySettingPrompt = false;
+            this._settingPromptSyncing = true;
+            try {
+                for (const key of SETTING_PROMPT_KEYS) {
+                    const input = this._settingPromptInputs?.[key];
+                    if (!input) continue;
+                    if (snapSettings[key] != null) {
+                        setRichPromptValue(input, String(snapSettings[key]), true);
+                        wroteAnySettingPrompt = true;
+                    }
+                }
+            } finally {
+                this._settingPromptSyncing = false;
             }
+            if (wroteAnySettingPrompt) this._syncScalarsToProjectJson();
+            else this._syncSettingPromptInputs();
             this._syncProjectScalarDisplay();
             const projectTracks = Array.isArray(project.tracks) ? project.tracks : [];
-            const tracks = projectTracks.map((track, order) => ({
-                ...track,
-                type: track.type === "audio" ? "audio" : "image",
-                trackIndex: order,
-                isMain: track.role === "main",
-            }));
+            const tracks = projectTracks.map((track, order) => {
+                const rawType = String(track.type || "visual").toLowerCase();
+                const type = rawType === "audio"
+                    ? "audio"
+                    : (rawType === "subtitle" || rawType === "text")
+                        ? "text"
+                        : "image";
+                return {
+                    ...track,
+                    type,
+                    trackIndex: order,
+                    isMain: track.role === "main",
+                };
+            });
             this._timeline.clearTracks();
             if (tracks.length) {
                 this._loadTracksFromJson(tracks);

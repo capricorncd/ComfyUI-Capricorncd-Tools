@@ -38,6 +38,9 @@ export class Timeline extends EventEmitter {
     this._selected    = null;
     this._selectedIds = new Set();
     this.addTrackTypes = options.addTrackTypes ?? null; // e.g. ['image','audio']
+    this.playEndTime = Number.isFinite(Number(options.playEndTime)) && Number(options.playEndTime) > 0
+      ? Number(options.playEndTime)
+      : null;
     this._playing   = false;
     this._rafId     = null;
     this._lastTs    = null;
@@ -68,8 +71,22 @@ export class Timeline extends EventEmitter {
     return maxEnd;
   }
 
-  /** Playhead / seek cannot move past the last clip end (or full duration if empty). */
+  /**
+   * Optional soft play/seek end (seconds). When set, playback and seeking
+   * clamp here while the visual timeline may still extend further (e.g.
+   * gen-edit out-of-bounds region past the parent clip duration).
+   */
+  setPlayEndTime(secs) {
+    const n = Number(secs);
+    this.playEndTime = Number.isFinite(n) && n > 0 ? n : null;
+    this._clampCurrentTime();
+  }
+
+  /** Playhead / seek cannot move past playEndTime (if set), else last clip end. */
   _seekMaxTime() {
+    if (Number.isFinite(this.playEndTime) && this.playEndTime > 0) {
+      return Math.min(this.playEndTime, Math.max(this.duration, this.playEndTime));
+    }
     const end = this._contentEndTime();
     return end > 0 ? end : this.duration;
   }
@@ -93,6 +110,9 @@ export class Timeline extends EventEmitter {
       }
     }
     times.push(this._seekSnapTime());
+    if (Number.isFinite(this.playEndTime) && this.playEndTime > 0) {
+      times.push(this.playEndTime);
+    }
     return times;
   }
 
@@ -344,6 +364,7 @@ export class Timeline extends EventEmitter {
     // were attached.
     const consume = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); };
     this._onKey = (e) => {
+      if (this._keyboardSuspended) return;
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       switch (e.code) {
         case 'Space':
@@ -468,17 +489,31 @@ export class Timeline extends EventEmitter {
    * Whether a newly added non-audio track should become Main.
    * Explicit `isMain: false` prevents auto-promotion during project load.
    */
-  _resolveWillBeMain(data, isAudio) {
-    if (isAudio) return false;
+  _resolveWillBeMain(data, neverMain) {
+    if (neverMain) return false;
     if (data.isMain === true) return true;
     if (data.isMain === false) return false;
     return !this._mainTrackId;
   }
 
+  _mountTrackAt(track, index) {
+    const at = Math.max(0, Math.min(index, this.tracks.length));
+    this.tracks.splice(at, 0, track);
+    const next = this.tracks[at + 1];
+    if (next) {
+      this._tracksEl.insertBefore(track.el, next.el);
+      this._trackHeadersEl.insertBefore(track.headerEl, next.headerEl);
+    } else {
+      this._tracksEl.appendChild(track.el);
+      this._trackHeadersEl.appendChild(track.headerEl);
+    }
+  }
+
   /**
    * Add a track with zone-aware placement:
-   *   • First non-audio track → becomes the Main track (appended at current bottom)
-   *   • Subsequent non-audio tracks → overlays, inserted at position 0 (above all overlays)
+   *   • First media track → becomes the Main track (appended)
+   *   • Subsequent media tracks → overlays, inserted at position 0 (top)
+   *   • Voiceover tracks → between media and audio (just above first audio)
    *   • Audio tracks → always appended at the very bottom
    *
    * Pass `isMain: true` to force-designate a track as Main regardless of order.
@@ -486,24 +521,25 @@ export class Timeline extends EventEmitter {
    * @param {{ type?: string, name?: string, color?: string, isMain?: boolean }} data
    */
   addTrack(data = {}) {
-    const isAudio = (data.type || 'video') === 'audio';
-    const willBeMain = this._resolveWillBeMain(data, isAudio);
+    const type = data.type || 'video';
+    const isAudio = type === 'audio';
+    const isVoiceover = type === 'voiceover';
+    const willBeMain = this._resolveWillBeMain(data, isAudio || isVoiceover);
     const track = new Track(this, { ...data, isMain: willBeMain });
 
     if (willBeMain) {
       this._mainTrackId = track.id;
     }
 
-    if (!isAudio && !willBeMain && this._mainTrackId) {
+    if (isVoiceover) {
+      const audioIdx = this.tracks.findIndex((t) => t.type === 'audio');
+      this._mountTrackAt(track, audioIdx >= 0 ? audioIdx : this.tracks.length);
+    } else if (!isAudio && !willBeMain && this._mainTrackId) {
       // Overlay track → insert at the very top (index 0), above previous overlays
-      this.tracks.unshift(track);
-      this._tracksEl.prepend(track.el);
-      this._trackHeadersEl.prepend(track.headerEl);
+      this._mountTrackAt(track, 0);
     } else {
-      // Main track (first non-audio), audio track, or no main yet → append
-      this.tracks.push(track);
-      this._tracksEl.appendChild(track.el);
-      this._trackHeadersEl.appendChild(track.headerEl);
+      // Main track (first media), audio track, or no main yet → append
+      this._mountTrackAt(track, this.tracks.length);
     }
 
     this.emit('track:add', { track });
@@ -516,25 +552,17 @@ export class Timeline extends EventEmitter {
    * project order so overlay/main stacking matches persisted `order`.
    */
   addTrackAt(data = {}, index = this.tracks.length) {
-    const isAudio = (data.type || 'video') === 'audio';
-    const willBeMain = this._resolveWillBeMain(data, isAudio);
+    const type = data.type || 'video';
+    const isAudio = type === 'audio';
+    const isVoiceover = type === 'voiceover';
+    const willBeMain = this._resolveWillBeMain(data, isAudio || isVoiceover);
     const track = new Track(this, { ...data, isMain: willBeMain });
 
     if (willBeMain) {
       this._mainTrackId = track.id;
     }
 
-    const at = Math.max(0, Math.min(index, this.tracks.length));
-    this.tracks.splice(at, 0, track);
-
-    const next = this.tracks[at + 1];
-    if (next) {
-      this._tracksEl.insertBefore(track.el, next.el);
-      this._trackHeadersEl.insertBefore(track.headerEl, next.headerEl);
-    } else {
-      this._tracksEl.appendChild(track.el);
-      this._trackHeadersEl.appendChild(track.headerEl);
-    }
+    this._mountTrackAt(track, index);
 
     this.emit('track:add', { track });
     this._refresh();

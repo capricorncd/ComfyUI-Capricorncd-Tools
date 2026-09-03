@@ -58,7 +58,7 @@
 |------|------|------|
 | `positive` | CONDITIONING | H3 正向 conditioning |
 | `latent` | LATENT | 供采样的 H3 latent |
-| `total_frame_count` | INT | 该片段对齐后的总帧数 |
+| `total_frame_count` | INT | 按 **clip_json / data_json 的 fps**（时间轴帧率）对齐到 H3 的 17k+5 网格后的总帧数。例如 7s @ 60fps → 约 430 |
 | `prompt` | STRING | 实际送入 H3 的提示词 |
 | `images` | IMAGE | 堆叠静帧参考（letterbox）；无则为 64×64 空白 |
 | `videos` | IMAGE | 堆叠视频参考帧（letterbox）；无则为空白 |

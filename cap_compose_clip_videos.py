@@ -108,6 +108,50 @@ def _probe_has_audio(path: str) -> bool:
         return False
 
 
+def extract_audio_file(
+    src_path: str,
+    dest_path: str,
+    *,
+    trim_in_sec: float = 0.0,
+    duration_sec: float | None = None,
+) -> None:
+    """Demux / re-encode audio from a video into a WAV for the timeline library."""
+    if not src_path or not os.path.isfile(src_path):
+        raise ValueError(_t("file_not_found", get_last_known_lang()))
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError(_t("ffmpeg_not_found", get_last_known_lang()))
+    if not _probe_has_audio(src_path):
+        raise ValueError(_t("video_has_no_audio", get_last_known_lang()))
+
+    tin = max(0.0, float(trim_in_sec or 0.0))
+    dur = None
+    if duration_sec is not None:
+        try:
+            d = float(duration_sec)
+            if d > 0.01:
+                dur = d
+        except (TypeError, ValueError):
+            dur = None
+
+    os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    if tin > 1e-6:
+        cmd.extend(["-ss", f"{tin:.6f}"])
+    cmd.extend(["-i", _ffmpeg_path(src_path)])
+    if dur is not None:
+        cmd.extend(["-t", f"{dur:.6f}"])
+    cmd.extend([
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "44100",
+        "-ac", "2",
+        _ffmpeg_path(dest_path),
+    ])
+    _run_ffmpeg(cmd)
+    if not os.path.isfile(dest_path) or os.path.getsize(dest_path) <= 0:
+        raise RuntimeError(_t("ffmpeg_failed", get_last_known_lang(), detail="empty audio output"))
+
+
 def _probe_video_size(path: str) -> tuple[int, int] | None:
     kwargs: dict = {"capture_output": True, "text": True, "encoding": "utf-8", "errors": "replace", "timeout": 30}
     if sys.platform == "win32":

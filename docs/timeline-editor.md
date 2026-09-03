@@ -147,31 +147,281 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 
 ## `project_json` (editable)
 
-High-level shape:
+Full project document stored on the node widget. Current shape is **`schema_version: 2`** (integer; independent of the Python package `project_version`). Older documents (schema 1 or top-level `resources`) are migrated to schema 2 on load.
+
+Normally owned by the fullscreen editor — you do not edit it by hand. The tables and example below match what the editor writes via `_buildProject()`.
+
+### Top level
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `project_version` | string | Package version string (e.g. `"0.x.y"`), refreshed on save |
+| `schema_version` | int | Document shape version; currently `2` |
+| `name` | string | Project name |
+| `media` | array | Media catalog (schema 2); clips reference entries by `media_ids` |
+| `settings` | object | Project settings (global prompt, watermark, timeline view state, …) |
+| `tracks` | array | Tracks in `order` |
+
+Legacy `resources` is migration input only and is not written back.
+
+### `media[]` (catalog)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Media id (e.g. `md_…`); referenced by clip `media_ids` |
+| `kind` | string | `image` / `video` / `audio` |
+| `file` | string | Path relative to ComfyUI `input/` (often under `capricorncd-timeline/`) |
+| `location` | string | Usually `"input"` |
+| `name` | string | Display name |
+| `prompt` | string | Per-media prompt |
+| `media_type` | string | Asset-type tag (character / scene / prop / other, or empty) |
+| `tags` | string[] | Tags |
+| `stars` | int? | 1–5; omitted when unrated |
+
+### `settings`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fps` / `width` / `height` | number | Cached copies of node scalars |
+| `global_prompt` | string | Global prompt |
+| `timeline_zoom` | number | Timeline zoom |
+| `current_time` | number | Playhead time (seconds) |
+| `timeline_scroll_left` / `timeline_scroll_top` | number | Timeline scroll |
+| `watermark` | object | Compose-video watermark (below) |
+| `use_clip_specified_video_filename` | bool | Default `true`. When on, Run writes `output_video` and auto-links that path; when off, keep legacy auto-detect |
+| `runtime_only_clip_ids` | string[]? | Temporary; set only during single-clip Run |
+| `gen_video_stamp` | string? | Temporary stamp (`yyyyMMdd-HHmmss`) for aligning `output_video` with the frontend expected path |
+
+#### `settings.watermark`
+
+| Field | Description |
+|-------|-------------|
+| `mode` | Derived: `none` / `text` / `image` (image wins when file present and not disabled) |
+| `text.content` | Watermark text |
+| `text.fontFamily` / `text.fontPath` | Font family / local font path |
+| `text.fontSize` | Font size (~6–400) |
+| `text.letterSpacing` | Letter spacing (~-50–200, default 0) |
+| `text.color` | `#RRGGBB` |
+| `image.file` | Watermark image path; empty = none |
+| `image.disabled` | When `true`, ignore image and fall back to text |
+| `opacity` | 0–100 |
+| `scale` | 10–300 (percent) |
+| `position` | `top-left` / `top-center` / `top-right` / `bottom-left` / `bottom-center` / `bottom-right` / `center` / `random-interval` / `random-fixed` |
+| `margin` | `{ top, right, bottom, left, locked }` in pixels; `locked` links all sides |
+
+### `tracks[]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Track id |
+| `type` | string | `visual` / `audio` / `subtitle` |
+| `role` | string | `main` / `overlay` / `audio` / `subtitle`, … |
+| `name` | string | Display name |
+| `order` | int | Top-to-bottom order (from 0) |
+| `enabled` | bool | Disabled tracks are omitted from runtime `data_json` |
+| `visible` | bool | Invisible tracks are skipped |
+| `muted` | bool | Audio / A/V mute |
+| `locked` | bool | Lock |
+| `color` | string | Track color |
+| `clips` | array | Clips |
+
+**Subtitle tracks** (`type: "subtitle"`) are preview overlays only; they are skipped when the node executes and do not appear in `data_json`.
+
+### `tracks[].clips[]`
+
+Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `duration_ms`.
+
+#### Visual clip (`type: "clip"`)
+
+| Field | Description |
+|-------|-------------|
+| `id` | Clip id |
+| `enabled` / `visible` | Enable / visibility |
+| `start_ms` / `duration_ms` | Timeline range |
+| `media_ids` | Ordered refs into `media[].id` |
+| `source` | Optional; video trim: `in_ms` / `out_ms` / `duration_ms` |
+| `name` | Title |
+| `prompt` / `ai_prompt` | Keyframe prompt / AI result |
+| `use_global_prompt` / `use_ai_prompt` | Use global prompt / AI result |
+| `use_media_prompts` | bool[] aligned with `media_ids` |
+| `media_enabled` | bool[] aligned with `media_ids` |
+| `head_extend_sec` / `tail_extend_sec` | Head / tail extend (seconds) |
+| `generate_preview_video` / `second_sample` | Generation flags |
+| `clip_role` | `multi_ref` / `first_last` / `t2v` / `video_ref` / `video_edit` / `other` |
+| `clip_role_custom` | Custom text when `clip_role === "other"` |
+| `agent` | `MiniMaxH3` / `LTX` / `Bernini` / `Wan` / `other` |
+| `agent_custom` | Custom name when `agent === "other"` |
+| `generated_videos` | Optional bound MP4s: `{ id, file, enabled, muted, note }` (`file` relative to `output/`) |
+| `preview_mode` | Optional; `"generated"` for generated-video preview |
+| `has_audio` / `muted` | Optional for video sources with audio |
+
+#### Audio clip (`type: "audio"`)
+
+| Field | Description |
+|-------|-------------|
+| `media_ids` | Usually one audio media id |
+| `source` | `in_ms` / `out_ms` / `duration_ms` |
+| `muted` | Mute |
+| `fade_in_ms` / `fade_out_ms` | Optional; written when greater than 0 |
+
+#### Subtitle clip (`type: "subtitle"`)
+
+| Field | Description |
+|-------|-------------|
+| `text` | Subtitle body |
+| `font_family` / `font_path` | Font |
+| `font_size` | Size |
+| `letter_spacing` | Letter spacing (default 0) |
+| `color` | `#RRGGBB` |
+| `bold` / `italic` | Bold / italic |
+| `opacity` | 0–1 |
+| `stroke_enabled` / `stroke_color` / `stroke_width` | Stroke |
+| `shadow_enabled` / `shadow_color` / `shadow_blur` / `shadow_offset_x` / `shadow_offset_y` | Shadow |
+| `align` | `left` / `center` / `right` |
+| `v_align` | `top` / `middle` / `bottom` |
+| `offset_x` / `offset_y` | Percent offsets vs canvas |
+
+### Example (schema 2, illustrative)
 
 ```json
 {
-  "project_version": "x.y.z",
-  "schema_version": "x.y.z",
+  "project_version": "0.x.y",
+  "schema_version": 2,
   "name": "Untitled",
-  "resources": [],
+  "media": [
+    {
+      "id": "md_abc123",
+      "kind": "image",
+      "file": "capricorncd-timeline/shot01.png",
+      "location": "input",
+      "name": "shot01.png",
+      "prompt": "",
+      "media_type": "character",
+      "tags": [],
+      "stars": 3
+    }
+  ],
   "settings": {
-    "global_prompt": ""
+    "fps": 24,
+    "width": 1344,
+    "height": 768,
+    "global_prompt": "cinematic lighting",
+    "timeline_zoom": 1.2,
+    "current_time": 0,
+    "timeline_scroll_left": 0,
+    "timeline_scroll_top": 0,
+    "watermark": {
+      "mode": "text",
+      "text": {
+        "content": "Cap",
+        "fontFamily": "Arial",
+        "fontPath": "",
+        "fontSize": 32,
+        "letterSpacing": 2,
+        "color": "#ffffff"
+      },
+      "image": { "file": "", "disabled": false },
+      "opacity": 80,
+      "scale": 100,
+      "position": "bottom-right",
+      "margin": { "top": 24, "right": 24, "bottom": 24, "left": 24, "locked": true }
+    }
   },
   "tracks": [
     {
-      "id": "track_1",
+      "id": "track_main",
       "type": "visual",
+      "role": "main",
+      "name": "Main",
       "order": 0,
       "enabled": true,
       "visible": true,
-      "clips": []
+      "muted": false,
+      "locked": false,
+      "color": "#4ea1ff",
+      "clips": [
+        {
+          "id": "clip_1",
+          "type": "clip",
+          "enabled": true,
+          "visible": true,
+          "start_ms": 0,
+          "duration_ms": 5000,
+          "media_ids": ["md_abc123"],
+          "name": "Clip",
+          "prompt": "close up",
+          "ai_prompt": "",
+          "use_global_prompt": true,
+          "use_ai_prompt": true,
+          "use_media_prompts": [true],
+          "media_enabled": [true],
+          "head_extend_sec": 0,
+          "tail_extend_sec": 0,
+          "generate_preview_video": false,
+          "second_sample": false,
+          "clip_role": "multi_ref",
+          "clip_role_custom": "",
+          "agent": "MiniMaxH3",
+          "agent_custom": "",
+          "generated_videos": [
+            {
+              "id": "gv_1",
+              "file": "MiniMax_H3/clip_1.mp4",
+              "enabled": true,
+              "muted": false,
+              "note": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "track_sub",
+      "type": "subtitle",
+      "role": "subtitle",
+      "name": "Subtitles",
+      "order": 1,
+      "enabled": true,
+      "visible": true,
+      "muted": false,
+      "locked": false,
+      "color": "#ff9e4a",
+      "clips": [
+        {
+          "id": "sub_1",
+          "type": "subtitle",
+          "enabled": true,
+          "visible": true,
+          "start_ms": 0,
+          "duration_ms": 3000,
+          "name": "Hello",
+          "text": "Hello",
+          "font_family": "Arial",
+          "font_path": "",
+          "font_size": 48,
+          "letter_spacing": 0,
+          "color": "#ffffff",
+          "bold": false,
+          "italic": false,
+          "opacity": 1,
+          "stroke_enabled": true,
+          "stroke_color": "#000000",
+          "stroke_width": 3,
+          "shadow_enabled": true,
+          "shadow_color": "#000000",
+          "shadow_blur": 4,
+          "shadow_offset_x": 2,
+          "shadow_offset_y": 2,
+          "align": "center",
+          "v_align": "bottom",
+          "offset_x": 0,
+          "offset_y": 8
+        }
+      ]
     }
   ]
 }
 ```
-
-The fullscreen editor owns this document; you normally do not edit it by hand.
 
 ---
 
@@ -222,6 +472,7 @@ The fullscreen editor owns this document; you normally do not edit it by hand.
 | `start_image` / `end_image` | Absolute paths resolved via ComfyUI `input` |
 | `audios[]` | Audio/video slices overlapping this visual range; mixed by [Data Json Clip Parser](data-json-clip-parser.md) |
 | `z_index` | Track stacking order used when building segments |
+| `output_video` | Optional; when clip-specified filenames are enabled: `CapTimelineEditor/[project]/yyyyMMdd-HHmmss_[clip_id].mp4` (relative to `output/`) |
 
 There is no top-level `audio_path` (that field is Audio Timeline only).
 
