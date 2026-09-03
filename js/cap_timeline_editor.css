@@ -2465,8 +2465,8 @@ body.cat-te-media-dnd-over-tl {
 }
 .cat-te-prompt-copy-btn {
     position: absolute;
-    right: 6px;
-    bottom: 6px;
+    right: 4px;
+    top: -12px;
     z-index: 6;
     width: 22px;
     height: 22px;
@@ -3739,6 +3739,10 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-ai-optimize-left {
     border-right: 1px solid #2a2a48;
 }
+.cat-te-ai-optimize-left .cat-te-prompt-copy-host{
+    display: flex;
+    height: 100%;
+}
 .cat-te-ai-optimize-tabs {
     display: flex;
     gap: 4px;
@@ -3815,6 +3819,10 @@ body.cat-te-media-dnd-over-tl {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+}
+.cat-te-ai-result-field .cat-te-prompt-copy-host {
+    height: 100%;
+    display: flex;
 }
 .cat-te-info-tip {
     position: relative;
