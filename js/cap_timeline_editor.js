@@ -279,6 +279,7 @@ function hookScalarWidgets(node) {
 function onTeGlobalKeyDown(e) {
     const te = CapTimelineEditorApp._open;
     if (!te) return;
+    if (te.handleModalKey(e)) return;
     // Gen-edit modal owns Space / timeline keys — beat both Timeline instances.
     if (te.handleGenEditKey?.(e)) return;
     // Undo/redo first — must beat ComfyUI's capture-phase graph undo.

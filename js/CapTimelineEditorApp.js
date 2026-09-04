@@ -946,6 +946,8 @@ export class CapTimelineEditorApp {
     handleMediaPreviewKey(e) {
         if (!this._overlay?.classList.contains("open")) return false;
         if (this.mediaPreviewModal?.hidden) return false;
+        if (this.rawMetaModal && !this.rawMetaModal.hidden) return false;
+        if (e.target?.closest?.("[role='tab']")) return false;
         if (this._mediaPreviewState?.browse === false) return false;
         if (e.target?.closest?.("input, textarea, select")) return false;
         if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return false;
@@ -2622,6 +2624,7 @@ export class CapTimelineEditorApp {
             this._playbackCtx.close().catch(() => {});
             this._playbackCtx = null;
         }
+        this._modalObserver?.disconnect();
         this._overlay?.remove();
         this._overlay = null;
         CapTimelineEditorApp._instances.delete(this);
@@ -2993,31 +2996,41 @@ export class CapTimelineEditorApp {
                 <button type="button" class="cat-te-media-preview-nav next" title="${T("next_image_title")}" aria-label="${T("next_image_aria")}">›</button>
               </div>
               <div class="cat-te-media-preview-meta">
-                <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
-                  <span class="cat-te-media-preview-desc-label">${T("desc_prompt_label")}</span>
-                  <div class="cat-te-media-preview-desc-wrap">
-                    <textarea class="cat-te-media-preview-desc" rows="3" placeholder="${T("asset_desc_placeholder")}"></textarea>
+                <div class="cat-te-media-info-tabs" role="tablist">
+                  <button type="button" class="cat-te-btn active" role="tab" aria-selected="true" data-media-tab="settings">${T("media_basic_settings")}</button>
+                  <button type="button" class="cat-te-btn" role="tab" aria-selected="false" data-media-tab="info">${T("media_file_info")}</button>
+                </div>
+                <div class="cat-te-media-settings-panel" role="tabpanel">
+                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
+                    <span class="cat-te-media-preview-desc-label">${T("desc_prompt_label")}</span>
+                    <div class="cat-te-media-preview-desc-wrap">
+                      <textarea class="cat-te-media-preview-desc" rows="3" placeholder="${T("asset_desc_placeholder")}"></textarea>
+                    </div>
+                  </div>
+                  <div class="cat-te-media-preview-meta-grid">
+                    <label class="cat-te-media-preview-meta-row">
+                      <span>${T("type_label")}</span>
+                      <select class="cat-te-media-preview-type">
+                        <option value="">${T("not_set_option")}</option>
+                        <option value="character">${T("asset_type_character")}</option>
+                        <option value="scene">${T("asset_type_scene")}</option>
+                        <option value="prop">${T("asset_type_prop")}</option>
+                        <option value="other">${T("asset_type_other")}</option>
+                      </select>
+                    </label>
+                    <label class="cat-te-media-preview-meta-row cat-te-media-preview-type-custom-row" hidden>
+                      <span>${T("custom_type_label")}</span>
+                      <input class="cat-te-media-preview-type-custom" type="text" placeholder="${T("enter_type_placeholder")}" />
+                    </label>
+                    <label class="cat-te-media-preview-meta-row cat-te-media-preview-tags-row">
+                      <span>${T("tags_label")}</span>
+                      <input class="cat-te-media-preview-tags" type="text" placeholder="${T("tags_placeholder")}" />
+                    </label>
                   </div>
                 </div>
-                <div class="cat-te-media-preview-meta-grid">
-                  <label class="cat-te-media-preview-meta-row">
-                    <span>${T("type_label")}</span>
-                    <select class="cat-te-media-preview-type">
-                      <option value="">${T("not_set_option")}</option>
-                      <option value="character">${T("asset_type_character")}</option>
-                      <option value="scene">${T("asset_type_scene")}</option>
-                      <option value="prop">${T("asset_type_prop")}</option>
-                      <option value="other">${T("asset_type_other")}</option>
-                    </select>
-                  </label>
-                  <label class="cat-te-media-preview-meta-row cat-te-media-preview-type-custom-row" hidden>
-                    <span>${T("custom_type_label")}</span>
-                    <input class="cat-te-media-preview-type-custom" type="text" placeholder="${T("enter_type_placeholder")}" />
-                  </label>
-                  <label class="cat-te-media-preview-meta-row cat-te-media-preview-tags-row">
-                    <span>${T("tags_label")}</span>
-                    <input class="cat-te-media-preview-tags" type="text" placeholder="${T("tags_placeholder")}" />
-                  </label>
+                <div class="cat-te-media-info-panel" role="tabpanel" hidden></div>
+                <div class="cat-te-media-meta-actions">
+                  <button type="button" class="cat-te-btn cat-te-media-meta-open">${T("media_view_meta")}</button>
                 </div>
               </div>
               <div class="cat-te-media-preview-footer">
@@ -3026,6 +3039,15 @@ export class CapTimelineEditorApp {
                   <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-media-preview-insert">${T("insert_at_position_btn")}</button>
                 </div>
               </div>
+            </div>
+          </div>
+          <div class="cat-te-modal-backdrop cat-te-raw-meta-modal" hidden>
+            <div class="cat-te-modal cat-te-raw-meta-dialog" role="dialog" aria-modal="true" aria-label="${T("media_raw_meta")}">
+              <div class="cat-te-modal-header">
+                <span>${T("media_raw_meta")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-raw-meta-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
+              </div>
+              <pre class="cat-te-raw-meta-text" tabindex="0"></pre>
             </div>
           </div>
           <div class="cat-te-modal-backdrop cat-te-clip-items-modal" hidden>
@@ -3373,6 +3395,7 @@ export class CapTimelineEditorApp {
                   </label>
                   <div class="cat-te-ai-optimize-actions">
                     <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span></button>
+                    <button type="button" class="cat-te-btn cat-te-ai-run">${iconHtml("play", 12)}<span>${T("menu_run")}</span></button>
                   </div>
                 </div>
               </div>
@@ -3610,7 +3633,6 @@ export class CapTimelineEditorApp {
         this.outputVideosAutoLinkBtn = el.querySelector(".cat-te-output-videos-auto-link");
         this.outputVideosTimeButtons = el.querySelectorAll(".cat-te-output-videos-time-btn");
         this.outputVideosTitle = el.querySelector(".cat-te-output-videos-title");
-        this.outputVideosDragHandle = el.querySelector(".cat-te-output-videos-drag");
         this.composeModal = el.querySelector(".cat-te-compose-modal");
         this.composePrefixInput = el.querySelector(".cat-te-compose-prefix");
         this.composeFilenameInput = el.querySelector(".cat-te-compose-filename");
@@ -3682,6 +3704,53 @@ export class CapTimelineEditorApp {
         el.querySelector(".cat-te-add-material-close").addEventListener("click", () => this._closeAddMaterial());
         el.querySelector(".cat-te-add-material-confirm").addEventListener("click", () => void this._confirmAddMaterial());
 
+        this.mediaInfoPanel = el.querySelector(".cat-te-media-info-panel");
+        this.mediaSettingsPanel = el.querySelector(".cat-te-media-settings-panel");
+        this.rawMetaModal = el.querySelector(".cat-te-raw-meta-modal");
+        this.rawMetaText = el.querySelector(".cat-te-raw-meta-text");
+        this.mediaMetaOpenBtn = el.querySelector(".cat-te-media-meta-open");
+        const tabs = [...el.querySelectorAll("[data-media-tab]")];
+        const selectTab = (tab) => {
+            for (const button of tabs) {
+                const active = button === tab;
+                button.classList.toggle("active", active);
+                button.setAttribute("aria-selected", String(active));
+                button.tabIndex = active ? 0 : -1;
+            }
+            this.mediaSettingsPanel.hidden = tab.dataset.mediaTab !== "settings";
+            this.mediaInfoPanel.hidden = tab.dataset.mediaTab !== "info";
+            if (!this.mediaInfoPanel.hidden) void this._loadMediaFileInfo();
+        };
+        for (const tab of tabs) {
+            tab.tabIndex = tab.dataset.mediaTab === "settings" ? 0 : -1;
+            tab.addEventListener("click", () => selectTab(tab));
+            tab.addEventListener("keydown", (e) => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const next = tabs[e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (tabs.indexOf(tab) + 1) % tabs.length];
+                selectTab(next);
+                next.focus();
+            });
+        }
+        this.mediaMetaOpenBtn.addEventListener("click", () => {
+            this.rawMetaModal.hidden = false;
+            el.querySelector(".cat-te-raw-meta-close").focus();
+            void this._loadMediaFileInfo(true);
+        });
+        el.querySelector(".cat-te-raw-meta-close").addEventListener("click", () => this._closeRawMeta());
+        this.rawMetaModal.addEventListener("click", (e) => {
+            if (e.target === this.rawMetaModal) this._closeRawMeta();
+        });
+        this.rawMetaModal.addEventListener("keydown", (e) => {
+            e.stopPropagation();
+            if (e.key === "Escape") { e.preventDefault(); this._closeRawMeta(); }
+            if (e.key === "Tab") {
+                e.preventDefault();
+                const close = el.querySelector(".cat-te-raw-meta-close");
+                (e.target === close ? this.rawMetaText : close).focus();
+            }
+        });
         el.querySelector(".cat-te-media-preview-close").addEventListener("click", () => this._closeMediaPreview());
         this.mediaPreviewPrevBtn?.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -3882,7 +3951,7 @@ export class CapTimelineEditorApp {
             });
         });
         this.outputVideosBody?.addEventListener("scroll", () => this._hideOutputVideoHoverPreview(), { passive: true });
-        this._bindOutputVideosPanelDrag();
+        this._bindModalInteractions();
         el.querySelector(".cat-te-compose-close")?.addEventListener("click", () => this._closeComposeModal());
         el.querySelector(".cat-te-compose-cancel")?.addEventListener("click", () => this._closeComposeModal());
         this.composeRunBtn?.addEventListener("click", () => {
@@ -3917,6 +3986,12 @@ export class CapTimelineEditorApp {
             if (this._aiOptimizeBusy) this._cancelAiOptimize();
             else void this._runAiOptimize();
         });
+        el.querySelector(".cat-te-ai-run").addEventListener("click", () => {
+            const clip = this._findClipById(this._aiOptimizeClipId);
+            if (!clip) return;
+            this._onAiResultInput();
+            void this._runClipDownstream(clip);
+        });
         this.aiResultInput?.addEventListener("input", () => this._onAiResultInput());
         this.aiLangSelect?.addEventListener("change", () => {
             const lang = this._aiOutputLanguage();
@@ -3943,20 +4018,20 @@ export class CapTimelineEditorApp {
 
         el.addEventListener("keydown", e => {
             const typing = !!e.target?.closest?.("input, textarea, select, [contenteditable='true']");
-            if (!this.mediaPreviewModal.hidden && this._mediaPreviewState?.browse !== false
+            if (this._blockingModal === this.mediaPreviewModal && this._mediaPreviewState?.browse !== false
                 && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
                 this._stepMediaPreview(e.key === "ArrowRight" ? 1 : -1);
                 e.preventDefault();
                 e.stopPropagation();
                 return;
             }
-            if (!this.genVideoModal?.hidden && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
+            if (this._blockingModal === this.genVideoModal && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
                 this._stepGenVideoPreview(e.key === "ArrowRight" ? 1 : -1);
                 e.preventDefault();
                 e.stopPropagation();
                 return;
             }
-            if (this.aiOptimizeModal && !this.aiOptimizeModal.hidden
+            if (this._blockingModal === this.aiOptimizeModal
                 && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
                 void this._stepAiOptimizeClip(e.key === "ArrowRight" ? 1 : -1);
                 e.preventDefault();
@@ -8186,7 +8261,6 @@ export class CapTimelineEditorApp {
         this._syncOutputPickerChrome();
         this._syncOutputVideosPickerTitle(clip);
         if (!alreadyOpen || kindChanged) {
-            this._ensureOutputVideosPanelPos();
             this.outputVideosModal.hidden = false;
             if (this.outputVideosFilter) this.outputVideosFilter.value = "";
             this._outputVideosTimeRange = OUTPUT_VIDEOS_TIME_RANGES[0].id;
@@ -8244,43 +8318,98 @@ export class CapTimelineEditorApp {
         this.outputVideosTitle.textContent = name ? `${base} · ${name}` : base;
     }
 
-    _ensureOutputVideosPanelPos() {
-        const panel = this.outputVideosModal;
-        if (!panel || panel.style.left || panel.style.top) return;
-        const width = Math.min(560, Math.max(280, window.innerWidth - 48));
-        const left = Math.max(16, window.innerWidth - width - 24);
-        const top = Math.max(16, Math.min(120, window.innerHeight - 200));
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
+    _bindModalInteractions() {
+        const modals = [...this._overlay.querySelectorAll(":scope > .cat-te-modal-backdrop, :scope > .cat-te-floating-panel")];
+        this._openModals = [];
+        const sync = () => {
+            const previous = this._blockingModal;
+            this._openModals = this._openModals.filter((modal) => !modal.hidden);
+            for (const modal of modals) {
+                if (modal.hidden || this._openModals.includes(modal)) continue;
+                const dialog = modal.querySelector(".cat-te-modal");
+                dialog.style.position = "";
+                dialog.style.left = "";
+                dialog.style.top = "";
+                this._openModals.push(modal);
+            }
+            const blocking = this._openModals.filter((modal) => modal !== this.outputVideosModal || modal.classList.contains("is-audio-picker"));
+            this._blockingModal = blocking.at(-1) || null;
+            for (const modal of this._openModals) {
+                modal.style.zIndex = String(modal === this.outputVideosModal && !modal.classList.contains("is-audio-picker")
+                    ? 100009 : 100010 + blocking.indexOf(modal));
+            }
+            for (const child of this._overlay.children) child.inert = !!this._blockingModal && child !== this._blockingModal;
+            if (this._timeline) this._timeline._keyboardSuspended = !!this._blockingModal;
+            if (previous !== this._blockingModal) {
+                if (this._blockingModal) {
+                    if (!this._blockingModal.contains(document.activeElement)) this._blockingModal.querySelector(".cat-te-modal-close")?.focus();
+                } else if (previous) this._overlay.focus();
+            }
+        };
+        this._modalObserver = new MutationObserver((records) => {
+            for (const record of records) {
+                if (record.attributeName === "hidden" && record.oldValue === null) {
+                    this._openModals = this._openModals.filter((modal) => modal !== record.target);
+                }
+            }
+            sync();
+        });
+        for (const modal of modals) {
+            this._modalObserver.observe(modal, { attributes: true, attributeFilter: ["hidden", "class"], attributeOldValue: true });
+            const dialog = modal.querySelector(".cat-te-modal");
+            const handle = dialog.querySelector(".cat-te-modal-header");
+            handle.addEventListener("pointerdown", (e) => {
+                if (e.button !== 0 || e.target.closest("button, input, select, textarea, a, [contenteditable='true']")) return;
+                e.preventDefault();
+                const rect = dialog.getBoundingClientRect();
+                const ox = e.clientX - rect.left;
+                const oy = e.clientY - rect.top;
+                handle.setPointerCapture(e.pointerId);
+                dialog.classList.add("is-dragging");
+                const move = (event) => {
+                    dialog.style.position = "fixed";
+                    dialog.style.left = `${Math.max(8, Math.min(window.innerWidth - rect.width - 8, event.clientX - ox))}px`;
+                    dialog.style.top = `${Math.max(8, Math.min(window.innerHeight - rect.height - 8, event.clientY - oy))}px`;
+                };
+                const end = () => {
+                    dialog.classList.remove("is-dragging");
+                    handle.removeEventListener("pointermove", move);
+                    handle.removeEventListener("lostpointercapture", end);
+                };
+                handle.addEventListener("pointermove", move);
+                handle.addEventListener("lostpointercapture", end);
+            });
+        }
+        sync();
     }
 
-    _bindOutputVideosPanelDrag() {
-        const panel = this.outputVideosModal;
-        const handle = this.outputVideosDragHandle;
-        if (!panel || !handle || handle._catTeDragBound) return;
-        handle._catTeDragBound = true;
-        handle.addEventListener("mousedown", (e) => {
-            if (e.button !== 0) return;
-            if (e.target.closest?.("button, input, select, textarea, a")) return;
+    handleModalKey(e) {
+        const modal = this._blockingModal;
+        if (!modal || !this._overlay?.classList.contains("open")) return false;
+        if (e.key === "Escape") {
             e.preventDefault();
-            const rect = panel.getBoundingClientRect();
-            const ox = e.clientX - rect.left;
-            const oy = e.clientY - rect.top;
-            panel.classList.add("is-dragging");
-            const onMove = (ev) => {
-                const left = Math.min(window.innerWidth - 48, Math.max(8, ev.clientX - ox));
-                const top = Math.min(window.innerHeight - 48, Math.max(8, ev.clientY - oy));
-                panel.style.left = `${left}px`;
-                panel.style.top = `${top}px`;
-            };
-            const onUp = () => {
-                panel.classList.remove("is-dragging");
-                window.removeEventListener("mousemove", onMove, true);
-                window.removeEventListener("mouseup", onUp, true);
-            };
-            window.addEventListener("mousemove", onMove, true);
-            window.addEventListener("mouseup", onUp, true);
-        });
+            e.stopImmediatePropagation();
+            modal.querySelector(".cat-te-modal-close")?.click();
+            return true;
+        }
+        if (e.key === "Tab") {
+            const fields = [...modal.querySelectorAll("button, input, select, textarea, a[href], [tabindex]")]
+                .filter((field) => !field.disabled && field.tabIndex >= 0 && field.getClientRects().length);
+            const next = e.shiftKey ? fields.at(-1) : fields[0];
+            if (!modal.contains(document.activeElement) || document.activeElement === (e.shiftKey ? fields[0] : fields.at(-1))) {
+                e.preventDefault();
+                next?.focus();
+            }
+        }
+        if (modal === this.genEditModal && this.handleGenEditKey(e)) return true;
+        if (modal === this.mediaPreviewModal && this.handleMediaPreviewKey(e)) return true;
+        if (modal === this.aiOptimizeModal && this.handleAiOptimizeKey(e)) return true;
+        const typing = e.target?.closest?.("input, textarea, select, [contenteditable='true']");
+        if (!typing && (e.key === "Delete" || e.key === "Backspace" || ((e.ctrlKey || e.metaKey) && ["z", "y", "v", "b", "g"].includes(e.key.toLowerCase())))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+        return true;
     }
 
     _closeOutputVideosPicker() {
@@ -8470,7 +8599,7 @@ export class CapTimelineEditorApp {
         const gap = 28;
         const margin = 8;
         // Keep the whole preview clear of the floating picker (usually docked right).
-        const panel = this.outputVideosModal?.getBoundingClientRect?.();
+        const panel = this.outputVideosModal?.querySelector(".cat-te-modal")?.getBoundingClientRect();
         const preferLeft = (panel && Number.isFinite(panel.left) ? panel.left : rect.left) - vw - gap;
         const preferRight = (panel && Number.isFinite(panel.right) ? panel.right : rect.right) + gap;
         let left;
@@ -11375,6 +11504,7 @@ export class CapTimelineEditorApp {
                 previewBadge.type = "button";
                 previewBadge.className = "cat-te-end-badge cat-te-clip-preview-badge";
                 previewBadge.addEventListener("mouseenter", () => {
+                    if (this._timeline?._playing) return;
                     const live = this._runPreviewByClipId.get(String(clip.id));
                     if (live?.url) {
                         this._startResourceGenProgramPreview(
@@ -11633,6 +11763,10 @@ export class CapTimelineEditorApp {
         this.mediaPreviewTitle.textContent = n > 1 ? `${index + 1} / ${n}  ${name}` : name;
         this._renderMediaPreviewStars(kind, file);
         this._fillMediaPreviewMeta(kind, file);
+        this._mediaInfoRequest = null;
+        this._mediaRawRequest = null;
+        this.mediaInfoPanel.replaceChildren();
+        if (!this.mediaInfoPanel.hidden) void this._loadMediaFileInfo();
         this._updateMediaPreviewNav();
         this._syncClipPanelFromMediaPreview(index);
 
@@ -11742,8 +11876,67 @@ export class CapTimelineEditorApp {
         this.mediaPreviewStage.replaceChildren();
         this.mediaPreviewStars?.replaceChildren();
         this.mediaPreviewModal.hidden = true;
+        this.rawMetaModal.hidden = true;
+        this._mediaInfoRequest = null;
+        this._mediaRawRequest = null;
         this._mediaPreviewState = null;
         this._applyMediaPreviewChrome();
+    }
+
+    _closeRawMeta() {
+        this.rawMetaModal.hidden = true;
+        this.mediaMetaOpenBtn.focus();
+    }
+
+    async _loadMediaFileInfo(raw = false) {
+        const item = this._mediaPreviewItem();
+        if (!item) {
+            (raw ? this.rawMetaText : this.mediaInfoPanel).textContent = T("media_not_recorded");
+            return;
+        }
+        const request = {};
+        const requestKey = raw ? "_mediaRawRequest" : "_mediaInfoRequest";
+        this[requestKey] = request;
+        const target = raw ? this.rawMetaText : this.mediaInfoPanel;
+        target.textContent = T("loading_ellipsis");
+        try {
+            const url = this._assetFileUrl(item.file, item.kind).replace("/asset_file?", "/asset_metadata?") + (raw ? "&raw=1" : "");
+            const response = await api.fetchApi(url);
+            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+            const info = await response.json();
+            if (this[requestKey] !== request) return;
+            if (raw) {
+                target.textContent = info.metadata_error ? T("load_failed", { msg: info.metadata_error }) : info.raw || T("media_not_recorded");
+                return;
+            }
+            target.replaceChildren();
+            const date = (value) => value ? new Date(value).toLocaleString() : "";
+            const fields = [
+                ["media_generation_prompt", info.prompt],
+                ["media_asset_description", info.description],
+                ["media_created_at", date(info.created_at)],
+                ["media_modified_at", date(info.modified_at)],
+                ["media_file_path", info.path],
+                ["media_file_size", `${Number(info.size_bytes).toLocaleString()} bytes`],
+            ];
+            for (const [label, value] of fields) {
+                const row = document.createElement("div");
+                row.className = "cat-te-media-file-field";
+                const title = document.createElement("span");
+                title.textContent = T(label);
+                const text = document.createElement("div");
+                text.textContent = value || T("media_not_recorded");
+                row.append(title, text);
+                target.appendChild(row);
+            }
+            if (info.metadata_error) {
+                const error = document.createElement("div");
+                error.textContent = T("load_failed", { msg: info.metadata_error });
+                target.appendChild(error);
+            }
+        } catch (error) {
+            if (this[requestKey] === request) target.textContent = T("load_failed", { msg: error.message });
+        }
     }
 
     _fillMediaPreviewMeta(kind, file) {

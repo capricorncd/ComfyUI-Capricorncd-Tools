@@ -7,6 +7,11 @@ import sys
 from aiohttp import web
 
 from .cap_i18n import resolve_lang, t
+from .cap_load_image_metadata import (
+    NODE_CLASS_MAPPINGS as _CLM_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _CLM_NAMES,
+    register_metadata_routes,
+)
 from .prompt_input_rich import CAP_RichPromptInput
 from .cap_audio_timeline import (
     NODE_CLASS_MAPPINGS as _CAT_CLASS,
@@ -85,6 +90,7 @@ from .timecode import (
 WEB_DIRECTORY = "./js"
 
 NODE_CLASS_MAPPINGS = {
+    **_CLM_CLASS,
     "CAP_RichPromptInput": CAP_RichPromptInput,
     **_CAT_CLASS,
     **_CDP_CLASS,
@@ -106,6 +112,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    **_CLM_NAMES,
     "CAP_RichPromptInput": "Rich Prompt Input",
     **_CAT_NAMES,
     **_CDP_NAMES,
@@ -187,6 +194,8 @@ def _register_routes():
         return
 
     _soft_patch_h3_motion_context_load_latent()
+
+    register_metadata_routes(routes)
 
     @routes.get("/audio_keyframe_timeline/uploaded")
     async def api_list_uploaded(request: web.Request) -> web.Response:

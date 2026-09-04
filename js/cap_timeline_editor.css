@@ -238,6 +238,9 @@ body.cat-te-row-resize * {
     justify-content: center;
 }
 .cat-te-modal-backdrop[hidden] { display: none; }
+.cat-te-modal-backdrop { pointer-events: auto; }
+.cat-te-modal-header { cursor: move; touch-action: none; }
+.cat-te-modal.is-dragging { user-select: none; }
 
 .cat-te-modal {
     width: 320px;
@@ -2799,6 +2802,89 @@ body.cat-te-media-dnd-over-tl {
 }
 .cat-te-media-preview-meta textarea { resize: vertical; min-height: 54px; }
 
+.cat-te-media-preview-modal .cat-te-media-preview-dialog {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.cat-te-media-preview-modal .cat-te-media-preview-header,
+.cat-te-media-preview-modal .cat-te-media-preview-footer {
+    grid-column: 1 / -1;
+}
+.cat-te-media-preview-modal .cat-te-media-preview-body {
+    min-width: 0;
+}
+.cat-te-media-preview-modal .cat-te-media-preview-meta {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-top: none;
+    border-left: 1px solid #2a2a48;
+}
+.cat-te-media-preview-modal .cat-te-media-preview-meta > * {
+    flex-shrink: 0;
+}
+.cat-te-media-preview-modal .cat-te-media-preview-meta-grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+.cat-te-media-info-tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 1px solid #2a2a48;
+    padding-bottom: 8px;
+}
+.cat-te-media-preview-modal .cat-te-media-settings-panel,
+.cat-te-media-preview-modal .cat-te-media-info-panel {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.cat-te-media-settings-panel[hidden],
+.cat-te-media-info-panel[hidden] {
+    display: none !important;
+}
+.cat-te-media-settings-panel > * { flex-shrink: 0; }
+.cat-te-media-meta-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 8px;
+    border-top: 1px solid #2a2a48;
+}
+.cat-te-media-file-field {
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.cat-te-media-file-field > span { color: #8888b0; }
+.cat-te-media-file-field > div {
+    color: #cbd5e0;
+    white-space: pre-wrap;
+    user-select: text;
+}
+.cat-te-raw-meta-modal { z-index: 100020; }
+.cat-te-raw-meta-dialog {
+    width: min(960px, 90vw);
+    height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+.cat-te-raw-meta-dialog .cat-te-modal-header { flex-shrink: 0; }
+.cat-te-raw-meta-text {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 16px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    color: #cbd5e0;
+    font-size: 12px;
+}
+
 .cat-te-clip-items-dialog {
     width: min(640px, 92vw);
     max-height: 80vh;
@@ -3124,17 +3210,17 @@ body.cat-te-media-dnd-over-tl {
 /* Floating (no dimming mask): keep timeline/clips clickable underneath. */
 .cat-te-floating-panel.cat-te-output-videos-modal {
     position: fixed;
-    inset: auto;
-    left: auto;
-    top: auto;
-    right: auto;
-    bottom: auto;
+    inset: 0;
     z-index: 100010;
     background: transparent;
-    display: block;
+    display: flex;
     pointer-events: none;
-    align-items: unset;
-    justify-content: unset;
+    align-items: center;
+    justify-content: center;
+}
+.cat-te-floating-panel.cat-te-output-videos-modal.is-audio-picker {
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: auto;
 }
 .cat-te-floating-panel.cat-te-output-videos-modal[hidden] {
     display: none !important;
@@ -3155,12 +3241,6 @@ body.cat-te-media-dnd-over-tl {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-.cat-te-floating-panel.cat-te-output-videos-modal.is-dragging {
-    user-select: none;
-}
-.cat-te-floating-panel.cat-te-output-videos-modal.is-dragging .cat-te-output-videos-dialog {
-    opacity: 0.96;
 }
 .cat-te-output-videos-toolbar {
     padding: 8px 12px;
@@ -4000,6 +4080,7 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-ai-optimize-actions {
     display: flex;
     justify-content: flex-end;
+    gap: 12px;
     flex-shrink: 0;
 }
 .cat-te-ai-generate {
