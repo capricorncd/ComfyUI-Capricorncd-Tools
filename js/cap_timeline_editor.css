@@ -3152,6 +3152,7 @@ body.cat-te-media-dnd-over-tl {
     padding: 0;
 }
 .cat-te-clip-video-name:hover { color: #fff; }
+.cat-te-clip-video-insert,
 .cat-te-clip-video-mute {
     flex-shrink: 0;
     width: 22px;
@@ -3166,11 +3167,13 @@ body.cat-te-media-dnd-over-tl {
     align-items: center;
     justify-content: center;
 }
+.cat-te-clip-video-insert svg,
 .cat-te-clip-video-mute svg {
     width: 14px;
     height: 14px;
     display: block;
 }
+.cat-te-clip-video-insert:hover,
 .cat-te-clip-video-mute:hover {
     color: #ddd;
     background: rgba(255, 255, 255, 0.06);

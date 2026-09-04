@@ -30,8 +30,7 @@ function refreshMirrorColors(ta) {
 }
 function formatLineHtml(line) {
     const isComment = line.startsWith("#");
-    let content = escapeHtml(line).replace(/ {2}/g, " &nbsp;");
-    if (!content) content = "\u00a0";
+    const content = escapeHtml(line);
     if (isComment) return `<span class="cap-rich-comment" style="opacity:0.4">${content}</span>`;
     return content;
 }
@@ -42,8 +41,8 @@ export function updateRichPromptMirror(ta) {
     syncMirrorLayout(ta);
     const lines = ta.value.split("\n");
     m.innerHTML =
-        lines.map(formatLineHtml).join("<br>") +
-        (ta.value.endsWith("\n") ? "<br>" : "");
+        lines.map(formatLineHtml).join("\n") +
+        (ta.value.endsWith("\n") ? "\u200b" : "");
     m.scrollTop = ta.scrollTop;
     m.scrollLeft = ta.scrollLeft;
 }
@@ -57,6 +56,8 @@ function syncMirrorLayout(ta) {
         "lineHeight", "letterSpacing", "wordSpacing",
         "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
         "textIndent", "tabSize", "whiteSpace", "wordBreak", "overflowWrap",
+        "textAlign", "textTransform", "direction", "fontStretch", "fontVariant",
+        "fontKerning", "fontFeatureSettings", "fontVariationSettings", "textRendering",
     ];
     for (const key of copy) m.style[key] = cs[key];
     // Keep mirror borderless: border-box + copied border would shrink wrap width vs textarea.
@@ -64,6 +65,7 @@ function syncMirrorLayout(ta) {
     m.style.border = "none";
     m.style.margin = "0";
     m.style.outline = "none";
+    m.style.scrollbarGutter = "auto";
     if (!cs.whiteSpace || cs.whiteSpace === "normal") {
         m.style.whiteSpace = "pre-wrap";
     }
@@ -73,10 +75,12 @@ function syncMirrorLayout(ta) {
     refreshMirrorColors(ta);
 
     if (ta._capRichMode === "overlay" || ta._capRichMode === "widget") {
-        m.style.top = `${ta.offsetTop}px`;
-        m.style.left = `${ta.offsetLeft}px`;
-        m.style.width = `${ta.clientWidth}px`;
-        m.style.height = `${ta.clientHeight}px`;
+        const contentBox = ta._capMirrorContentBox;
+        m.style.top = `${ta.offsetTop + parseFloat(cs.borderTopWidth)}px`;
+        m.style.left = `${ta.offsetLeft + parseFloat(cs.borderLeftWidth) + ta.clientLeft - Math.round(parseFloat(cs.borderLeftWidth))}px`;
+        // clientWidth/clientHeight round away subpixels and can change line wrapping.
+        m.style.width = `${contentBox ? contentBox.width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) : ta.clientWidth}px`;
+        m.style.height = `${contentBox ? contentBox.height + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) : ta.clientHeight}px`;
         m.style.right = "";
         m.style.bottom = "";
     }
@@ -168,11 +172,12 @@ function ensureMirror(ta, mode) {
     }
 
     ta._capMirror = mirror;
+    ta._capMirrorContentBox = null;
     if (!ta._capRichMode) ta._capRichMode = mode;
     syncMirrorLayout(ta);
     if (!ta._capMirrorResizeObs) {
-        ta._capMirrorResizeObs = new ResizeObserver(() => {
-            syncMirrorLayout(ta);
+        ta._capMirrorResizeObs = new ResizeObserver(([entry]) => {
+            ta._capMirrorContentBox = { width: entry.contentRect.width, height: entry.contentRect.height };
             updateRichPromptMirror(ta);
         });
         // content-box: scrollbar show/hide changes wrap width without border-box resize.

@@ -4,6 +4,7 @@ export const SVG_ATTRS =
     'viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
 
 export const ICONS = {
+    pictureInPicture: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10h6V4"/><path d="m2 4 6 6"/><path d="M21 10V7a2 2 0 0 0-2-2h-7"/><path d="M3 14v2a2 2 0 0 0 2 2h3"/><rect x="12" y="14" width="10" height="7" rx="1"/></svg>`,
     close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     insert: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7 7 17"/><path d="M17 17H7V7"/></svg>`,
     replace: `<svg data-v-39ea7f52="" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-replace-icon lucide-replace lucide-icon customizable"><path d="M14 4a1 1 0 0 1 1-1"></path><path d="M15 10a1 1 0 0 1-1-1"></path><path d="M21 4a1 1 0 0 0-1-1"></path><path d="M21 9a1 1 0 0 1-1 1"></path><path d="m3 7 3 3 3-3"></path><path d="M6 10V5a2 2 0 0 1 2-2h2"></path><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>`,
