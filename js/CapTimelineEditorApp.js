@@ -708,11 +708,10 @@ export class CapTimelineEditorApp {
         /** When true, Run associates CapTimelineEditor/..._{clipId}.mp4 by specified name. */
         this._useClipSpecifiedVideoFilename = true;
         /**
-         * Timeline edit mode:
-         * - resource: edit source media / prompts (default)
-         * - generated: edit generated videos (trim / duration display)
+         * Per-clip preview uses meta.previewMode ("media" | "generated").
+         * Legacy projects may still carry settings.timeline_edit_mode.
          */
-        this._timelineEditMode = "resource";
+        this._legacyTimelineEditMode = null;
         /** Temporary stamp written into project settings for one queuePrompt. */
         this._genVideoStamp = null;
         this._systemFonts = null;
@@ -5058,12 +5057,7 @@ export class CapTimelineEditorApp {
     }
 
     _clipUsesGeneratedPreview(meta) {
-        if (!this._isGeneratedEditMode()) return false;
-        return !!this._firstEnabledGeneratedVideo(meta);
-    }
-
-    _isGeneratedEditMode() {
-        return this._timelineEditMode === "generated";
+        return meta?.previewMode === "generated" && !!this._firstEnabledGeneratedVideo(meta);
     }
 
     _genEffectiveDurationSec(gen) {
@@ -5116,7 +5110,7 @@ export class CapTimelineEditorApp {
     }
 
     _rememberResourceTiming(clip, meta) {
-        if (!clip || this._isGeneratedEditMode()) return;
+        if (!clip) return;
         const m = meta || this._ensureClipMeta(clip);
         m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
         m.resourceDurationSec = Math.max(0.05, Number(clip.duration) || 0.05);
@@ -5156,36 +5150,52 @@ export class CapTimelineEditorApp {
         return gen.duration_sec;
     }
 
-    _setTimelineEditMode(mode) {
-        const next = mode === "generated" ? "generated" : "resource";
-        if (this._timelineEditMode === next) {
+    _setClipPreviewMode(clip, mode, { recordUndo = true, refresh = true } = {}) {
+        if (!clip) return false;
+        const m = this._ensureClipMeta(clip);
+        const gen = this._firstEnabledGeneratedVideo(m);
+        const next = mode === "generated" && gen ? "generated" : "media";
+        if (m.previewMode === next) return false;
+        if (recordUndo) this._recordUndo();
+        m.previewMode = next;
+        this._meta.set(clip.id, m);
+        if (refresh) {
+            this._decorateClip(clip);
+            this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
+            this._scheduleProgramPreview();
+            if (this._timeline?._playing) this._startAudioPlayback();
             this._updateEditModeToolbar();
-            return;
+            this._saveToWidgets();
         }
-        this._recordUndo();
-        this._timelineEditMode = next;
-        void this._applyTimelineEditMode();
-        this._saveToWidgets();
+        return true;
     }
 
+    _toggleClipPreviewMode(clip) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        if (!this._firstEnabledGeneratedVideo(m)) return;
+        const next = m.previewMode === "generated" ? "media" : "generated";
+        this._setClipPreviewMode(clip, next);
+    }
+
+    /** Refresh clip decorations / thumbnails from per-clip previewMode. */
     async _applyTimelineEditMode() {
-        const genMode = this._isGeneratedEditMode();
-        if (genMode) {
-            this._hideOutputVideoHoverPreview();
-            this._stopResourceGenProgramPreview();
-        }
+        this.tlHost?.classList.remove("is-gen-edit-mode");
         const jobs = [];
         for (const track of this._allImageTracks()) {
             for (const clip of track.clips) {
                 const m = this._ensureClipMeta(clip);
                 this._ensureResourceDuration(clip, m);
                 this._ensureResourceStart(clip, m);
-                const gen = this._firstEnabledGeneratedVideo(m);
-                m.previewMode = genMode && gen ? "generated" : "media";
+                if (!this._firstEnabledGeneratedVideo(m) && m.previewMode === "generated") {
+                    m.previewMode = "media";
+                }
                 this._meta.set(clip.id, m);
-                // Re-base from resource start so re-entering gen mode does not cascade.
                 clip.startTime = this._ensureResourceStart(clip, m);
-                if (genMode && gen) {
+                const gen = this._clipUsesGeneratedPreview(m)
+                    ? this._firstEnabledGeneratedVideo(m)
+                    : null;
+                if (gen) {
                     jobs.push((async () => {
                         await this._ensureGenVideoDuration(gen);
                         this._applyClipDisplayDuration(clip, m, gen);
@@ -5200,12 +5210,7 @@ export class CapTimelineEditorApp {
             }
         }
         if (jobs.length) await Promise.all(jobs);
-        // Gen mode no longer expands clip duration — keep resource layout.
-        if (!genMode) {
-            this._restoreLinkedTrackResourceStarts();
-        }
         this._updateEditModeToolbar();
-        this.tlHost?.classList.toggle("is-gen-edit-mode", genMode);
         this._refreshTimelineDuration();
         this._scheduleProgramPreview();
         if (this._timeline?._playing) this._startAudioPlayback();
@@ -5300,12 +5305,8 @@ export class CapTimelineEditorApp {
     _applyClipDisplayDuration(clip, meta, gen) {
         const m = meta || this._ensureClipMeta(clip);
         const resourceDur = this._ensureResourceDuration(clip, m);
-        // Generated-edit mode keeps the same clip duration as resource edit;
-        // gen video layout/trim is edited in the gen-edit modal, not here.
         clip.duration = resourceDur;
-        if (!this._isGeneratedEditMode()) {
-            clip.sourceOffset = Math.max(0, Number(clip.sourceOffset) || 0);
-        }
+        clip.sourceOffset = Math.max(0, Number(clip.sourceOffset) || 0);
         clip._applyPosition?.();
         this._meta.set(clip.id, m);
         void gen;
@@ -5316,7 +5317,6 @@ export class CapTimelineEditorApp {
     }
 
     _updateEditModeToolbar() {
-        const genMode = this._isGeneratedEditMode();
         if (this.insertClipBtn) {
             this.insertClipBtn.disabled = false;
             this.insertClipBtn.title = T("insert_empty_clip_title");
@@ -5327,11 +5327,12 @@ export class CapTimelineEditorApp {
         }
         const modeBtn = this.editModeBtn;
         if (modeBtn) {
-            modeBtn.classList.toggle("is-active", genMode);
-            modeBtn.innerHTML = `${iconHtml(genMode ? "camera" : "video", 14)}<span>${
-                genMode ? T("edit_mode_back_to_resource_btn") : T("edit_mode_switch_to_generated_btn")
-            }</span>`;
-            modeBtn.title = genMode
+            const active = this._allGeneratedPreviewActive();
+            const hasTargets = this._clipsWithEnabledGeneratedVideo().length > 0;
+            modeBtn.disabled = !hasTargets;
+            modeBtn.classList.toggle("is-active", active);
+            modeBtn.innerHTML = iconHtml(active ? "videoOff" : "video", 14);
+            modeBtn.title = active
                 ? T("edit_mode_back_to_resource_title")
                 : T("edit_mode_switch_to_generated_title");
         }
@@ -5342,11 +5343,25 @@ export class CapTimelineEditorApp {
     }
 
     _toggleAllGeneratedPreview() {
-        this._setTimelineEditMode(this._isGeneratedEditMode() ? "resource" : "generated");
+        const targets = this._clipsWithEnabledGeneratedVideo();
+        if (!targets.length) return;
+        const next = this._allGeneratedPreviewActive() ? "media" : "generated";
+        this._recordUndo();
+        for (const { clip, meta } of targets) {
+            meta.previewMode = next;
+            this._meta.set(clip.id, meta);
+            this._decorateClip(clip);
+            this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
+        }
+        this._updateEditModeToolbar();
+        this._scheduleProgramPreview();
+        if (this._timeline?._playing) this._startAudioPlayback();
+        this._saveToWidgets();
     }
 
     _allGeneratedPreviewActive() {
-        return this._isGeneratedEditMode();
+        const targets = this._clipsWithEnabledGeneratedVideo();
+        return targets.length > 0 && targets.every(({ meta }) => meta.previewMode === "generated");
     }
 
     _generatedVideosFromJson(clip) {
@@ -6060,13 +6075,15 @@ export class CapTimelineEditorApp {
         this._decorateClip(clip);
         if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
         if (this._genVideoState?.clipId === clip.id) this._showGenVideoAt(this._genVideoState.index || 0);
-        if (this._timeline && this._timelineReady) {
+            if (this._timeline && this._timelineReady) {
             this._saveToWidgets();
             if (this._historyReady) {
                 this._openedProjectJson = JSON.stringify(this._buildProject());
             }
-            if (this._isGeneratedEditMode()) void this._applyTimelineEditMode();
-            else this._updateEditModeToolbar();
+            this._decorateClip(clip);
+            this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
+            this._updateEditModeToolbar();
+            this._scheduleProgramPreview();
         } else {
             this._persistGeneratedVideosToProjectJson(clip.id, added.map((row) => row.file));
         }
@@ -6077,8 +6094,7 @@ export class CapTimelineEditorApp {
     /** Visual clips that have at least one enabled generated video. */
     _clipsWithEnabledGeneratedVideo() {
         const out = [];
-        for (const track of this._timeline?.tracks ?? []) {
-            if (track.type === "audio") continue;
+        for (const track of this._allImageTracks()) {
             for (const clip of track.clips) {
                 const meta = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (!this._firstEnabledGeneratedVideo(meta)) continue;
@@ -7483,12 +7499,13 @@ export class CapTimelineEditorApp {
                 const m = this._ensureClipMeta(clip);
                 m.generatedVideos = st.draft.map((g) => ({ ...g }));
                 m.genEditAudios = this._normalizeGenEditAudioDraft(st.audioDraft);
-                if (this._isGeneratedEditMode()) {
-                    m.previewMode = this._firstEnabledGeneratedVideo(m) ? "generated" : "media";
+                if (this._firstEnabledGeneratedVideo(m)) {
+                    m.previewMode = "generated";
                 }
                 this._meta.set(clip.id, m);
                 this._decorateClip(clip);
                 this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
+                this._updateEditModeToolbar();
                 if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
                 this._saveToWidgets();
                 this._scheduleProgramPreview();
@@ -8518,7 +8535,7 @@ export class CapTimelineEditorApp {
      * @param {string|null} [urlOverride] blob/object URL (e.g. live sampling preview)
      */
     _startResourceGenProgramPreview(clip, file, urlOverride = null) {
-        if (!clip || this._isGeneratedEditMode()) return;
+        if (!clip) return;
         const url = urlOverride || (file ? this._outputVideoUrl(file) : "");
         if (!url) return;
         const fileKey = file || url;
@@ -8867,13 +8884,6 @@ export class CapTimelineEditorApp {
             clip.name = first?.file?.split(/[\\/]/).pop()
                 || gen?.file?.split(/[\\/]/).pop()
                 || DEFAULT_CLIP_NAME;
-        }
-        // Generated-edit mode without a bound video: empty placeholder Clip.
-        if (this._isGeneratedEditMode() && !enabledGen) {
-            clip.thumbnail = null;
-            this._refreshClipAppearance(clip);
-            if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
-            return;
         }
         if (gen) {
             if (refreshVideo) {
@@ -10359,7 +10369,7 @@ export class CapTimelineEditorApp {
                     if (!clip.hasAudio) continue;
                     if (track.visible === false || m?.disabled) continue;
                     if (track.muted) continue;
-                    // Generated-video preview audio is scheduled separately
+        // Generated-video preview audio is scheduled separately
                     // via Web Audio (canvas <video> stays muted).
                     if (this._clipUsesGeneratedPreview(m)) continue;
                 }
@@ -10376,7 +10386,6 @@ export class CapTimelineEditorApp {
     _collectGeneratedVideoAudioJobs(fromTime) {
         const jobs = [];
         const t0 = Math.max(0, Number(fromTime) || 0);
-        const genMode = this._isGeneratedEditMode();
         for (const track of this._allImageTracks()) {
             if (track.visible === false || track.muted) continue;
             const info = this._trackInfo.get(track.id) || {};
@@ -10384,13 +10393,8 @@ export class CapTimelineEditorApp {
             for (const clip of track.clips) {
                 const m = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (m.disabled || m.visible === false) continue;
-                if (!genMode && !this._clipUsesGeneratedPreview(m)) continue;
-                const gens = genMode
-                    ? this._clipGeneratedVideos(m).filter((g) => g.enabled !== false)
-                    : (() => {
-                        const g = this._firstEnabledGeneratedVideo(m);
-                        return g ? [g] : [];
-                    })();
+                if (!this._clipUsesGeneratedPreview(m)) continue;
+                const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
                 // Newest-first: one unmuted gen per clip (topmost).
                 let picked = null;
                 for (const gen of gens) {
@@ -10662,7 +10666,8 @@ export class CapTimelineEditorApp {
         this._promptConcatOrder = normalizePromptConcatOrder(settings.prompt_concat_order);
         this._renderPromptConcatOrderList();
         this._useClipSpecifiedVideoFilename = settings.use_clip_specified_video_filename !== false;
-        this._timelineEditMode = settings.timeline_edit_mode === "generated" ? "generated" : "resource";
+        // Legacy global mode → migrate onto per-clip previewMode after clips load.
+        this._legacyTimelineEditMode = settings.timeline_edit_mode === "generated" ? "generated" : null;
         project.settings = {
             ...settings,
             fps: Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps),
@@ -10674,7 +10679,6 @@ export class CapTimelineEditorApp {
             ])),
             prompt_concat_order: this._getPromptConcatOrder(),
             use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
-            timeline_edit_mode: this._timelineEditMode,
         };
         let wroteAnySettingPrompt = false;
         this._settingPromptSyncing = true;
@@ -10736,6 +10740,15 @@ export class CapTimelineEditorApp {
         this._configureTimelineUi();
         if (loadSeq !== this._loadSeq) return;
         this._timelineReady = true;
+        if (this._legacyTimelineEditMode === "generated") {
+            for (const { clip, meta } of this._clipsWithEnabledGeneratedVideo()) {
+                if (meta.previewMode !== "generated") {
+                    meta.previewMode = "generated";
+                    this._meta.set(clip.id, meta);
+                }
+            }
+            this._legacyTimelineEditMode = null;
+        }
         void this._applyTimelineEditMode();
         this._saveToWidgets();
         this._ensureProgramPreviewObserver();
@@ -11351,18 +11364,17 @@ export class CapTimelineEditorApp {
         const runPreview = !isAudio && !isSubtitle && !isVoiceover && track.type === "image"
             ? this._runPreviewByClipId.get(String(clip.id))
             : null;
-        const genEditEmpty = this._isGeneratedEditMode() && !isAudio && !isSubtitle && !isVoiceover && !enabledGen;
-        clip.el.classList.toggle("cat-te-clip-gen-empty", genEditEmpty);
-        // Video badge in resource edit: hover plays finished generated video, or the
-        // live KJ Model Preview Override mp4 while this clip is sampling.
-        const showPreviewBadge = !this._isGeneratedEditMode() && !!(enabledGen || runPreview?.url);
+        clip.el.classList.remove("cat-te-clip-gen-empty");
+        const genPreview = this._clipUsesGeneratedPreview(m);
+        // Video badge: hover plays finished generated video (or live sampling);
+        // click toggles normal ↔ generated preview state.
+        const showPreviewBadge = !!(enabledGen || runPreview?.url);
         if (showPreviewBadge) {
             if (!previewBadge) {
                 previewBadge = document.createElement("button");
                 previewBadge.type = "button";
                 previewBadge.className = "cat-te-end-badge cat-te-clip-preview-badge";
                 previewBadge.addEventListener("mouseenter", () => {
-                    if (this._isGeneratedEditMode()) return;
                     const live = this._runPreviewByClipId.get(String(clip.id));
                     if (live?.url) {
                         this._startResourceGenProgramPreview(
@@ -11379,13 +11391,25 @@ export class CapTimelineEditorApp {
                 previewBadge.addEventListener("mouseleave", () => {
                     this._scheduleResourceGenProgramPreviewStop();
                 });
+                previewBadge.addEventListener("click", (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (!this._firstEnabledGeneratedVideo(this._meta.get(clip.id) ?? defaultImageMeta())) {
+                        return;
+                    }
+                    this._stopResourceGenProgramPreview();
+                    this._toggleClipPreviewMode(clip);
+                });
                 clip.el.appendChild(previewBadge);
             }
-            previewBadge.innerHTML = iconHtml("video", 12);
+            previewBadge.innerHTML = iconHtml(genPreview ? "videoOff" : "video", 12);
             previewBadge.title = runPreview?.url
                 ? T("program_preview_sampling_video_title")
-                : T("program_preview_generated_video_title");
+                : (genPreview
+                    ? T("clip_preview_generated_title")
+                    : T("clip_preview_normal_title"));
             previewBadge.classList.toggle("is-sampling", !!runPreview?.url);
+            previewBadge.classList.toggle("is-generated", genPreview);
             previewBadge.classList.toggle(
                 "is-previewing",
                 this._resourceGenPreview?.clipId === clip.id,
@@ -12514,9 +12538,9 @@ export class CapTimelineEditorApp {
                 { label: T("linked_generated_videos_title"), fn: () => void this._openOutputVideosPicker(clip) },
                 { label: T("menu_separate_audio"), fn: () => void this._separateClipAudio(clip) },
             );
-            if (this._isGeneratedEditMode()) {
+            if (this._clipGeneratedVideos(m).length) {
                 items.splice(2, 0, {
-                    label: T("menu_edit_gen_video"),
+                    label: T("menu_trim_video"),
                     fn: () => void this._openGenEditModal(clip),
                 });
             }
@@ -13538,7 +13562,6 @@ export class CapTimelineEditorApp {
     _prefetchUpcomingGeneratedVideos(t, lookaheadSec = 2.5) {
         const now = Math.max(0, Number(t) || 0);
         const horizon = now + Math.max(0.5, Number(lookaheadSec) || 2.5);
-        const genMode = this._isGeneratedEditMode();
         for (const track of this._allImageTracks()) {
             if (track.visible === false) continue;
             const info = this._trackInfo.get(track.id) || {};
@@ -13550,10 +13573,9 @@ export class CapTimelineEditorApp {
                 if (end < now - 0.05 || start > horizon) continue;
                 const m = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (m.disabled || m.visible === false) continue;
+                if (!this._clipUsesGeneratedPreview(m)) continue;
                 const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
-                if (!gens.length) continue;
-                const rows = genMode ? gens : (this._firstEnabledGeneratedVideo(m) ? [this._firstEnabledGeneratedVideo(m)] : []);
-                for (const gen of rows) {
+                for (const gen of gens) {
                     if (!gen?.file) continue;
                     const entry = this._ensurePreviewVideo(gen.file, "output");
                     if (!entry) continue;
@@ -13622,16 +13644,16 @@ export class CapTimelineEditorApp {
                 if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
                 const m = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (m.disabled || m.visible === false) continue;
+                if (this._clipUsesGeneratedPreview(m)) {
                     const gens = this._clipGeneratedVideos(m).filter((g) => g.enabled !== false);
-                    if (this._isGeneratedEditMode()) {
-                        if (!gens.length) {
-                            layers.push({ kind: "package", clip, meta: m });
-                            continue;
-                        }
-                        const localT = Math.max(0, t - clip.startTime);
-                        // generatedVideos is newest-first; paint older first so newest ends on top.
-                        for (const gen of [...gens].reverse()) {
-                            const start = Math.max(0, Number(gen.edit_start_sec) || 0);
+                    if (!gens.length) {
+                        layers.push({ kind: "package", clip, meta: m });
+                        continue;
+                    }
+                    const localT = Math.max(0, t - clip.startTime);
+                    // generatedVideos is newest-first; paint older first so newest ends on top.
+                    for (const gen of [...gens].reverse()) {
+                        const start = Math.max(0, Number(gen.edit_start_sec) || 0);
                         let eff = this._genEffectiveDurationSec(gen);
                         if (!(eff > 0)) {
                             const full = Number(gen.duration_sec);
@@ -13650,19 +13672,6 @@ export class CapTimelineEditorApp {
                             editStartSec: start,
                         });
                     }
-                    continue;
-                }
-                const gen = this._clipUsesGeneratedPreview(m) ? this._firstEnabledGeneratedVideo(m) : null;
-                if (gen) {
-                    layers.push({
-                        kind: "generated",
-                        clip,
-                        meta: m,
-                        file: gen.file,
-                        muted: gen.muted === true || !!track.muted || !!m.muted,
-                        trimInSec: Math.max(0, Number(gen.trim_in_sec) || 0),
-                        editStartSec: Math.max(0, Number(gen.edit_start_sec) || 0),
-                    });
                     continue;
                 }
                 const items = this._enabledClipItems(m);
@@ -13868,7 +13877,7 @@ export class CapTimelineEditorApp {
         this.editModeBtn.type = "button";
         this.editModeBtn.className = "tl-btn tl-btn-edit-mode tl-btn-all-gen-preview";
         this.editModeBtn.addEventListener("click", () => {
-            this._setTimelineEditMode(this._isGeneratedEditMode() ? "resource" : "generated");
+            this._toggleAllGeneratedPreview();
         });
         tl.toolbarEl.appendChild(this.editModeBtn);
         this.genEditModeBtn = null;
@@ -14053,11 +14062,9 @@ export class CapTimelineEditorApp {
                 || isVoiceoverTrackType(clip.track?.type)
                 || isSubtitleTrackType(clip.track?.type)
             )) {
-                if (!this._isGeneratedEditMode()) {
-                    const m = this._ensureClipMeta(clip);
-                    m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
-                    this._meta.set(clip.id, m);
-                }
+                const m = this._ensureClipMeta(clip);
+                m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
+                this._meta.set(clip.id, m);
             }
             this._commitPendingUndo(moved);
             this._refreshTimelineDuration();
@@ -14066,20 +14073,11 @@ export class CapTimelineEditorApp {
         tl.on("clip:resizestart", () => this._beginPendingUndo());
         tl.on("clip:resizeend", ({ clip, moved }) => {
             this._syncAudioFadeMeta(clip);
-            if (moved && this._isGeneratedEditMode() && clip?.track?.type === "image") {
-                // Clip duration is resource-locked in gen mode — revert any resize.
-                const m = this._ensureClipMeta(clip);
-                const dur = this._ensureResourceDuration(clip, m);
-                const start = this._ensureResourceStart(clip, m);
-                clip.duration = dur;
-                clip.startTime = start;
-                clip._applyPosition?.();
-                this._commitPendingUndo(false);
-            } else if (moved && !this._isGeneratedEditMode() && clip?.track?.type === "image") {
+            if (moved && clip?.track?.type === "image") {
                 this._rememberResourceTiming(clip);
                 this._commitPendingUndo(moved);
             } else {
-                if (moved && clip && isVoiceoverTrackType(clip.track?.type) && !this._isGeneratedEditMode()) {
+                if (moved && clip && isVoiceoverTrackType(clip.track?.type)) {
                     const m = this._ensureClipMeta(clip);
                     m.resourceStartSec = Math.max(0, Number(clip.startTime) || 0);
                     m.resourceDurationSec = Math.max(0.05, Number(clip.duration) || 0.05);
@@ -15835,7 +15833,6 @@ export class CapTimelineEditorApp {
                 timeline_scroll_top: Number(this._timeline?.scrollEl?.scrollTop ?? 0) || 0,
                 watermark: this._watermark,
                 use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
-                timeline_edit_mode: this._timelineEditMode === "generated" ? "generated" : "resource",
                 ...(this._genVideoStamp
                     ? { gen_video_stamp: String(this._genVideoStamp) }
                     : {}),

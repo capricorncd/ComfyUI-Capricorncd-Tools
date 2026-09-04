@@ -1521,11 +1521,7 @@ body.cat-te-media-dnd-over-tl {
     min-height: 220px;
 }
 
-.cat-te-timeline-host.is-gen-edit-mode .tl-track-image .tl-clip-handle,
-.cat-te-timeline-host.is-gen-edit-mode .tl-track-video .tl-clip-handle {
-    pointer-events: none;
-    opacity: 0.35;
-}
+/* (legacy) global gen-edit mode used to lock trim handles; per-clip preview no longer does. */
 
 /* Generated-video edit modal */
 .cat-te-gen-edit-dialog {
@@ -1764,6 +1760,9 @@ body.cat-te-media-dnd-over-tl {
 }
 .cat-te-end-badge.cat-te-clip-preview-badge.is-sampling {
     background: rgba(230, 126, 34, 0.9);
+}
+.cat-te-end-badge.cat-te-clip-preview-badge.is-generated {
+    background: rgba(74, 158, 255, 0.88);
 }
 
 .cat-te-mute-badge {
