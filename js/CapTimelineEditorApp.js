@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { Timeline, ICONS } from "./timeline/index.js";
 import { parseTimecode, formatTimecode, frameIndexFromSecs, encodeClipTimingMs, decodeClipTimingSecs } from "./timecode.js";
-import { attachRichPromptHandler, setRichPromptValue, toggleComment, resolvePromptTextarea, updateRichPromptMirror } from "./rich_prompt.js";
+import { attachRichPromptHandler, setRichPromptValue, resolvePromptTextarea, updateRichPromptMirror } from "./rich_prompt.js";
 import { loadExtensionCss } from "./cap_ui.js";
 import { iconHtml } from "./cap_icons.js";
 import { t as T } from "./i18n/timeline_editor.js";
@@ -55,6 +55,13 @@ const SETTING_PROMPT_KEYS = [
     "non_diegetic_music",
     "negative_prompt",
 ];
+const SETTING_PROMPT_PREFIX_DEFAULTS = {
+    global_prompt: "",
+    style_prompt: "(填写MiniMax H3规范里的风格提示词英文：)",
+    non_diegetic_music: "non_diegetic_music:",
+    negative_prompt: "Negative:",
+};
+const settingPromptPrefixKey = (key) => `${key}_prefix_line`;
 /**
  * Prompt parts for clip.prompt_includes and settings.prompt_concat_order.
  * Order of this constant is the default concatenation order.
@@ -776,6 +783,8 @@ export class CapTimelineEditorApp {
         /** Web Audio sources for gen-edit modal playback (canvas videos stay muted). */
         this._genEditAudioSources = [];
         this._composeBusy = false;
+        this._aiOptimizeBusy = false;
+        this._aiOptimizeAbort = null;
         this._watermark = this._defaultWatermark();
         this._promptConcatOrder = [...DEFAULT_PROMPT_CONCAT_ORDER];
         /** When true, Run associates CapTimelineEditor/..._{clipId}.mp4 by specified name. */
@@ -3719,6 +3728,8 @@ export class CapTimelineEditorApp {
                     <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="negative">${T("negative_prompt_tab")}</button>
                   </div>
                   <textarea class="cat-te-ai-src-text"></textarea>
+                </div>
+                <div class="cat-te-ai-optimize-right">
                   <div class="cat-te-prompt-includes" aria-label="${T("prompt_includes_label")}">
                     <div class="cat-te-prompt-includes-label">${T("prompt_includes_label")}</div>
                     <div class="cat-te-prompt-includes-chips" role="group">
@@ -3730,8 +3741,6 @@ export class CapTimelineEditorApp {
                       <button type="button" class="cat-te-prompt-include-chip" data-include="negative" title="${T("prompt_include_negative_title")}">${T("prompt_include_negative")}</button>
                     </div>
                   </div>
-                </div>
-                <div class="cat-te-ai-optimize-right">
                   <div class="cat-te-ai-field-row">
                     <div class="cat-te-ai-field">
                       <span class="cat-te-ai-field-label">
@@ -16112,7 +16121,10 @@ export class CapTimelineEditorApp {
     }
 
     _cancelAiOptimize() {
-        this._aiOptimizeAbort?.abort();
+        const controller = this._aiOptimizeAbort;
+        this._aiOptimizeAbort = null;
+        controller?.abort();
+        this._setAiOptimizeBusy(false);
     }
 
     async _loadAiOptimizeModels() {
@@ -16271,8 +16283,10 @@ export class CapTimelineEditorApp {
             if (ac.signal.aborted || error?.name === "AbortError") return;
             alert(T("ai_optimize_failed", { msg: error instanceof Error ? error.message : String(error) }));
         } finally {
-            if (this._aiOptimizeAbort === ac) this._aiOptimizeAbort = null;
-            this._setAiOptimizeBusy(false);
+            if (this._aiOptimizeAbort === ac) {
+                this._aiOptimizeAbort = null;
+                this._setAiOptimizeBusy(false);
+            }
         }
     }
 

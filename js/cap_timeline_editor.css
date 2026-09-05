@@ -4009,9 +4009,10 @@ body.cat-te-media-dnd-over-tl {
     background: #0d1420;
     cursor: default;
 }
-.cat-te-ai-optimize-left .cat-te-prompt-includes {
+.cat-te-ai-optimize-right .cat-te-prompt-includes {
     flex: 0 0 auto;
-    padding-top: 4px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2a2a48;
 }
 
 .cat-te-overlay .cap-rich-prompt-mirror,
