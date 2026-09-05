@@ -2216,6 +2216,7 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-clip-thumb-wrap {
     position: relative;
     width: 100%;
+    aspect-ratio: 16 / 9;
     height: auto;
     border-radius: 6px;
     overflow: hidden;
@@ -2237,9 +2238,9 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-clip-thumb-video {
     width: 100%;
     max-width: 100%;
-    height: auto;
+    height: 100%;
     object-fit: contain;
-    object-position: center;
+    object-position: center top;
 }
 
 .cat-te-clip-thumb-empty {
