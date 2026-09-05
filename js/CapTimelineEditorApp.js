@@ -1291,6 +1291,29 @@ export class CapTimelineEditorApp {
         ], r.left, r.bottom + 4);
     }
 
+    _resetTrackOrder() {
+        const tl = this._timeline;
+        if (!tl) return;
+        const rank = (track) => isSubtitleTrackType(track.type) ? 0
+            : isVoiceoverTrackType(track.type) ? 2 : track.type === "audio" ? 3 : 1;
+        const tracks = [...tl.tracks].sort((a, b) => rank(a) - rank(b));
+        if (tracks.some((track, index) => track !== tl.tracks[index])) this._recordUndo();
+        tl.tracks = tracks;
+        tracks.forEach((track, index) => {
+            tl._tracksEl.appendChild(track.el);
+            tl._trackHeadersEl.appendChild(track.headerEl);
+            const info = this._trackInfo.get(track.id);
+            if (info) info.trackIndex = index;
+            for (const clip of track.clips) {
+                const meta = this._meta.get(clip.id);
+                if (meta) meta.trackIndex = index;
+            }
+        });
+        tl._refresh();
+        this._scheduleProgramPreview();
+        this._saveToWidgets();
+    }
+
     _showAddTrackMenu(e) {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
@@ -3392,7 +3415,7 @@ export class CapTimelineEditorApp {
                   </label>
                   <div class="cat-te-ai-optimize-actions">
                     <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span></button>
-                    <button type="button" class="cat-te-btn cat-te-ai-run">${iconHtml("play", 12)}<span>${T("menu_run")}</span></button>
+                    <button type="button" class="cat-te-btn cat-te-ai-run">${iconHtml("play", 12)}<span>${T("run_and_close")}</span></button>
                   </div>
                 </div>
               </div>
@@ -3989,6 +4012,7 @@ export class CapTimelineEditorApp {
             if (!clip) return;
             this._onAiResultInput();
             void this._runClipDownstream(clip);
+            this._closeAiOptimizeModal();
         });
         this.aiResultInput?.addEventListener("input", () => this._onAiResultInput());
         this.aiLangSelect?.addEventListener("change", () => {
@@ -5180,6 +5204,33 @@ export class CapTimelineEditorApp {
             cursor = st + dur;
             clip._applyPosition?.();
         }
+    }
+
+    _trimGeneratedVideoHead(clip, seconds) {
+        if (!(seconds > 0)) return;
+        const m = this._ensureClipMeta(clip);
+        m.generatedVideos = this._clipGeneratedVideos(m).flatMap((gen) => {
+            const start = Math.max(0, Number(gen.edit_start_sec) || 0);
+            const cut = Math.max(0, seconds - start);
+            const duration = this._genEffectiveDurationSec(gen);
+            if (duration > 0 && cut >= duration - 1e-9) return [];
+            return [{
+                ...gen,
+                edit_start_sec: Math.max(0, start - seconds),
+                trim_in_sec: Math.max(0, Number(gen.trim_in_sec) || 0) + cut,
+            }];
+        });
+        m.genEditAudios = this._normalizeGenEditAudioDraft(m.genEditAudios).flatMap((audio) => {
+            const cut = Math.max(0, seconds - audio.edit_start_sec);
+            if (cut >= audio.duration - 1e-9) return [];
+            return [{
+                ...audio,
+                edit_start_sec: Math.max(0, audio.edit_start_sec - seconds),
+                source_offset: audio.source_offset + cut,
+                duration: audio.duration - cut,
+            }];
+        });
+        this._meta.set(clip.id, m);
     }
 
     _rememberResourceTiming(clip, meta) {
@@ -8374,7 +8425,7 @@ export class CapTimelineEditorApp {
             this._openModals = this._openModals.filter((modal) => !modal.hidden);
             for (const modal of modals) {
                 if (modal.hidden || this._openModals.includes(modal)) continue;
-                const dialog = modal.querySelector(".cat-te-modal");
+                const dialog = modal.querySelector(".cat-te-ai-optimize-shell, .cat-te-modal");
                 dialog.style.position = "";
                 dialog.style.left = "";
                 dialog.style.top = "";
@@ -8405,19 +8456,20 @@ export class CapTimelineEditorApp {
         for (const modal of modals) {
             this._modalObserver.observe(modal, { attributes: true, attributeFilter: ["hidden", "class"], attributeOldValue: true });
             const dialog = modal.querySelector(".cat-te-modal");
+            const dragTarget = dialog.closest(".cat-te-ai-optimize-shell") || dialog;
             const handle = dialog.querySelector(".cat-te-modal-header");
             handle.addEventListener("pointerdown", (e) => {
                 if (e.button !== 0 || e.target.closest("button, input, select, textarea, a, [contenteditable='true']")) return;
                 e.preventDefault();
-                const rect = dialog.getBoundingClientRect();
+                const rect = dragTarget.getBoundingClientRect();
                 const ox = e.clientX - rect.left;
                 const oy = e.clientY - rect.top;
                 handle.setPointerCapture(e.pointerId);
                 dialog.classList.add("is-dragging");
                 const move = (event) => {
-                    dialog.style.position = "fixed";
-                    dialog.style.left = `${Math.max(8, Math.min(window.innerWidth - rect.width - 8, event.clientX - ox))}px`;
-                    dialog.style.top = `${Math.max(8, Math.min(window.innerHeight - rect.height - 8, event.clientY - oy))}px`;
+                    dragTarget.style.position = "fixed";
+                    dragTarget.style.left = `${Math.max(8, Math.min(window.innerWidth - rect.width - 8, event.clientX - ox))}px`;
+                    dragTarget.style.top = `${Math.max(8, Math.min(window.innerHeight - rect.height - 8, event.clientY - oy))}px`;
                 };
                 const end = () => {
                     dialog.classList.remove("is-dragging");
@@ -14103,6 +14155,20 @@ export class CapTimelineEditorApp {
             this._showRunMenu(e);
         });
         tl.toolbarEl.appendChild(this.runMenuBtn);
+        const moreBtn = document.createElement("button");
+        moreBtn.type = "button";
+        moreBtn.className = "tl-btn";
+        moreBtn.innerHTML = iconHtml("ellipsisVertical", 16);
+        moreBtn.title = T("timeline_more");
+        moreBtn.setAttribute("aria-label", moreBtn.title);
+        moreBtn.setAttribute("aria-haspopup", "menu");
+        moreBtn.addEventListener("click", (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            this._buildCtxMenu([
+                { label: T("reset_track_order"), fn: () => this._resetTrackOrder() },
+            ], rect.left, rect.bottom + 4);
+        });
+        tl.toolbarEl.appendChild(moreBtn);
         this._updateEditModeToolbar();
 
         // Timeline undo/redo: Ctrl/Cmd+Z/Y are intercepted in handleShortcutKey
@@ -14287,12 +14353,20 @@ export class CapTimelineEditorApp {
             this._refreshTimelineDuration();
             this._scheduleProgramPreview();
         });
-        tl.on("clip:resizestart", () => this._beginPendingUndo());
+        let resizeStartTime = null;
+        tl.on("clip:resizestart", ({ clip }) => {
+            resizeStartTime = clip.startTime;
+            this._beginPendingUndo();
+        });
         tl.on("clip:resizeend", ({ clip, moved }) => {
             this._syncAudioFadeMeta(clip);
             if (moved && clip?.track?.type === "image") {
+                if (resizeStartTime != null) this._trimGeneratedVideoHead(clip, clip.startTime - resizeStartTime);
                 this._rememberResourceTiming(clip);
                 this._commitPendingUndo(moved);
+                this._decorateClip(clip);
+                if (this._selClip?.id === clip.id) this._updateClipInfoPanel(clip);
+                this._saveToWidgets();
             } else {
                 if (moved && clip && isVoiceoverTrackType(clip.track?.type)) {
                     const m = this._ensureClipMeta(clip);
@@ -14302,6 +14376,7 @@ export class CapTimelineEditorApp {
                 }
                 this._commitPendingUndo(moved);
             }
+            resizeStartTime = null;
             this._refreshTimelineDuration();
             this._scheduleProgramPreview();
         });

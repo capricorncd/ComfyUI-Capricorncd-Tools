@@ -60,21 +60,6 @@ def _media_by_id(project: dict) -> dict[str, dict]:
     return out
 
 
-def _first_enabled_generated(clip: dict) -> dict | None:
-    for row in _as_list(clip.get("generated_videos")):
-        if not isinstance(row, dict):
-            continue
-        if row.get("enabled", True) is False:
-            continue
-        file = str(row.get("file") or "").strip().replace("\\", "/")
-        if file:
-            return {
-                "file": file,
-                "muted": row.get("muted") is True,
-            }
-    return None
-
-
 def _clip_audio_file(clip: dict, media_map: dict[str, dict]) -> str:
     for mid in _as_list(clip.get("media_ids")):
         row = media_map.get(str(mid or ""))
@@ -131,7 +116,7 @@ def _collect_plan(
     audio_segs: list[dict] = []
     end_ms = 0
 
-    for track in tracks:
+    for track in reversed(tracks):
         track_type = str(track.get("type") or "").lower()
         enabled = track.get("enabled", True) is not False
         if not enabled:
@@ -147,27 +132,55 @@ def _collect_plan(
                     continue
                 if clip.get("visible", True) is False:
                     continue
-                gen = _first_enabled_generated(clip)
-                if not gen:
-                    continue
-                path = _resolve_output_video(gen["file"])
-                if not path:
-                    raise ValueError(_t("generated_video_not_found", get_last_known_lang(), file=gen['file']))
-                start = _ms(clip.get("start_ms"))
-                duration = max(1, _ms(clip.get("duration_ms"), 1))
-                end = start + duration
-                end_ms = max(end_ms, end)
-                video_segs.append({
-                    "path": path,
-                    # Timeline placement for this clip: [start_sec, end_sec].
-                    "start_sec": start / 1000.0,
-                    "duration_sec": duration / 1000.0,
-                    "end_sec": end / 1000.0,
-                    # Track / clip / generated-video mute all silence render audio.
-                    "muted": bool(gen["muted"])
-                        or bool(track.get("muted"))
-                        or bool(clip.get("muted")),
-                })
+                start_sec = _ms(clip.get("start_ms")) / 1000.0
+                clip_duration = max(1, _ms(clip.get("duration_ms"), 1)) / 1000.0
+                # Saved rows follow subtrack order, top first; paint bottom first.
+                for gen in reversed(_as_list(clip.get("generated_videos"))):
+                    if not isinstance(gen, dict) or gen.get("enabled", True) is False:
+                        continue
+                    file = str(gen.get("file") or "").strip()
+                    if not file:
+                        continue
+                    offset = max(0.0, float(gen.get("edit_start_sec") or 0))
+                    source_in = max(0.0, float(gen.get("trim_in_sec") or 0))
+                    duration = clip_duration - offset
+                    source_end = gen.get("trim_out_sec") or gen.get("duration_sec")
+                    if source_end is not None:
+                        duration = min(duration, float(source_end) - source_in)
+                    if duration <= 0:
+                        continue
+                    path = _resolve_output_video(file)
+                    if not path:
+                        raise ValueError(_t("generated_video_not_found", get_last_known_lang(), file=file))
+                    end_ms = max(end_ms, round((start_sec + clip_duration) * 1000))
+                    video_segs.append({
+                        "path": path,
+                        "start_sec": start_sec + offset,
+                        "duration_sec": duration,
+                        "end_sec": start_sec + offset + duration,
+                        "source_in_sec": source_in,
+                        "muted": bool(gen.get("muted")) or bool(track.get("muted")) or bool(clip.get("muted")),
+                    })
+                if not ignore_audio_tracks and not track.get("muted") and not clip.get("muted"):
+                    for audio in _as_list(clip.get("gen_edit_audios")):
+                        if not isinstance(audio, dict) or audio.get("muted"):
+                            continue
+                        offset = max(0.0, float(audio.get("edit_start_sec") or 0))
+                        duration = min(float(audio.get("duration") or 0), clip_duration - offset)
+                        if duration <= 0:
+                            continue
+                        file = str(audio.get("file") or "").strip()
+                        path = resolve_media_path(file, location="input")
+                        if not path or not os.path.isfile(path):
+                            raise ValueError(_t("audio_file_not_found", get_last_known_lang(), file=file))
+                        audio_segs.append({
+                            "path": path,
+                            "start_sec": start_sec + offset,
+                            "duration_sec": duration,
+                            "source_in_sec": max(0.0, float(audio.get("source_offset") or 0)),
+                            "fade_in_sec": 0.0,
+                            "fade_out_sec": 0.0,
+                        })
             continue
 
         if ignore_audio_tracks or track_type != "audio":
@@ -464,7 +477,7 @@ def compose_timeline_project(
     height = plan["height"]
     fps = plan["fps"]
     total = plan["total_sec"]
-    # Bottom→top paint order: earlier tracks first, then later overlays.
+    # The plan is already ordered bottom to top for both parent and subtracks.
     video_segs = list(plan["video_segs"])
     audio_segs = plan["audio_segs"]
 
@@ -492,11 +505,8 @@ def compose_timeline_project(
         idx = i + 1
         start = float(seg["start_sec"])
         dur = float(seg["duration_sec"])
-        # Clip window on the timeline: [start, start+dur].
-        # Take the first `dur` seconds of the generated video and put that
-        # content into the clip's time range (start → end).
         filters.append(
-            f"[{idx}:v]trim=0:{dur:.6f},setpts=PTS-STARTPTS+{start:.6f}/TB,"
+            f"[{idx}:v]trim=start={seg['source_in_sec']:.6f}:duration={dur:.6f},setpts=PTS-STARTPTS+{start:.6f}/TB,"
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
             f"format=yuv420p[v{i}]"
@@ -524,7 +534,7 @@ def compose_timeline_project(
         delay_ms = max(0, int(round(seg["start_sec"] * 1000)))
         label = f"ga{i}"
         filters.append(
-            f"[{idx}:a]atrim=0:{seg['duration_sec']:.6f},asetpts=PTS-STARTPTS,"
+            f"[{idx}:a]atrim=start={seg['source_in_sec']:.6f}:duration={seg['duration_sec']:.6f},asetpts=PTS-STARTPTS,"
             f"adelay={delay_ms}|{delay_ms}[{label}]"
         )
         amix_labels.append(label)

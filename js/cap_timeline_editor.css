@@ -156,6 +156,9 @@ body.cat-te-row-resize * {
     padding: 5px 12px;
     font-size: 12px;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 .cat-te-btn:hover { background: #2a2a48; color: #fff; }
 .cat-te-btn:disabled,
@@ -3755,6 +3758,8 @@ body.cat-te-media-dnd-over-tl {
 .cat-te-wm-margin-lock svg { display: block; }
 
 .cat-te-ai-optimize-dialog {
+    flex: 1;
+    min-width: 0;
     width: min(1100px, 94vw);
     height: min(82vh, 820px);
     max-height: 90vh;
@@ -3762,6 +3767,7 @@ body.cat-te-media-dnd-over-tl {
     flex-direction: column;
 }
 .cat-te-ai-optimize-shell {
+    width: min(1212px, calc(100vw - 16px));
     display: flex;
     align-items: center;
     gap: 12px;

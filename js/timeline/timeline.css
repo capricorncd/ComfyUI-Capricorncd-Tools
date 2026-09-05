@@ -291,8 +291,8 @@
 }
 
 .tl-track-headers {
-  overflow: hidden;
-  flex: 1;
+  overflow: visible;
+  flex: none;
   transition: transform 0.0s;
 }
 
