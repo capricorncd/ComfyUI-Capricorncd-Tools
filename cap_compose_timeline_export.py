@@ -77,8 +77,8 @@ def _even_dim(value: int) -> int:
     return value if value % 2 == 0 else value - 1
 
 
-def _size_from_generated_videos(video_segs: list[dict], fallback_w: int, fallback_h: int) -> tuple[int, int]:
-    """Use the largest probed generated-video frame size (keeps 2nd-sample upscales)."""
+def _size_from_video_segments(video_segs: list[dict], fallback_w: int, fallback_h: int) -> tuple[int, int]:
+    """Use the largest probed video frame size (keeps 2nd-sample upscales)."""
     best_w = 0
     best_h = 0
     best_area = 0
@@ -155,6 +155,7 @@ def _collect_plan(
                     continue
                 start_sec = _ms(clip.get("start_ms")) / 1000.0
                 clip_duration = max(1, _ms(clip.get("duration_ms"), 1)) / 1000.0
+                video_count_before = len(video_segs)
                 # Saved rows follow subtrack order, top first; paint bottom first.
                 for gen in reversed(_as_list(clip.get("generated_videos"))):
                     if not isinstance(gen, dict) or gen.get("enabled", True) is False:
@@ -182,6 +183,35 @@ def _collect_plan(
                         "source_in_sec": source_in,
                         "muted": bool(gen.get("muted")) or bool(track.get("muted")) or bool(clip.get("muted")),
                     })
+                if len(video_segs) == video_count_before and clip.get("export_source_video", True) is not False:
+                    enabled_flags = _as_list(clip.get("media_enabled"))
+                    media_rows = []
+                    for media_index, media_id in enumerate(_as_list(clip.get("media_ids"))):
+                        if media_index < len(enabled_flags) and enabled_flags[media_index] is False:
+                            continue
+                        media = media_map.get(str(media_id or ""))
+                        if isinstance(media, dict) and str(media.get("kind") or "").lower() in ("image", "video"):
+                            media_rows.append(media)
+                    media_duration = clip_duration / max(1, len(media_rows))
+                    source = _as_dict(clip.get("source"))
+                    for media_index, media in enumerate(media_rows):
+                        if str(media.get("kind") or "").lower() != "video":
+                            continue
+                        file = str(media.get("file") or "").strip()
+                        path = resolve_media_path(file, location="input")
+                        if not path or not os.path.isfile(path):
+                            raise ValueError(_t("video_file_not_found", get_last_known_lang(), file=file))
+                        segment_start = start_sec + media_index * media_duration
+                        source_in = _ms(source.get("in_ms")) / 1000.0 if len(media_rows) == 1 else 0.0
+                        video_segs.append({
+                            "path": path,
+                            "start_sec": segment_start,
+                            "duration_sec": media_duration,
+                            "end_sec": segment_start + media_duration,
+                            "source_in_sec": source_in,
+                            "muted": bool(track.get("muted")) or bool(clip.get("muted")),
+                        })
+                        end_ms = max(end_ms, round((segment_start + media_duration) * 1000))
                 if not ignore_audio_tracks and not track.get("muted") and not clip.get("muted"):
                     for audio in _as_list(clip.get("gen_edit_audios")):
                         if not isinstance(audio, dict) or audio.get("muted"):
@@ -247,7 +277,7 @@ def _collect_plan(
         raise ValueError(_t("no_generated_videos_to_compose", get_last_known_lang()))
 
     if use_generated_video_size:
-        width, height = _size_from_generated_videos(video_segs, width, height)
+        width, height = _size_from_video_segments(video_segs, width, height)
     else:
         width, height = _even_dim(width), _even_dim(height)
 

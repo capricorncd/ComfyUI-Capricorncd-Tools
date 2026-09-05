@@ -367,6 +367,7 @@ function defaultImageMeta(trackIndex = 0) {
         headExtendSec: 0,
         tailExtendSec: 0,
         generatePreviewVideo: false,
+        exportSourceVideo: true,
         secondSample: false,
         h3MotionContextLength: 0,
         saveLatent: false,
@@ -2912,6 +2913,10 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-gen-preview-video" type="checkbox" disabled />
                   <span>${T("gen_preview_video_label")}</span>
                 </label>
+                <label class="cat-te-clip-setting-check cat-te-export-source-video-row" hidden>
+                  <input class="cat-te-export-source-video" type="checkbox" checked disabled />
+                  <span>${T("export_source_video_label")}</span>
+                </label>
                 <label class="cat-te-clip-setting-check">
                   <input class="cat-te-second-sample" type="checkbox" disabled />
                   <span>${T("second_sample_label")}</span>
@@ -3602,6 +3607,8 @@ export class CapTimelineEditorApp {
         this.headExtendInput = el.querySelector(".cat-te-head-extend");
         this.tailExtendInput = el.querySelector(".cat-te-tail-extend");
         this.genPreviewVideoCb = el.querySelector(".cat-te-gen-preview-video");
+        this.exportSourceVideoCb = el.querySelector(".cat-te-export-source-video");
+        this.exportSourceVideoRow = el.querySelector(".cat-te-export-source-video-row");
         this.secondSampleCb = el.querySelector(".cat-te-second-sample");
         this.h3MotionContextInput = el.querySelector(".cat-te-h3-motion-context");
         this.saveLatentCb = el.querySelector(".cat-te-save-latent");
@@ -3953,6 +3960,7 @@ export class CapTimelineEditorApp {
             this.headExtendInput.addEventListener("change", () => this._onHeadExtendChange());
             this.tailExtendInput?.addEventListener("change", () => this._onTailExtendChange());
             this.genPreviewVideoCb?.addEventListener("change", () => this._onGenPreviewVideoChange());
+            this.exportSourceVideoCb?.addEventListener("change", () => this._onExportSourceVideoChange());
             this.secondSampleCb?.addEventListener("change", () => this._onSecondSampleChange());
             this.h3MotionContextInput?.addEventListener("change", () => this._onH3MotionContextChange());
             this.saveLatentCb?.addEventListener("change", () => this._onSaveLatentChange());
@@ -11328,6 +11336,7 @@ export class CapTimelineEditorApp {
                 headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
                 tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
                 generatePreviewVideo: !!c.generate_preview_video,
+                exportSourceVideo: c.export_source_video !== false,
                 secondSample: !!c.second_sample,
                 h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
                 saveLatent: !!c.save_latent,
@@ -11407,6 +11416,7 @@ export class CapTimelineEditorApp {
                 headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
                 tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
                 generatePreviewVideo: !!c.generate_preview_video,
+                exportSourceVideo: c.export_source_video !== false,
                 secondSample: !!c.second_sample,
             items: (Array.isArray(c.items) && c.items.length
                 ? c.items.map(normalizeClipItem).filter(Boolean)
@@ -11464,6 +11474,7 @@ export class CapTimelineEditorApp {
             headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
             tailExtendSec: Math.max(0, Math.round(Number(c.tail_extend_sec) || 0)),
             generatePreviewVideo: !!c.generate_preview_video,
+            exportSourceVideo: c.export_source_video !== false,
                 secondSample: !!c.second_sample,
             items: (Array.isArray(c.items) && c.items.length
                 ? c.items.map(normalizeClipItem).filter(Boolean)
@@ -14749,6 +14760,7 @@ export class CapTimelineEditorApp {
         const head = el.querySelector(".cat-te-head-extend");
         const tail = el.querySelector(".cat-te-tail-extend");
         const gen = el.querySelector(".cat-te-gen-preview-video");
+        const exportSourceVideo = el.querySelector(".cat-te-export-source-video");
         const secondSample = el.querySelector(".cat-te-second-sample");
         const h3Motion = el.querySelector(".cat-te-h3-motion-context");
         const saveLatent = el.querySelector(".cat-te-save-latent");
@@ -14758,6 +14770,8 @@ export class CapTimelineEditorApp {
         this.headExtendInput = head;
         this.tailExtendInput = tail;
         this.genPreviewVideoCb = gen;
+        this.exportSourceVideoCb = exportSourceVideo;
+        this.exportSourceVideoRow = el.querySelector(".cat-te-export-source-video-row");
         this.secondSampleCb = secondSample;
         this.h3MotionContextInput = h3Motion;
         this.saveLatentCb = saveLatent;
@@ -14772,6 +14786,7 @@ export class CapTimelineEditorApp {
             head.addEventListener("change", () => this._onHeadExtendChange());
             tail?.addEventListener("change", () => this._onTailExtendChange());
             gen?.addEventListener("change", () => this._onGenPreviewVideoChange());
+            exportSourceVideo?.addEventListener("change", () => this._onExportSourceVideoChange());
             secondSample?.addEventListener("change", () => this._onSecondSampleChange());
             h3Motion?.addEventListener("change", () => this._onH3MotionContextChange());
             saveLatent?.addEventListener("change", () => this._onSaveLatentChange());
@@ -14795,6 +14810,12 @@ export class CapTimelineEditorApp {
         if (this.genPreviewVideoCb) {
             this.genPreviewVideoCb.disabled = disabled;
             this.genPreviewVideoCb.checked = enabled && !!m?.generatePreviewVideo;
+        }
+        const hasSourceVideo = enabled && this._clipItems(m).some((item) => item.enabled !== false && item.kind === "video");
+        if (this.exportSourceVideoRow) this.exportSourceVideoRow.hidden = !hasSourceVideo;
+        if (this.exportSourceVideoCb) {
+            this.exportSourceVideoCb.disabled = !hasSourceVideo;
+            this.exportSourceVideoCb.checked = hasSourceVideo && m?.exportSourceVideo !== false;
         }
         if (this.secondSampleCb) {
             this.secondSampleCb.disabled = disabled;
@@ -15924,6 +15945,15 @@ export class CapTimelineEditorApp {
         this._meta.set(this._selClip.id, m);
     }
 
+    _onExportSourceVideoChange() {
+        if (!this._selClip || this.exportSourceVideoCb?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.exportSourceVideo = this.exportSourceVideoCb.checked;
+        this._meta.set(this._selClip.id, m);
+        this._saveToWidgets();
+    }
+
     _onSecondSampleChange() {
         if (!this._selClip || this.secondSampleCb?.disabled) return;
         this._recordUndo();
@@ -16092,6 +16122,9 @@ export class CapTimelineEditorApp {
                     row.head_extend_sec = Math.max(0, Math.round(Number(m.headExtendSec) || 0));
                     row.tail_extend_sec = Math.max(0, Math.round(Number(m.tailExtendSec) || 0));
                     row.generate_preview_video = !!m.generatePreviewVideo;
+                    if (items.some((item) => item.kind === "video")) {
+                        row.export_source_video = m.exportSourceVideo !== false;
+                    }
                     row.second_sample = !!m.secondSample;
                     row.h3_motion_context_length = this._clampH3MotionContextLength(m.h3MotionContextLength);
                     row.save_latent = !!m.saveLatent;

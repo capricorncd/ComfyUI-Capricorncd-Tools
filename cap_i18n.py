@@ -251,15 +251,20 @@ _STRINGS: dict[str, dict[str, str]] = {
         "zh": "找不到生成视频: {file}",
         "ja": "生成された動画が見つかりません: {file}",
     },
+    "video_file_not_found": {
+        "en": "Video file not found: {file}",
+        "zh": "找不到视频文件: {file}",
+        "ja": "動画ファイルが見つかりません: {file}",
+    },
     "audio_file_not_found": {
         "en": "Audio file not found: {file}",
         "zh": "找不到音频文件: {file}",
         "ja": "音声ファイルが見つかりません: {file}",
     },
     "no_generated_videos_to_compose": {
-        "en": "No generated videos to compose (add and enable a generated video for a clip first)",
-        "zh": "没有可合成的生成视频（请先为 clip 添加并启用生成视频）",
-        "ja": "合成できる生成動画がありません（先にクリップに生成動画を追加して有効にしてください）",
+        "en": "No videos to compose (add a video clip or enable a generated video first)",
+        "zh": "没有可合成的视频（请添加视频 Clip，或启用生成视频）",
+        "ja": "合成する動画がありません（動画クリップを追加するか、生成動画を有効にしてください）",
     },
     "watermark_image_not_found": {
         "en": "Watermark image not found: {file}",
