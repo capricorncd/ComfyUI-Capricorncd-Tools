@@ -279,6 +279,13 @@ function hookScalarWidgets(node) {
 function onTeGlobalKeyDown(e) {
     const te = CapTimelineEditorApp._open;
     if (!te) return;
+    if (e.key === "Alt") {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        te._overlay?.focus?.({ preventScroll: true });
+        return;
+    }
     if (te.handleModalKey(e)) return;
     // Gen-edit modal owns Space / timeline keys — beat both Timeline instances.
     if (te.handleGenEditKey?.(e)) return;
@@ -287,6 +294,15 @@ function onTeGlobalKeyDown(e) {
     if (te.handleMediaPreviewKey(e)) return;
     if (te.handleAiOptimizeKey(e)) return;
     if (te.handleDeleteKey(e)) return;
+}
+
+function onTeGlobalKeyUp(e) {
+    const te = CapTimelineEditorApp._open;
+    if (!te || e.key !== "Alt") return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+    te._overlay?.focus?.({ preventScroll: true });
 }
 
 function removeObsoleteWidgets(node) {
@@ -345,6 +361,7 @@ app.registerExtension({
         // must patch tracker undo (see _capTePatchChangeTrackerUndo), not
         // rely on stopImmediatePropagation alone.
         window.addEventListener("keydown", onTeGlobalKeyDown, true);
+        window.addEventListener("keyup", onTeGlobalKeyUp, true);
         hookQueuePrompt();
         hookLoadGraphData();
         // comfyAPI / ChangeTracker may boot after extension setup.

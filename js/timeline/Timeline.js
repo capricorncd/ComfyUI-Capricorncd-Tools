@@ -227,6 +227,7 @@ export class Timeline extends EventEmitter {
   _buildDOM() {
     const c = this._container;
     c.classList.add('tl-root');
+    if (!c.hasAttribute('tabindex')) c.tabIndex = -1;
     c.innerHTML = '';
 
     // ── Toolbar ──────────────────────────────────────────────────────────────
@@ -354,6 +355,7 @@ export class Timeline extends EventEmitter {
       if (e.altKey) {
         e.preventDefault();
         this.scrollEl.scrollLeft += e.deltaY;
+        this._container.focus({ preventScroll: true });
         return;
       }
       if (e.ctrlKey || e.metaKey) {
