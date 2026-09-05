@@ -40,6 +40,50 @@
     font: 13px/1.4 system-ui, sans-serif;
 }
 
+.cap-ui-confirm-overlay {
+    z-index: 100100;
+}
+
+.cap-ui-confirm-dialog {
+    width: min(420px, calc(100vw - 32px));
+    border: 1px solid #4a4a5e;
+    border-radius: 8px;
+    background: #1b1b29;
+    color: #ddd;
+    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.55);
+}
+
+.cap-ui-confirm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid #343447;
+    cursor: move;
+}
+
+.cap-ui-confirm-close {
+    border: 0;
+    background: transparent;
+    color: #aaa;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cap-ui-confirm-message {
+    padding: 18px 16px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.cap-ui-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 0 16px 14px;
+}
+
 .cap-ui-hd {
     display: flex;
     align-items: center;

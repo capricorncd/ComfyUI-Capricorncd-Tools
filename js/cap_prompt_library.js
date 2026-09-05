@@ -3,7 +3,7 @@
 import { app } from "../../scripts/app.js";
 import { resolvePromptTextarea, updateRichPromptMirror } from "./rich_prompt.js";
 import { iconHtml } from "./cap_icons.js";
-import { ensureCapUiCss, mkUiBtn, mkUiIconBtn } from "./cap_ui.js";
+import { ensureCapUiCss, mkUiBtn, mkUiIconBtn, showCapConfirm } from "./cap_ui.js";
 import {
     hoistNodeOverlay,
     positionOverlayFixedToHeader,
@@ -845,13 +845,17 @@ function renderList(body, kind) {
             const btnDel = mkUiIconBtn(iconHtml("trash"), {
                 variant: "danger",
                 title: t("delete_title"),
-                onClick: () => {
+                onClick: async () => {
                     const msg = kind === "history"
                         ? t("confirm_delete_history")
                         : item.builtin
                             ? t("confirm_delete_builtin_preset")
                             : t("confirm_delete_preset");
-                    if (!confirm(msg)) return;
+                    if (!await showCapConfirm(msg, {
+                        title: t("delete_title"),
+                        confirmLabel: t("delete_title"),
+                        cancelLabel: t("cancel_btn"),
+                    })) return;
                     if (kind === "history") removePromptHistory(item.id);
                     else if (item.builtin) hideBuiltinPreset(item.id);
                     else removePromptPreset(item.id);
@@ -987,8 +991,12 @@ function renderToolbar(toolbar, body, kind) {
             renderList(body, kind);
         }}));
 
-        toolbar.appendChild(mkUiBtn(t("clear_btn"), { variant: "danger", onClick: () => {
-            if (!confirm(kind === "history" ? t("confirm_clear_history") : t("confirm_clear_presets"))) return;
+        toolbar.appendChild(mkUiBtn(t("clear_btn"), { variant: "danger", onClick: async () => {
+            if (!await showCapConfirm(kind === "history" ? t("confirm_clear_history") : t("confirm_clear_presets"), {
+                title: t("clear_btn"),
+                confirmLabel: t("clear_btn"),
+                cancelLabel: t("cancel_btn"),
+            })) return;
             if (kind === "history") clearPromptHistory();
             else clearPromptPresets();
             renderList(body, kind);

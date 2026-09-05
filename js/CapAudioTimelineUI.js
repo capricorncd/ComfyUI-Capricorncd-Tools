@@ -3,11 +3,12 @@ import WaveSurfer from "./wavesurfer.esm.js";
 import { clamp, formatTimecode, parseTimecode, segmentFrameCount } from "./timecode.js";
 import { attachRichPromptHandler, detachRichPromptHandler, setRichPromptValue } from "./rich_prompt.js";
 import { bindCanvasWheelPassthrough } from "./cap_canvas_wheel.js";
-import { loadExtensionCss } from "./cap_ui.js";
+import { ensureCapUiCss, loadExtensionCss, showCapConfirm } from "./cap_ui.js";
 import { iconHtml } from "./cap_icons.js";
 import { t } from "./i18n/audio_timeline_ui.js";
 
 function loadCss() {
+    ensureCapUiCss();
     loadExtensionCss("cap_audio_timeline.css", "cat-styles");
 }
 
@@ -938,13 +939,17 @@ _subOverlaps(start, end, excludeId) {
         start < c.endMs && end > c.startMs);
 }
 
-_confirmAction(message) {
-    return window.confirm(message);
+_confirmAction(message, title) {
+    return showCapConfirm(message, {
+        title,
+        confirmLabel: t("menu_delete"),
+        cancelLabel: t("cancel"),
+    });
 }
 
-_confirmDeleteClip(id) {
+async _confirmDeleteClip(id) {
     if (!id || !this.clips.some(c => c.id === id)) return;
-    if (!this._confirmAction(t("confirm_delete_clip"))) return;
+    if (!await this._confirmAction(t("confirm_delete_clip"), t("menu_delete"))) return;
     this._deleteClip(id);
 }
 
@@ -958,9 +963,9 @@ _deleteClip(id) {
     this._updTlCtrl();
 }
 
-_clearTimeline() {
+async _clearTimeline() {
     if (!this.clips.length) return;
-    if (!this._confirmAction(t("confirm_clear_timeline"))) return;
+    if (!await this._confirmAction(t("confirm_clear_timeline"), t("clear_timeline_title"))) return;
     this.clips = [];
     this.selClipId = null;
     this.selClipIds.clear();

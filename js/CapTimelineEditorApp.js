@@ -1334,12 +1334,17 @@ export class CapTimelineEditorApp {
     }
 
     async _deleteAgentConfig() {
-        if (!this._editingAgentId || !confirm(T("confirm_delete_agent"))) return;
+        const agentId = this._editingAgentId;
+        if (!agentId) return;
+        this._openDeleteConfirm(T("confirm_delete_agent"), () => this._performDeleteAgentConfig(agentId));
+    }
+
+    async _performDeleteAgentConfig(agentId) {
         try {
-            const response = await fetch(api.apiURL(`/audio_keyframe_timeline/agents/${encodeURIComponent(this._editingAgentId)}`), { method: "DELETE" });
+            const response = await fetch(api.apiURL(`/audio_keyframe_timeline/agents/${encodeURIComponent(agentId)}`), { method: "DELETE" });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-            this._cancelAgentEdit();
+            if (this._editingAgentId === agentId) this._cancelAgentEdit();
             await this._loadAgentConfigs();
         } catch (error) {
             alert(T("delete_agent_failed", { msg: error instanceof Error ? error.message : String(error) }));
@@ -2573,6 +2578,11 @@ export class CapTimelineEditorApp {
     }
 
     _removeWatermarkImage() {
+        if (!this._watermark.image.file) return;
+        this._openDeleteConfirm(T("confirm_remove_watermark_image"), () => this._removeWatermarkImageNow());
+    }
+
+    _removeWatermarkImageNow() {
         this._watermark.image.file = "";
         this._watermark.image.disabled = false;
         this._deriveWatermarkMode();
@@ -4129,6 +4139,7 @@ export class CapTimelineEditorApp {
         this.trackDeleteModal = el.querySelector(".cat-te-track-delete-modal");
         this.trackDeleteMessage = el.querySelector(".cat-te-track-delete-message");
         this.mediaDeleteModal = el.querySelector(".cat-te-media-delete-modal");
+        this.mediaDeleteTitle = el.querySelector("#cat-te-media-delete-title");
         this.mediaDeleteMessage = el.querySelector(".cat-te-media-delete-message");
         this.trackConvertModal = el.querySelector(".cat-te-track-convert-modal");
         this.trackConvertMessage = el.querySelector(".cat-te-track-convert-message");
@@ -4294,7 +4305,7 @@ export class CapTimelineEditorApp {
         });
         el.querySelector(".cat-te-media-delete-close")?.addEventListener("click", () => this._closeMediaDeleteModal());
         el.querySelector(".cat-te-media-delete-cancel")?.addEventListener("click", () => this._closeMediaDeleteModal());
-        el.querySelector(".cat-te-media-delete-confirm")?.addEventListener("click", () => void this._confirmMediaDelete());
+        el.querySelector(".cat-te-media-delete-confirm")?.addEventListener("click", () => void this._confirmDeleteAction());
         this.mediaDeleteModal?.addEventListener("click", (e) => {
             if (e.target === this.mediaDeleteModal) this._closeMediaDeleteModal();
         });
@@ -5122,9 +5133,15 @@ export class CapTimelineEditorApp {
         const msg = n === 1
             ? T("confirm_delete_named_clip", { name: clips[0].name })
             : T("confirm_delete_selected_n_clips", { n });
-        if (!confirm(msg)) return true;
+        this._openDeleteConfirm(msg, () => this._removeTimelineClips(clips));
+        return true;
+    }
+
+    _removeTimelineClips(clips) {
+        const existing = clips.filter((clip) => clip?.track?.getClip?.(clip.id));
+        if (!existing.length) return;
         this._recordUndo();
-        for (const clip of clips) {
+        for (const clip of existing) {
             this._meta.delete(clip.id);
             this._timeline.removeClip(clip.track.id, clip.id);
         }
@@ -5133,7 +5150,6 @@ export class CapTimelineEditorApp {
         }
         this._updatePromptPanel();
         this._refreshTimelineDuration();
-        return true;
     }
 
     _imgUrl(file) {
@@ -6876,7 +6892,14 @@ export class CapTimelineEditorApp {
         const row = rows.find((item) => item.id === videoId);
         if (!row) return;
         const name = row.file.split(/[\\/]/).pop();
-        if (!confirm(T("confirm_remove_from_clip", { name }))) return;
+        this._openDeleteConfirm(T("confirm_remove_from_clip", { name }), () => this._removeGeneratedVideo(clip, videoId));
+    }
+
+    _removeGeneratedVideo(clip, videoId) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        const rows = this._clipGeneratedVideos(m);
+        if (!rows.some((item) => item.id === videoId)) return;
         this._recordUndo();
         m.generatedVideos = rows.filter((item) => item.id !== videoId);
         if (!this._firstEnabledGeneratedVideo(m) && m.previewMode === "generated") {
@@ -7639,6 +7662,12 @@ export class CapTimelineEditorApp {
         if (!st || !clip) return;
         const gid = st.clipMap.get(clip.id);
         if (!gid) return;
+        this._openDeleteConfirm(T("confirm_delete_named_clip", { name: clip.name }), () => this._removeGenEditClip(clip, gid));
+    }
+
+    _removeGenEditClip(clip, gid) {
+        const st = this._genEditState;
+        if (!st || !clip || st.clipMap.get(clip.id) !== gid) return;
         st.draft = st.draft.filter((g) => g.id !== gid);
         st.audioDraft = (st.audioDraft || []).filter((a) => a.from_gen_id !== gid);
         this._applyGenEditChanges();
@@ -7715,6 +7744,16 @@ export class CapTimelineEditorApp {
         this._pullGenEditDraftFromTimeline();
         const aid = st.audioMap?.get(clip.id) || clip.el?.dataset?.audioId;
         if (!aid) return;
+        const row = (st.audioDraft || []).find((audio) => audio.id === aid);
+        const name = String(row?.file || clip.name || "").split(/[\\/]/).pop();
+        this._openDeleteConfirm(T("confirm_remove_from_clip", { name }), () => this._removeGenEditAudioClip(clip, aid));
+    }
+
+    _removeGenEditAudioClip(clip, aid) {
+        const st = this._genEditState;
+        if (!st || !clip) return;
+        const currentId = st.audioMap?.get(clip.id) || clip.el?.dataset?.audioId;
+        if (currentId !== aid) return;
         st.audioDraft = (st.audioDraft || []).filter((a) => a.id !== aid);
         this._applyGenEditChanges();
         this._buildGenEditTimeline();
@@ -8426,6 +8465,16 @@ export class CapTimelineEditorApp {
     }
 
     _deleteGeneratedAudio(clip, audioId) {
+        if (!clip) return;
+        const m = this._ensureClipMeta(clip);
+        const before = this._clipGeneratedAudios(m);
+        const row = before.find((item) => item.id === audioId);
+        if (!row) return;
+        const name = String(row.file || "").split(/[\\/]/).pop();
+        this._openDeleteConfirm(T("confirm_remove_from_clip", { name }), () => this._removeGeneratedAudio(clip, audioId));
+    }
+
+    _removeGeneratedAudio(clip, audioId) {
         if (!clip) return;
         const m = this._ensureClipMeta(clip);
         const before = this._clipGeneratedAudios(m);
@@ -9721,9 +9770,19 @@ export class CapTimelineEditorApp {
         const current = items[index];
         if (!current) return;
         const name = current.file.split(/[\\/]/).pop() || current.file;
-        if (!confirm(T("confirm_remove_from_clip", { name }))) return;
+        this._openDeleteConfirm(T("confirm_remove_from_clip", { name }), () => this._removeClipItemNow(clip, current.id, index));
+    }
+
+    _removeClipItemNow(clip, itemId, fallbackIndex) {
+        if (!clip || clip.track?.type === "audio") return;
+        const m = this._ensureClipMeta(clip);
+        this._normalizeVisualMeta(clip, m, { seedFromClip: false });
+        const items = this._clipItems(m);
+        const index = items.findIndex((item) => item.id === itemId);
+        const removeIndex = index >= 0 ? index : fallbackIndex;
+        if (removeIndex < 0 || removeIndex >= items.length) return;
         this._recordUndo();
-        m.items = items.filter((_, i) => i !== index).map((item) => ({
+        m.items = items.filter((_, i) => i !== removeIndex).map((item) => ({
             id: item.id,
             kind: item.kind,
             file: item.file,
@@ -9733,7 +9792,7 @@ export class CapTimelineEditorApp {
         m.mediaIds = m.items.map((item) => item.id).filter(Boolean);
         this._normalizeVisualMeta(clip, m, { seedFromClip: false });
         this._meta.set(clip.id, m);
-        this._setClipPreviewItemIndex(clip, Math.min(index, Math.max(0, m.items.length - 1)));
+        this._setClipPreviewItemIndex(clip, Math.min(removeIndex, Math.max(0, m.items.length - 1)));
         this._syncClipPrimaryAppearance(clip);
         this._scheduleProgramPreview();
         this._saveToWidgets();
@@ -13211,24 +13270,32 @@ export class CapTimelineEditorApp {
     }
 
     _openMediaDeleteModal(entries, message, batch) {
-        if (!this.mediaDeleteModal || !entries?.length) return;
-        this._pendingMediaDelete = { entries, batch };
+        if (!entries?.length) return;
+        this._openDeleteConfirm(message, () => this._performMediaDelete(entries, batch), T("delete_asset_title"));
+    }
+
+    _openDeleteConfirm(message, action, title = T("delete_btn")) {
+        if (!this.mediaDeleteModal || typeof action !== "function") return;
+        this._pendingDeleteAction = action;
+        if (this.mediaDeleteTitle) this.mediaDeleteTitle.textContent = title;
         this.mediaDeleteMessage.textContent = message;
         this.mediaDeleteModal.hidden = false;
         this.mediaDeleteModal.querySelector(".cat-te-media-delete-cancel")?.focus();
     }
 
     _closeMediaDeleteModal() {
-        this._pendingMediaDelete = null;
+        this._pendingDeleteAction = null;
         if (this.mediaDeleteModal) this.mediaDeleteModal.hidden = true;
     }
 
-    async _confirmMediaDelete() {
-        const pending = this._pendingMediaDelete;
-        if (!pending?.entries?.length) return;
-        const entries = pending.entries;
-        const batch = pending.batch;
+    async _confirmDeleteAction() {
+        const action = this._pendingDeleteAction;
+        if (typeof action !== "function") return;
         this._closeMediaDeleteModal();
+        await action();
+    }
+
+    async _performMediaDelete(entries, batch) {
         this._recordUndo();
         const diskJobs = [];
         for (const { file, kind } of entries) {
@@ -14003,13 +14070,11 @@ export class CapTimelineEditorApp {
     }
 
     _deleteClip(clip) {
-        this._recordUndo();
-        this._meta.delete(clip.id);
-        this._timeline.removeClip(clip.track.id, clip.id);
-        if (!this._timeline.getSelectedClips().length) {
-            this._timeline.selectClip(null);
-        }
-        this._updatePromptPanel();
+        if (!clip) return;
+        this._openDeleteConfirm(
+            T("confirm_delete_named_clip", { name: clip.name }),
+            () => this._removeTimelineClips([clip]),
+        );
     }
 
     _splitClip(clip) {
