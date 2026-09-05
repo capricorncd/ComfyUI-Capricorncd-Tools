@@ -114,12 +114,27 @@ def _collect_plan(
 
     video_segs: list[dict] = []
     audio_segs: list[dict] = []
+    subtitle_segs: list[dict] = []
     end_ms = 0
 
     for track in reversed(tracks):
         track_type = str(track.get("type") or "").lower()
         enabled = track.get("enabled", True) is not False
         if not enabled:
+            continue
+
+        if track_type in ("subtitle", "text"):
+            if track.get("visible", True) is False:
+                continue
+            for clip in _as_list(track.get("clips")):
+                if not isinstance(clip, dict) or clip.get("enabled", True) is False or clip.get("visible", True) is False:
+                    continue
+                text = str(clip.get("text") or clip.get("name") or "").strip()
+                if not text:
+                    continue
+                start = _ms(clip.get("start_ms")) / 1000.0
+                duration = max(1, _ms(clip.get("duration_ms"), 1)) / 1000.0
+                subtitle_segs.append({"text": text, "start_sec": start, "end_sec": start + duration, "style": clip})
             continue
 
         if track_type in ("visual", "image", "video", ""):
@@ -237,6 +252,7 @@ def _collect_plan(
         "total_sec": max(end_ms / 1000.0, 0.1),
         "video_segs": video_segs,
         "audio_segs": audio_segs,
+        "subtitle_segs": subtitle_segs,
     }
 
 
@@ -363,6 +379,50 @@ def _render_text_watermark_png(text_cfg: dict, scale_pct: float) -> str:
     return path
 
 
+def _render_subtitle_png(text: str, style: dict) -> str:
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        font_size = max(1, round(float(style.get("font_size", 36))))
+    except (TypeError, ValueError):
+        font_size = 36
+    font_path = resolve_font_path(style.get("font_path") or "")
+    font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+    color = str(style.get("color") or "#ffffff").lstrip("#")
+    if len(color) != 6:
+        color = "ffffff"
+    opacity = max(0.0, min(1.0, float(style.get("opacity", 1) or 1)))
+    fill = tuple(int(color[i:i + 2], 16) for i in (0, 2, 4)) + (round(255 * opacity),)
+    stroke_width = max(0, round(float(style.get("stroke_width", 0) or 0))) if style.get("stroke_enabled", True) is not False else 0
+    stroke_color = str(style.get("stroke_color") or "#000000").lstrip("#")
+    if len(stroke_color) != 6:
+        stroke_color = "000000"
+    stroke_fill = tuple(int(stroke_color[i:i + 2], 16) for i in (0, 2, 4)) + (round(255 * opacity),)
+    align = str(style.get("align") or "center").lower()
+    spacing = max(2, round(font_size * 0.25))
+    scratch = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    box = scratch.multiline_textbbox((0, 0), text, font=font, spacing=spacing, align=align, stroke_width=stroke_width)
+    shadow_x = round(float(style.get("shadow_offset_x", 0) or 0)) if style.get("shadow_enabled") else 0
+    shadow_y = round(float(style.get("shadow_offset_y", 0) or 0)) if style.get("shadow_enabled") else 0
+    pad = stroke_width + max(abs(shadow_x), abs(shadow_y)) + 2
+    width = max(1, box[2] - box[0] + pad * 2)
+    height = max(1, box[3] - box[1] + pad * 2)
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    pos = (pad - box[0], pad - box[1])
+    if style.get("shadow_enabled"):
+        shadow_color = str(style.get("shadow_color") or "#000000").lstrip("#")
+        if len(shadow_color) != 6:
+            shadow_color = "000000"
+        shadow_fill = tuple(int(shadow_color[i:i + 2], 16) for i in (0, 2, 4)) + (round(180 * opacity),)
+        draw.multiline_text((pos[0] + shadow_x, pos[1] + shadow_y), text, font=font, fill=shadow_fill, spacing=spacing, align=align)
+    draw.multiline_text(pos, text, font=font, fill=fill, spacing=spacing, align=align, stroke_width=stroke_width, stroke_fill=stroke_fill)
+    fd, path = tempfile.mkstemp(suffix=".png", prefix="cap_subtitle_")
+    os.close(fd)
+    image.save(path)
+    return path
+
+
 def _random_schedule(total_sec: float, rng) -> list[tuple[float, float, str]]:
     segments: list[tuple[float, float, str]] = []
     t = 0.0
@@ -480,6 +540,7 @@ def compose_timeline_project(
     # The plan is already ordered bottom to top for both parent and subtracks.
     video_segs = list(plan["video_segs"])
     audio_segs = plan["audio_segs"]
+    subtitle_segs = plan["subtitle_segs"]
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
 
@@ -499,6 +560,12 @@ def compose_timeline_project(
         watermark, width, height, total, watermark_input_index,
     )
     cmd += wm_input_args
+    subtitle_input_index = watermark_input_index + (1 if wm_input_args else 0)
+    subtitle_paths: list[str] = []
+    for seg in subtitle_segs:
+        path = _render_subtitle_png(seg["text"], seg["style"])
+        subtitle_paths.append(path)
+        cmd += ["-loop", "1", "-i", _ffmpeg_path(path)]
 
     filters: list[str] = []
     for i, seg in enumerate(video_segs):
@@ -523,6 +590,24 @@ def compose_timeline_project(
         prev = out
     filters.append(f"[{prev}]format=yuv420p[vout]")
     filters += wm_filters
+    for i, seg in enumerate(subtitle_segs):
+        style = seg["style"]
+        align = str(style.get("align") or "center").lower()
+        v_align = str(style.get("v_align") or "bottom").lower()
+        offset_x = float(style.get("offset_x", 0) or 0) / 100.0
+        offset_y = float(style.get("offset_y", 0) or 0) / 100.0
+        pad = round(width * 0.04)
+        x_base = str(pad) if align == "left" else f"main_w-overlay_w-{pad}" if align == "right" else "(main_w-overlay_w)/2"
+        y_base = str(pad) if v_align == "top" else "(main_h-overlay_h)/2" if v_align in ("center", "middle") else f"main_h-overlay_h-{pad}"
+        x = f"({x_base})+main_w*{offset_x:.6f}"
+        y_sign = "-" if v_align not in ("top", "center", "middle") else "+"
+        y = f"({y_base}){y_sign}main_h*{offset_y:.6f}"
+        out = f"vsub{i}"
+        filters.append(
+            f"[{video_out_label}][{subtitle_input_index + i}:v]overlay=x={x}:y={y}:eof_action=pass:"
+            f"enable='{_escape_enable(seg['start_sec'], seg['end_sec'])}'[{out}]"
+        )
+        video_out_label = out
 
     amix_labels: list[str] = []
     for i, seg in enumerate(video_segs):
@@ -572,8 +657,12 @@ def compose_timeline_project(
     else:
         map_args.append("-an")
 
+    filter_fd, filter_path = tempfile.mkstemp(suffix=".txt", prefix="cap_ffmpeg_filters_")
+    with os.fdopen(filter_fd, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write(";".join(filters))
+
     cmd += [
-        "-filter_complex", ";".join(filters),
+        "-filter_complex_script", _ffmpeg_path(filter_path),
         *map_args,
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
@@ -592,8 +681,13 @@ def compose_timeline_project(
     try:
         _run_ffmpeg(cmd)
     finally:
+        if os.path.exists(filter_path):
+            os.unlink(filter_path)
         if wm_cleanup_path and os.path.exists(wm_cleanup_path):
             os.unlink(wm_cleanup_path)
+        for path in subtitle_paths:
+            if os.path.exists(path):
+                os.unlink(path)
     return {
         "width": width,
         "height": height,
@@ -601,6 +695,7 @@ def compose_timeline_project(
         "duration_sec": total,
         "video_count": len(video_segs),
         "audio_count": len(audio_segs) + sum(1 for s in video_segs if not s["muted"]),
+        "subtitle_count": len(subtitle_segs),
         "output_path": output_path,
     }
 

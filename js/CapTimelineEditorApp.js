@@ -13847,6 +13847,49 @@ export class CapTimelineEditorApp {
         }
     }
 
+    _warmNextPreviewVideo(t, usedKeys) {
+        const horizon = 1.25;
+        let nextTime = Infinity;
+        for (const track of this._allImageTracks()) {
+            if (track.visible === false || this._trackInfo.get(track.id)?.enabled === false) continue;
+            for (const clip of track.clips) {
+                const m = this._meta.get(clip.id) ?? defaultImageMeta();
+                if (m.disabled || m.visible === false) continue;
+                for (const edge of [clip.startTime, clip.endTime]) {
+                    if (edge > t + 1e-6 && edge < nextTime) nextTime = edge;
+                }
+                if (this._clipUsesGeneratedPreview(m)) {
+                    for (const gen of this._clipGeneratedVideos(m)) {
+                        if (gen.enabled === false) continue;
+                        const edge = clip.startTime + Math.max(0, Number(gen.edit_start_sec) || 0);
+                        if (edge > t + 1e-6 && edge < nextTime) nextTime = edge;
+                    }
+                }
+            }
+        }
+        if (!Number.isFinite(nextTime) || nextTime - t > horizon) return;
+        let layers = this._collectPreviewLayers(nextTime + 0.5 / Math.max(1, this.getFps()));
+        if (layers.some((layer) => layer.kind === "generated")) layers = layers.slice(-1);
+        const layer = layers.at(-1);
+        if (!layer || (layer.kind !== "generated" && layer.kind !== "video")) return;
+        const file = layer.kind === "generated" ? layer.file : (layer.item?.file || layer.clip.src);
+        const location = layer.kind === "generated" ? "output" : "input";
+        const key = `${location}:${file}`;
+        if (!file || usedKeys.has(key)) return;
+        const entry = this._ensurePreviewVideo(file, location);
+        if (!entry) return;
+        let mediaTime = (layer.clip.sourceOffset || 0) + (nextTime - layer.clip.startTime);
+        if (layer.kind === "generated") {
+            mediaTime = Math.max(0, Number(layer.trimInSec) || 0)
+                + Math.max(0, nextTime - layer.clip.startTime - (Number(layer.editStartSec) || 0));
+        }
+        entry.active = false;
+        entry.el.muted = true;
+        if (!entry.el.paused) entry.el.pause();
+        this._seekPreviewVideo(entry, mediaTime, { force: true });
+        usedKeys.add(key);
+    }
+
     _drawCover(ctx, media, cw, ch) {
         const mw = media.videoWidth || media.naturalWidth || media.width || 0;
         const mh = media.videoHeight || media.naturalHeight || media.height || 0;
@@ -14100,6 +14143,7 @@ export class CapTimelineEditorApp {
         });
         this._drawSubtitleOverlays(octx, cw, ch, t);
         const drew = drewVisual || hasSub;
+        if (playing) this._warmNextPreviewVideo(t, usedVideoKeys);
         this._pauseUnusedPreviewVideos(usedVideoKeys);
 
         if (drew) {
