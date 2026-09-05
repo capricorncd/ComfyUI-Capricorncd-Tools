@@ -5328,19 +5328,16 @@ export class CapTimelineEditorApp {
                     m.previewMode = "media";
                 }
                 this._meta.set(clip.id, m);
-                clip.startTime = this._ensureResourceStart(clip, m);
                 const gen = this._clipUsesGeneratedPreview(m)
                     ? this._firstEnabledGeneratedVideo(m)
                     : null;
                 if (gen) {
                     jobs.push((async () => {
                         await this._ensureGenVideoDuration(gen);
-                        this._applyClipDisplayDuration(clip, m, gen);
                         this._decorateClip(clip);
                         this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
                     })());
                 } else {
-                    this._applyClipDisplayDuration(clip, m, null);
                     this._decorateClip(clip);
                     this._syncClipPrimaryAppearance(clip, { refreshVideo: true });
                 }
@@ -5437,16 +5434,6 @@ export class CapTimelineEditorApp {
             }
             this._reflowTrackNoOverlap(track);
         }
-    }
-
-    _applyClipDisplayDuration(clip, meta, gen) {
-        const m = meta || this._ensureClipMeta(clip);
-        const resourceDur = this._ensureResourceDuration(clip, m);
-        clip.duration = resourceDur;
-        clip.sourceOffset = Math.max(0, Number(clip.sourceOffset) || 0);
-        clip._applyPosition?.();
-        this._meta.set(clip.id, m);
-        void gen;
     }
 
     _syncGenTrimFromClip(_clip) {
@@ -13491,15 +13478,7 @@ export class CapTimelineEditorApp {
         const isAudio = track.type === "audio";
         const baseMeta = this._meta.get(clip.id)
             ?? (isAudio ? defaultAudioMeta() : defaultImageMeta());
-        const cloneMeta = () => {
-            const m = { ...baseMeta };
-            if (Array.isArray(baseMeta.items)) {
-                m.items = baseMeta.items.map((item) => (
-                    item && typeof item === "object" ? { ...item } : item
-                ));
-            }
-            return m;
-        };
+        const cloneMeta = () => this._cloneClipMeta(baseMeta);
         const clipId = clip.id;
         const clipStart = clip.startTime;
         const sourceOffset = clip.sourceOffset || 0;
@@ -13530,6 +13509,8 @@ export class CapTimelineEditorApp {
         left._audioBuffer = audioBuffer;
         {
             const lm = cloneMeta();
+            lm.resourceStartSec = clipStart;
+            lm.resourceDurationSec = leftDur;
             if (isAudio) {
                 lm.fadeInMs = Math.round((left.fadeIn || 0) * 1000);
                 lm.fadeOutMs = 0;
@@ -13549,6 +13530,8 @@ export class CapTimelineEditorApp {
         right._audioBuffer = audioBuffer;
         {
             const rm = cloneMeta();
+            rm.resourceStartSec = t;
+            rm.resourceDurationSec = rightDur;
             if (isAudio) {
                 rm.fadeInMs = 0;
                 rm.fadeOutMs = Math.round((right.fadeOut || 0) * 1000);

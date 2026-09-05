@@ -25,7 +25,7 @@ export class PlayHead {
       const onMove = (e) => {
         const rect = tl.scrollEl.getBoundingClientRect();
         const x = e.clientX - rect.left + tl.scrollEl.scrollLeft;
-        tl.setCurrentTime(Math.max(0, x / tl.pixelsPerSecond));
+        tl.setCurrentTime(tl._snapSeekToClipEdges(Math.max(0, x / tl.pixelsPerSecond)));
       };
 
       const onUp = () => {

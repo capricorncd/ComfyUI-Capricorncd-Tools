@@ -101,6 +101,24 @@ export class Timeline extends EventEmitter {
     return this._snapTime(this.currentTime);
   }
 
+  _snapSeekToClipEdges(time) {
+    const threshold = SNAP_EDGE_PX / this.pixelsPerSecond;
+    let best = this._snapTime(time);
+    let bestDist = threshold;
+    for (const track of this.tracks) {
+      for (const clip of track.clips) {
+        for (const edge of [clip.startTime, clip.endTime]) {
+          const distance = Math.abs(time - edge);
+          if (distance < bestDist) {
+            best = edge;
+            bestDist = distance;
+          }
+        }
+      }
+    }
+    return this._snapTime(best);
+  }
+
   _clipSnapTimes(excludeClip) {
     const times = [];
     for (const track of this.tracks) {
@@ -822,7 +840,7 @@ export class Timeline extends EventEmitter {
   // ─── time control ─────────────────────────────────────────────────────────
 
   _seekFromEvent(e) {
-    this.setCurrentTime(this.clientXToTime(e.clientX));
+    this.setCurrentTime(this._snapSeekToClipEdges(this.clientXToTime(e.clientX)));
   }
 
   _beginSeekScrub(e) {
