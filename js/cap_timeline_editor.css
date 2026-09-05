@@ -1891,6 +1891,15 @@ body.cat-te-media-dnd-over-tl {
     gap: 6px;
     margin-top: 4px;
 }
+
+.cat-te-sub-style-title {
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color, #333);
+    color: var(--fg-color, #ddd);
+    font-size: 12px;
+    font-weight: 600;
+}
 .cat-te-sub-apply-row .cat-te-btn {
     width: 100%;
 }

@@ -126,6 +126,7 @@ def _collect_plan(
         if track_type in ("subtitle", "text"):
             if track.get("visible", True) is False:
                 continue
+            track_style = _as_dict(track.get("subtitle_style"))
             for clip in _as_list(track.get("clips")):
                 if not isinstance(clip, dict) or clip.get("enabled", True) is False or clip.get("visible", True) is False:
                     continue
@@ -134,7 +135,12 @@ def _collect_plan(
                     continue
                 start = _ms(clip.get("start_ms")) / 1000.0
                 duration = max(1, _ms(clip.get("duration_ms"), 1)) / 1000.0
-                subtitle_segs.append({"text": text, "start_sec": start, "end_sec": start + duration, "style": clip})
+                subtitle_segs.append({
+                    "text": text,
+                    "start_sec": start,
+                    "end_sec": start + duration,
+                    "style": track_style or clip,
+                })
             continue
 
         if track_type in ("visual", "image", "video", ""):

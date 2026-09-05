@@ -497,6 +497,58 @@ function pickSubtitleStyle(meta) {
     return out;
 }
 
+function subtitleStyleFromJson(value) {
+    const src = value && typeof value === "object" ? value : {};
+    return pickSubtitleStyle({
+        fontFamily: src.font_family ?? src.fontFamily,
+        fontPath: src.font_path ?? src.fontPath,
+        fontSize: src.font_size ?? src.fontSize,
+        letterSpacing: src.letter_spacing ?? src.letterSpacing,
+        color: src.color,
+        bold: src.bold,
+        italic: src.italic,
+        opacity: src.opacity,
+        strokeEnabled: src.stroke_enabled ?? src.strokeEnabled,
+        strokeColor: src.stroke_color ?? src.strokeColor,
+        strokeWidth: src.stroke_width ?? src.strokeWidth,
+        shadowEnabled: src.shadow_enabled ?? src.shadowEnabled,
+        shadowColor: src.shadow_color ?? src.shadowColor,
+        shadowBlur: src.shadow_blur ?? src.shadowBlur,
+        shadowOffsetX: src.shadow_offset_x ?? src.shadowOffsetX,
+        shadowOffsetY: src.shadow_offset_y ?? src.shadowOffsetY,
+        align: src.align,
+        vAlign: src.v_align ?? src.vAlign,
+        offsetX: src.offset_x ?? src.offsetX,
+        offsetY: src.offset_y ?? src.offsetY,
+    });
+}
+
+function serializeSubtitleStyle(meta) {
+    const style = { ...pickSubtitleStyle(defaultSubtitleMeta()), ...pickSubtitleStyle(meta) };
+    return {
+        font_family: style.fontFamily,
+        font_path: style.fontPath || "",
+        font_size: style.fontSize,
+        letter_spacing: style.letterSpacing ?? 0,
+        color: style.color,
+        bold: !!style.bold,
+        italic: !!style.italic,
+        opacity: style.opacity,
+        stroke_enabled: style.strokeEnabled !== false,
+        stroke_color: style.strokeColor,
+        stroke_width: style.strokeWidth,
+        shadow_enabled: style.shadowEnabled !== false,
+        shadow_color: style.shadowColor,
+        shadow_blur: style.shadowBlur,
+        shadow_offset_x: style.shadowOffsetX,
+        shadow_offset_y: style.shadowOffsetY,
+        align: style.align,
+        v_align: style.vAlign,
+        offset_x: style.offsetX,
+        offset_y: style.offsetY,
+    };
+}
+
 function isSubtitleTrackType(type) {
     const t = String(type || "").toLowerCase();
     return t === "text" || t === "subtitle";
@@ -1349,6 +1401,9 @@ export class CapTimelineEditorApp {
                     : isSubtitleTrackType(type)
                         ? "subtitle"
                         : "overlay",
+            ...(isSubtitleTrackType(type)
+                ? { subtitleStyle: pickSubtitleStyle(defaultSubtitleMeta()) }
+                : {}),
         });
         this._setupTrackControls(track);
         this._saveToWidgets();
@@ -2909,6 +2964,7 @@ export class CapTimelineEditorApp {
                   <span>${T("subtitle_text_label")}</span>
                   <textarea class="cat-te-sub-text" rows="3" placeholder="${T("subtitle_default_text")}"></textarea>
                 </label>
+                <div class="cat-te-sub-style-title">${T("subtitle_track_style_title")}</div>
                 <label class="cat-te-clip-setting-row">
                   <span>${T("subtitle_font_label")}</span>
                   <select class="cat-te-sub-font"></select>
@@ -2985,7 +3041,6 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-sub-offset-y" type="number" min="-50" max="50" step="1" value="8" />
                 </label>
                 <div class="cat-te-sub-apply-row">
-                  <button type="button" class="cat-te-btn cat-te-sub-apply-track">${T("subtitle_apply_track_btn")}</button>
                   <button type="button" class="cat-te-btn cat-te-sub-apply-all">${T("subtitle_apply_all_btn")}</button>
                 </div>
               </div>
@@ -3577,7 +3632,6 @@ export class CapTimelineEditorApp {
         this.subVAlignSelect = el.querySelector(".cat-te-sub-valign");
         this.subOffsetXInput = el.querySelector(".cat-te-sub-offset-x");
         this.subOffsetYInput = el.querySelector(".cat-te-sub-offset-y");
-        this.subApplyTrackBtn = el.querySelector(".cat-te-sub-apply-track");
         this.subApplyAllBtn = el.querySelector(".cat-te-sub-apply-all");
         this.clipInfoDetail = el.querySelector(".cat-te-clip-info-detail");
         this.clipSwiper = el.querySelector(".cat-te-clip-swiper");
@@ -10140,6 +10194,7 @@ export class CapTimelineEditorApp {
         });
         this._meta.set(clip.id, {
             ...defaultSubtitleMeta(this._trackIndex(track)),
+            ...pickSubtitleStyle(this._trackInfo.get(track.id)?.subtitleStyle),
             text,
         });
         this._timeline.selectClip(clip);
@@ -11009,6 +11064,7 @@ export class CapTimelineEditorApp {
 
         ordered.forEach((row, index) => {
             const isMain = !!row.isMain;
+            const isSubtitle = isSubtitleTrackType(row.type);
             const track = tl.addTrackAt({
                 id: row.id,
                 type: row.type || "image",
@@ -11031,6 +11087,12 @@ export class CapTimelineEditorApp {
             track.setLocked(!!row.locked);
             track.setVisible(row.visible !== false);
             track.setMuted(!!row.muted);
+            const savedSubtitleStyle = row.subtitle_style && typeof row.subtitle_style === "object"
+                ? row.subtitle_style
+                : null;
+            const legacySubtitleClip = isSubtitle
+                ? (Array.isArray(row.clips) ? row.clips : []).find((clip) => clip && typeof clip === "object")
+                : null;
             this._trackInfo.set(track.id, {
                 trackIndex: row.trackIndex ?? index,
                 enabled: row.enabled !== false,
@@ -11042,9 +11104,17 @@ export class CapTimelineEditorApp {
                             : isVoiceoverTrackType(row.type)
                                 ? "voiceover"
                                 : isSubtitleTrackType(row.type)
-                                    ? "subtitle"
-                                    : "overlay"
+                                     ? "subtitle"
+                                     : "overlay"
                 ),
+                ...(isSubtitle
+                    ? {
+                        subtitleStyle: {
+                            ...pickSubtitleStyle(defaultSubtitleMeta()),
+                            ...subtitleStyleFromJson(savedSubtitleStyle || legacySubtitleClip?.style || legacySubtitleClip),
+                        },
+                    }
+                    : {}),
             });
             this._setupTrackControls(track);
         });
@@ -11195,32 +11265,10 @@ export class CapTimelineEditorApp {
                 duration: dur,
                 color: track.color || "#ff9e4a",
             });
-            const style = c.style && typeof c.style === "object" ? c.style : c;
+            const trackStyle = this._trackInfo.get(track.id)?.subtitleStyle;
             this._meta.set(clip.id, {
                 ...defaultSubtitleMeta(trackIdx),
-                ...pickSubtitleStyle({
-                    text,
-                    fontFamily: style.font_family ?? style.fontFamily,
-                    fontPath: style.font_path ?? style.fontPath,
-                    fontSize: style.font_size ?? style.fontSize,
-                    letterSpacing: style.letter_spacing ?? style.letterSpacing,
-                    color: style.color,
-                    bold: style.bold,
-                    italic: style.italic,
-                    opacity: style.opacity,
-                    strokeEnabled: style.stroke_enabled ?? style.strokeEnabled,
-                    strokeColor: style.stroke_color ?? style.strokeColor,
-                    strokeWidth: style.stroke_width ?? style.strokeWidth,
-                    shadowEnabled: style.shadow_enabled ?? style.shadowEnabled,
-                    shadowColor: style.shadow_color ?? style.shadowColor,
-                    shadowBlur: style.shadow_blur ?? style.shadowBlur,
-                    shadowOffsetX: style.shadow_offset_x ?? style.shadowOffsetX,
-                    shadowOffsetY: style.shadow_offset_y ?? style.shadowOffsetY,
-                    align: style.align,
-                    vAlign: style.v_align ?? style.vAlign,
-                    offsetX: style.offset_x ?? style.offsetX,
-                    offsetY: style.offset_y ?? style.offsetY,
-                }),
+                ...pickSubtitleStyle(trackStyle),
                 text,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
@@ -14872,7 +14920,12 @@ export class CapTimelineEditorApp {
         }
         if (isSubtitle) {
             try {
-                this._fillSubtitlePanel(this._ensureClipMeta(clip));
+                const subtitleMeta = this._ensureClipMeta(clip);
+                const info = this._trackInfo.get(clip.track.id) || {};
+                Object.assign(subtitleMeta, pickSubtitleStyle(info.subtitleStyle));
+                this._fillSubtitlePanel(subtitleMeta);
+                info.subtitleStyle = pickSubtitleStyle(subtitleMeta);
+                this._trackInfo.set(clip.track.id, info);
             } catch (err) {
                 console.error("[CapTE] subtitle panel fill failed", err);
             }
@@ -14922,7 +14975,6 @@ export class CapTimelineEditorApp {
                 bind(el, "change", () => this._onSubtitleFieldChange({ [key]: cast }));
             }
         }
-        bind(this.subApplyTrackBtn, "click", () => this._applySubtitleStyleToTrack());
         bind(this.subApplyAllBtn, "click", () => this._applySubtitleStyleToAllUnlocked());
     }
 
@@ -15008,7 +15060,7 @@ export class CapTimelineEditorApp {
         return meta;
     }
 
-    _onSubtitleFieldChange() {
+    _onSubtitleFieldChange(changes = {}) {
         if (this._subPanelFilling) return;
         const clip = this._selClip;
         if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
@@ -15023,6 +15075,18 @@ export class CapTimelineEditorApp {
         }
         const m = this._ensureClipMeta(clip);
         this._readSubtitlePanelInto(m);
+        if (!changes.text) {
+            const style = pickSubtitleStyle(m);
+            const info = this._trackInfo.get(clip.track.id) || {};
+            info.subtitleStyle = style;
+            this._trackInfo.set(clip.track.id, info);
+            for (const other of clip.track.clips) {
+                const otherMeta = this._ensureClipMeta(other);
+                Object.assign(otherMeta, style);
+                this._meta.set(other.id, otherMeta);
+                this._decorateClip(other);
+            }
+        }
         this._syncFontSelectPreview(this.subFontSelect);
         const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
         clip.name = label.slice(0, 40);
@@ -15035,26 +15099,6 @@ export class CapTimelineEditorApp {
         this._scheduleProgramPreview();
     }
 
-    _applySubtitleStyleToTrack() {
-        const clip = this._selClip;
-        if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
-        const style = pickSubtitleStyle(this._ensureClipMeta(clip));
-        this._recordUndo();
-        for (const other of clip.track.clips) {
-            if (other.id === clip.id) continue;
-            const m = this._ensureClipMeta(other);
-            Object.assign(m, style);
-            const label = (m.text || T("subtitle_default_text")).trim() || T("subtitle_default_text");
-            other.name = label.slice(0, 40);
-            const labelEl = other.el?.querySelector?.(".tl-clip-label");
-            if (labelEl) labelEl.textContent = other.name;
-            this._meta.set(other.id, m);
-            this._decorateClip(other);
-        }
-        this._saveToWidgets();
-        this._scheduleProgramPreview();
-    }
-
     _applySubtitleStyleToAllUnlocked() {
         const clip = this._selClip;
         if (!clip || !isSubtitleTrackType(clip.track?.type)) return;
@@ -15062,6 +15106,9 @@ export class CapTimelineEditorApp {
         this._recordUndo();
         for (const track of this._allTextTracks()) {
             if (track.locked) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            info.subtitleStyle = { ...style };
+            this._trackInfo.set(track.id, info);
             for (const other of track.clips) {
                 const m = this._ensureClipMeta(other);
                 Object.assign(m, style);
@@ -15087,7 +15134,10 @@ export class CapTimelineEditorApp {
                 if (!(t >= clip.startTime - 1e-6 && t < clip.endTime - 1e-9)) continue;
                 const m = this._meta.get(clip.id) ?? defaultSubtitleMeta();
                 if (m.disabled || m.visible === false) continue;
-                this._paintSubtitle(ctx, cw, ch, m);
+                this._paintSubtitle(ctx, cw, ch, {
+                    ...m,
+                    ...pickSubtitleStyle(info.subtitleStyle),
+                });
             }
         }
     }
@@ -15964,7 +16014,6 @@ export class CapTimelineEditorApp {
                     return voRow;
                 }
                 if (isSubTrack) {
-                    const style = pickSubtitleStyle(m);
                     const subRow = {
                         id: clip.id,
                         type: "subtitle",
@@ -15972,28 +16021,7 @@ export class CapTimelineEditorApp {
                         visible: m.visible !== false,
                         start_ms: startMs,
                         duration_ms: durationMs,
-                        name: clip.name || T("subtitle_default_text"),
                         text: m.text ?? "",
-                        font_family: style.fontFamily,
-                        font_path: style.fontPath || "",
-                        font_size: style.fontSize,
-                        letter_spacing: style.letterSpacing ?? 0,
-                        color: style.color,
-                        bold: !!style.bold,
-                        italic: !!style.italic,
-                        opacity: style.opacity,
-                        stroke_enabled: style.strokeEnabled !== false,
-                        stroke_color: style.strokeColor,
-                        stroke_width: style.strokeWidth,
-                        shadow_enabled: style.shadowEnabled !== false,
-                        shadow_color: style.shadowColor,
-                        shadow_blur: style.shadowBlur,
-                        shadow_offset_x: style.shadowOffsetX,
-                        shadow_offset_y: style.shadowOffsetY,
-                        align: style.align,
-                        v_align: style.vAlign,
-                        offset_x: style.offsetX,
-                        offset_y: style.offsetY,
                     };
                     if (Number.isFinite(Number(m.resourceStartSec)) && m.resourceStartSec >= 0) {
                         subRow.resource_start_sec = Number(m.resourceStartSec);
@@ -16147,6 +16175,13 @@ export class CapTimelineEditorApp {
                 muted: !!track.muted,
                 locked: !!track.locked,
                 color: track.color,
+                ...(isSubTrack
+                    ? {
+                        subtitle_style: serializeSubtitleStyle(
+                            trackInfo.subtitleStyle || this._meta.get(track.clips[0]?.id),
+                        ),
+                    }
+                    : {}),
                 clips,
             };
         });
