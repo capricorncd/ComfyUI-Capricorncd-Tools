@@ -89,14 +89,11 @@ const OUTPUT_VIDEOS_TIME_RANGES = [
     { id: "1d", get label() { return T("time_range_1d"); }, hours: 24 },
     { id: "all", get label() { return T("time_range_all"); }, hours: null },
 ];
-const MEDIA_KIND_FILTERS = [
+const MEDIA_LIBRARY_TABS = [
     { id: "image", get label() { return T("media_kind_image"); } },
     { id: "video", get label() { return T("media_kind_video"); } },
     { id: "audio", get label() { return T("media_kind_audio"); } },
-    { id: "text", get label() { return T("media_kind_text"); } },
-    { id: "other", get label() { return T("media_kind_other"); } },
 ];
-const MEDIA_KIND_CORE = new Set(["image", "video", "audio", "text"]);
 const CLIP_ROLES = [
     { id: "multi_ref", get label() { return T("clip_role_multi_ref"); } },
     { id: "first_last", get label() { return T("clip_role_first_last"); } },
@@ -178,6 +175,16 @@ function normalizeGeneratedVideo(row) {
 
 const OUTPUT_VIDEO_EXT = /\.(mp4|webm|mov|mkv|avi|m4v)$/i;
 const OUTPUT_AUDIO_EXT = /\.(wav|mp3|flac|ogg|m4a|aac|wma)$/i;
+const INPUT_IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
+
+function mediaKindFromFilename(file, fallback = "") {
+    const path = String(file || "").trim().replace(/\\/g, "/").split(/[?#]/, 1)[0];
+    if (OUTPUT_VIDEO_EXT.test(path)) return "video";
+    if (OUTPUT_AUDIO_EXT.test(path)) return "audio";
+    if (INPUT_IMAGE_EXT.test(path)) return "image";
+    const kind = String(fallback || "").toLowerCase();
+    return ["image", "video", "audio"].includes(kind) ? kind : "";
+}
 
 function genAudioUid() {
     return `ga_${Math.random().toString(36).slice(2, 11)}`;
@@ -692,8 +699,8 @@ export class CapTimelineEditorApp {
         this._mediaStatus = new Map();
         this._projectResources = [];
         this._videoThumbCache = new Map();
+        this._mediaTab = "image";
         this._mediaStarFilter = "all";
-        this._mediaKindFilters = new Set();
         this._mediaTypeFilters = new Set();
         this._mediaTagFilters = new Set();
         this._mediaFilterOpen = false;
@@ -3025,7 +3032,13 @@ export class CapTimelineEditorApp {
                 <div class="cat-te-media-title">${T("media_title")}</div>
                 <div class="cat-te-media-header-actions"></div>
               </div>
+              <div class="cat-te-media-tabs" role="tablist" aria-label="${T("media_title")}">
+                ${MEDIA_LIBRARY_TABS.map((tab) => `<button type="button" class="cat-te-media-tab" role="tab" data-kind="${tab.id}" aria-selected="${tab.id === "image"}">${tab.label}</button>`).join("")}
+              </div>
               <div class="cat-te-media-grid"></div>
+              <div class="cat-te-media-footer">
+                <button type="button" class="cat-te-btn cat-te-media-primary-action"></button>
+              </div>
             </aside>
             <div class="cat-te-media-split" role="separator" aria-orientation="vertical" aria-label="${T("media_split_aria")}" title="${T("media_split_title")}"></div>
             <div class="cat-te-center">
@@ -3813,6 +3826,21 @@ export class CapTimelineEditorApp {
               </div>
             </div>
           </div>
+          <div class="cat-te-modal-backdrop cat-te-media-delete-modal" hidden>
+            <div class="cat-te-modal cat-te-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="cat-te-media-delete-title">
+              <div class="cat-te-modal-header">
+                <span id="cat-te-media-delete-title">${T("delete_asset_title")}</span>
+                <button type="button" class="cat-te-modal-close cat-te-media-delete-close" title="${T("close_title")}">${iconHtml("close", 16)}</button>
+              </div>
+              <div class="cat-te-modal-body">
+                <div class="cat-te-media-delete-message"></div>
+                <div class="cat-te-confirm-actions">
+                  <button type="button" class="cat-te-btn cat-te-media-delete-cancel">${T("cancel_btn")}</button>
+                  <button type="button" class="cat-te-btn cat-te-btn-danger cat-te-media-delete-confirm">${T("delete_btn")}</button>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="cat-te-modal-backdrop cat-te-track-convert-modal" hidden>
             <div class="cat-te-modal cat-te-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="cat-te-track-convert-title">
               <div class="cat-te-modal-header">
@@ -3902,7 +3930,9 @@ export class CapTimelineEditorApp {
         );
         this._settingPromptUndoArmed = Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [key, false]));
         this.mediaStarFilterHost = el.querySelector(".cat-te-media-header-actions");
+        this.mediaTabs = el.querySelectorAll(".cat-te-media-tab");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
+        this.mediaPrimaryActionBtn = el.querySelector(".cat-te-media-primary-action");
         this.mediaPanel = el.querySelector(".cat-te-media");
         this.mediaPanelSplit = el.querySelector(".cat-te-media-split");
         this.sidebarPanel = el.querySelector(".cat-te-sidebar");
@@ -4098,6 +4128,8 @@ export class CapTimelineEditorApp {
         this.trackColorInput = el.querySelector(".cat-te-track-color-input");
         this.trackDeleteModal = el.querySelector(".cat-te-track-delete-modal");
         this.trackDeleteMessage = el.querySelector(".cat-te-track-delete-message");
+        this.mediaDeleteModal = el.querySelector(".cat-te-media-delete-modal");
+        this.mediaDeleteMessage = el.querySelector(".cat-te-media-delete-message");
         this.trackConvertModal = el.querySelector(".cat-te-track-convert-modal");
         this.trackConvertMessage = el.querySelector(".cat-te-track-convert-message");
         this.aiResultInput = el.querySelector(".cat-te-ai-result");
@@ -4260,6 +4292,12 @@ export class CapTimelineEditorApp {
         this.trackDeleteModal?.addEventListener("click", (e) => {
             if (e.target === this.trackDeleteModal) this._closeTrackDeleteModal();
         });
+        el.querySelector(".cat-te-media-delete-close")?.addEventListener("click", () => this._closeMediaDeleteModal());
+        el.querySelector(".cat-te-media-delete-cancel")?.addEventListener("click", () => this._closeMediaDeleteModal());
+        el.querySelector(".cat-te-media-delete-confirm")?.addEventListener("click", () => void this._confirmMediaDelete());
+        this.mediaDeleteModal?.addEventListener("click", (e) => {
+            if (e.target === this.mediaDeleteModal) this._closeMediaDeleteModal();
+        });
         el.querySelector(".cat-te-track-convert-close")?.addEventListener("click", () => this._closeTrackConvertModal());
         el.querySelector(".cat-te-track-convert-ok")?.addEventListener("click", () => this._closeTrackConvertModal());
         this.trackConvertModal?.addEventListener("click", (e) => {
@@ -4294,6 +4332,22 @@ export class CapTimelineEditorApp {
             localStorage.setItem(STORAGE_PROMPT_FONT_SIZE, String(size));
             this.promptFontSizeInput.value = String(size);
             this._applyPromptFontSize();
+        });
+        this.mediaTabs?.forEach((tab) => {
+            tab.addEventListener("click", () => {
+                const kind = tab.dataset.kind;
+                if (!MEDIA_LIBRARY_TABS.some((item) => item.id === kind) || kind === this._mediaTab) return;
+                this._mediaTab = kind;
+                this._mediaStarFilter = "all";
+                this._mediaTypeFilters.clear();
+                this._mediaTagFilters.clear();
+                this._mediaBatchSelected.clear();
+                this._renderMediaGrid();
+            });
+        });
+        this.mediaPrimaryActionBtn?.addEventListener("click", () => {
+            if (this._mediaBatchMode) void this._deleteSelectedLibraryMedia();
+            else this._chooseMaterialFile();
         });
 
         this.promptInput?.addEventListener("click", () => void this._openAiOptimizeModal());
@@ -4491,6 +4545,11 @@ export class CapTimelineEditorApp {
                 return;
             }
             if (e.key === "Escape") {
+                if (this.mediaDeleteModal && !this.mediaDeleteModal.hidden) {
+                    this._closeMediaDeleteModal();
+                    e.stopPropagation();
+                    return;
+                }
                 if (this.outputVideosModal && !this.outputVideosModal.hidden) {
                     this._closeOutputVideosPicker();
                     e.stopPropagation();
@@ -5147,15 +5206,15 @@ export class CapTimelineEditorApp {
     }
 
     _findMedia(kind, file) {
-        kind = String(kind || "").toLowerCase();
         file = String(file || "").trim();
+        kind = mediaKindFromFilename(file, kind);
         if (!kind || !file) return null;
         return this._projectResources.find((row) => row.kind === kind && row.file === file) || null;
     }
 
     _ensureMedia(kind, file, extras = {}) {
-        kind = String(kind || "").toLowerCase();
         file = String(file || "").trim();
+        kind = mediaKindFromFilename(file, kind);
         if (!kind || !file || !["image", "video", "audio"].includes(kind)) return null;
         let row = this._findMedia(kind, file);
         if (!row) {
@@ -5187,12 +5246,14 @@ export class CapTimelineEditorApp {
         const out = [];
         for (const row of this._projectResources) {
             if (!row?.kind || !row?.file) continue;
-            const key = `${row.kind}:${row.file}`;
+            const kind = mediaKindFromFilename(row.file, row.kind);
+            if (!kind) continue;
+            const key = `${kind}:${row.file}`;
             if (seen.has(key)) continue;
             seen.add(key);
             const entry = {
                 id: row.id || mediaUid(),
-                kind: row.kind,
+                kind,
                 file: row.file,
                 location: "input",
                 name: row.name || String(row.file).split(/[\\/]/).pop(),
@@ -5229,8 +5290,9 @@ export class CapTimelineEditorApp {
         const seenId = new Set();
         for (const row of project.media || project.resources || []) {
             if (!row || typeof row !== "object") continue;
-            const kind = String(row.kind || "").toLowerCase();
             const file = String(row.file || "").trim();
+            const declaredKind = String(row.kind || "").toLowerCase();
+            const kind = mediaKindFromFilename(file, declaredKind);
             if (!kind || !file || !["image", "video", "audio"].includes(kind)) continue;
             const key = `${kind}:${file}`;
             if (seenKey.has(key)) continue;
@@ -5238,7 +5300,10 @@ export class CapTimelineEditorApp {
             let id = String(row.id || "").trim() || mediaUid();
             if (seenId.has(id)) id = mediaUid();
             seenId.add(id);
-            const local = this._parseMediaMeta(this._mediaStarsByDir?.[this._mediaStarsId(kind, file)]);
+            const local = this._parseMediaMeta(
+                this._mediaStarsByDir?.[this._mediaStarsId(kind, file)]
+                ?? this._mediaStarsByDir?.[this._mediaStarsId(declaredKind, file)],
+            );
             const tags = Array.isArray(row.tags) ? row.tags : (local.tags || []);
             const entry = {
                 id,
@@ -5298,8 +5363,8 @@ export class CapTimelineEditorApp {
         const isAudio = clipType === "audio" || trackType === "audio";
         const refs = [];
         const add = (kind, file) => {
-            kind = String(kind || "").toLowerCase();
             file = String(file || "").trim();
+            kind = mediaKindFromFilename(file, kind);
             if (!kind || !file) return;
             if (refs.some((r) => r.kind === kind && r.file === file)) return;
             refs.push({ kind, file });
@@ -5343,15 +5408,19 @@ export class CapTimelineEditorApp {
 
     _applyMediaCatalogFromProject(project) {
         this._projectResources = Array.isArray(project?.media)
-            ? project.media.filter((row) => row && row.file && row.kind).map((row) => ({ ...row }))
+            ? project.media.filter((row) => row && row.file && row.kind).map((row) => ({
+                ...row,
+                kind: mediaKindFromFilename(row.file, row.kind),
+            }))
             : [];
         this._imgFiles = [];
         this._videoFiles = [];
         this._audioFiles = [];
         for (const resource of this._projectResources) {
-            const kind = String(resource.kind || "").toLowerCase();
             const file = String(resource.file || "").trim();
+            const kind = mediaKindFromFilename(file, resource.kind);
             if (!kind || !file) continue;
+            resource.kind = kind;
             const list = kind === "audio" ? this._audioFiles : kind === "video" ? this._videoFiles : this._imgFiles;
             if (!list.includes(file)) list.push(file);
             if (resource.location) this._mediaStatus.set(`${kind}:${file}`, { location: resource.location });
@@ -9683,7 +9752,6 @@ export class CapTimelineEditorApp {
     _activeMediaFilterCount() {
         let n = 0;
         if (this._mediaStarFilter && this._mediaStarFilter !== "all") n += 1;
-        n += this._mediaKindFilters.size;
         n += this._mediaTypeFilters.size;
         n += this._mediaTagFilters.size;
         return n;
@@ -9691,7 +9759,6 @@ export class CapTimelineEditorApp {
 
     _clearMediaFilters() {
         this._mediaStarFilter = "all";
-        this._mediaKindFilters.clear();
         this._mediaTypeFilters.clear();
         this._mediaTagFilters.clear();
         this._renderMediaGrid();
@@ -9705,11 +9772,8 @@ export class CapTimelineEditorApp {
         return true;
     }
 
-    _matchesKindFilter(kind) {
-        const sel = this._mediaKindFilters;
-        if (!sel.size) return true;
-        if (sel.has(kind)) return true;
-        return sel.has("other") && !MEDIA_KIND_CORE.has(kind);
+    _matchesMediaTab(kind) {
+        return kind === this._mediaTab;
     }
 
     _libraryMediaEntries() {
@@ -9737,7 +9801,7 @@ export class CapTimelineEditorApp {
         const types = new Set();
         const tags = new Set();
         for (const { file, kind } of this._libraryMediaEntries()) {
-            if (!this._matchesKindFilter(kind)) continue;
+            if (!this._matchesMediaTab(kind)) continue;
             const meta = this._getMediaMeta(kind, file);
             if (meta.mediaType) types.add(meta.mediaType);
             for (const tag of meta.tags || []) tags.add(tag);
@@ -9746,7 +9810,7 @@ export class CapTimelineEditorApp {
     }
 
     _filterMediaFiles(files, kind) {
-        if (!this._matchesKindFilter(kind)) return [];
+        if (!this._matchesMediaTab(kind)) return [];
         const star = this._mediaStarFilter && this._mediaStarFilter !== "all"
             ? parseInt(this._mediaStarFilter, 10)
             : null;
@@ -9931,24 +9995,6 @@ export class CapTimelineEditorApp {
         batchBtn.addEventListener("click", () => this._toggleMediaBatchMode());
         this.mediaStarFilterHost.appendChild(batchBtn);
 
-        if (this._mediaBatchMode) {
-            const selectedCount = this._mediaBatchSelected.size;
-            const delBtn = document.createElement("button");
-            delBtn.type = "button";
-            delBtn.className = "cat-te-media-tool-btn danger";
-            delBtn.innerHTML = iconHtml("trash", 12);
-            delBtn.title = selectedCount ? T("delete_selected_n_assets_title", { n: selectedCount }) : T("select_asset_first_title");
-            delBtn.disabled = selectedCount === 0;
-            if (selectedCount) {
-                const badge = document.createElement("span");
-                badge.className = "cat-te-media-tool-badge";
-                badge.textContent = String(selectedCount);
-                delBtn.appendChild(badge);
-            }
-            delBtn.addEventListener("click", () => void this._deleteSelectedLibraryMedia());
-            this.mediaStarFilterHost.appendChild(delBtn);
-        }
-
         const viewBtn = document.createElement("button");
         viewBtn.type = "button";
         viewBtn.className = "cat-te-media-tool-btn";
@@ -9981,13 +10027,18 @@ export class CapTimelineEditorApp {
         filterWrap.appendChild(filterBtn);
         this.mediaStarFilterHost.appendChild(filterWrap);
 
-        const addBtn = document.createElement("button");
-        addBtn.type = "button";
-        addBtn.className = "cat-te-btn cat-te-media-add-btn";
-        addBtn.textContent = T("add_material_title");
-        addBtn.title = T("add_material_multi_select_title");
-        addBtn.addEventListener("click", () => this._chooseMaterialFile());
-        this.mediaStarFilterHost.appendChild(addBtn);
+        const actionBtn = this.mediaPrimaryActionBtn;
+        if (actionBtn) {
+            const selectedCount = this._mediaBatchSelected.size;
+            actionBtn.classList.toggle("cat-te-btn-danger", this._mediaBatchMode);
+            actionBtn.innerHTML = this._mediaBatchMode
+                ? `${iconHtml("trash", 14)}<span>${selectedCount ? T("delete_selected_n_assets_title", { n: selectedCount }) : T("delete_btn")}</span>`
+                : `<span>${T("add_material_title")}</span>`;
+            actionBtn.title = this._mediaBatchMode
+                ? (selectedCount ? T("delete_selected_n_assets_title", { n: selectedCount }) : T("select_asset_first_title"))
+                : T("add_material_multi_select_title");
+            actionBtn.disabled = this._mediaBatchMode && selectedCount === 0;
+        }
 
         if (this._mediaFilterOpen) this._openMediaFilterPanel(filterWrap);
     }
@@ -9999,29 +10050,6 @@ export class CapTimelineEditorApp {
         const panel = document.createElement("div");
         panel.className = "cat-te-media-filter-panel";
         panel.addEventListener("click", (e) => e.stopPropagation());
-
-        const kindRow = document.createElement("div");
-        kindRow.className = "cat-te-media-filter-section";
-        const kindTitle = document.createElement("div");
-        kindTitle.className = "cat-te-media-filter-label";
-        kindTitle.textContent = T("category_label");
-        const kindGroup = document.createElement("div");
-        kindGroup.className = "cat-te-media-filter-chips";
-        for (const opt of MEDIA_KIND_FILTERS) {
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "cat-te-media-filter-chip";
-            chip.textContent = opt.label;
-            chip.classList.toggle("active", this._mediaKindFilters.has(opt.id));
-            chip.addEventListener("click", () => {
-                if (this._mediaKindFilters.has(opt.id)) this._mediaKindFilters.delete(opt.id);
-                else this._mediaKindFilters.add(opt.id);
-                this._renderMediaGrid();
-            });
-            kindGroup.appendChild(chip);
-        }
-        kindRow.append(kindTitle, kindGroup);
-        panel.appendChild(kindRow);
 
         const starRow = document.createElement("div");
         starRow.className = "cat-te-media-filter-section";
@@ -10126,10 +10154,16 @@ export class CapTimelineEditorApp {
     }
 
     _renderMediaGrid() {
+        this.mediaTabs?.forEach((tab) => {
+            const active = tab.dataset.kind === this._mediaTab;
+            tab.classList.toggle("is-active", active);
+            tab.setAttribute("aria-selected", String(active));
+            tab.tabIndex = active ? 0 : -1;
+        });
         this._renderMediaStarFilter();
         this.mediaGrid.replaceChildren();
         this._applyMediaGridView();
-        const library = this._libraryMediaEntries();
+        const library = this._libraryMediaEntries().filter(({ kind }) => this._matchesMediaTab(kind));
         if (!library.length) {
             const msg = document.createElement("div");
             msg.className = "cat-te-media-empty";
@@ -10970,8 +11004,8 @@ export class CapTimelineEditorApp {
         if (!this._timeline) return;
         const wanted = new Map();
         const add = (kind, file) => {
-            kind = String(kind || "").toLowerCase();
             file = String(file || "").trim();
+            kind = mediaKindFromFilename(file, kind);
             if (!kind || !file || !["image", "video", "audio"].includes(kind)) return;
             wanted.set(`${kind}:${file}`, { kind, file });
             this._ensureMedia(kind, file);
@@ -12752,6 +12786,7 @@ export class CapTimelineEditorApp {
             || (this.trackRenameModal && !this.trackRenameModal.hidden)
             || (this.trackColorModal && !this.trackColorModal.hidden)
             || (this.trackDeleteModal && !this.trackDeleteModal.hidden)
+            || (this.mediaDeleteModal && !this.mediaDeleteModal.hidden)
             || (this.trackConvertModal && !this.trackConvertModal.hidden)
             || (this.settingsModal && !this.settingsModal.hidden)
             || (this.aiOptimizeModal && !this.aiOptimizeModal.hidden)
@@ -13159,22 +13194,7 @@ export class CapTimelineEditorApp {
             : onTimeline
                 ? T("confirm_delete_asset_on_timeline", { label })
                 : T("confirm_delete_asset", { label });
-        if (!confirm(msg)) return;
-
-        this._recordUndo();
-        const { needDisk } = this._removeLibraryMediaEntry(file, kind);
-        this._syncSelectedClip();
-        this._updatePromptPanel();
-        if (needDisk) {
-            try {
-                await this._deleteDiskAsset(file, kind);
-            } catch (error) {
-                alert(T("asset_removed_disk_delete_failed", { msg: error instanceof Error ? error.message : String(error) }));
-            }
-        }
-        this._renderMediaGrid();
-        this._refreshTimelineDuration();
-        this._scheduleProgramPreview();
+        this._openMediaDeleteModal([{ file, kind }], msg, false);
     }
 
     async _deleteSelectedLibraryMedia() {
@@ -13187,8 +13207,28 @@ export class CapTimelineEditorApp {
         const msg = onTimeline
             ? T("confirm_delete_selected_n_on_timeline", { n: entries.length })
             : T("confirm_delete_selected_n", { n: entries.length });
-        if (!confirm(msg)) return;
+        this._openMediaDeleteModal(entries, msg, true);
+    }
 
+    _openMediaDeleteModal(entries, message, batch) {
+        if (!this.mediaDeleteModal || !entries?.length) return;
+        this._pendingMediaDelete = { entries, batch };
+        this.mediaDeleteMessage.textContent = message;
+        this.mediaDeleteModal.hidden = false;
+        this.mediaDeleteModal.querySelector(".cat-te-media-delete-cancel")?.focus();
+    }
+
+    _closeMediaDeleteModal() {
+        this._pendingMediaDelete = null;
+        if (this.mediaDeleteModal) this.mediaDeleteModal.hidden = true;
+    }
+
+    async _confirmMediaDelete() {
+        const pending = this._pendingMediaDelete;
+        if (!pending?.entries?.length) return;
+        const entries = pending.entries;
+        const batch = pending.batch;
+        this._closeMediaDeleteModal();
         this._recordUndo();
         const diskJobs = [];
         for (const { file, kind } of entries) {
@@ -13199,13 +13239,17 @@ export class CapTimelineEditorApp {
         this._updatePromptPanel();
         const results = await Promise.all(diskJobs);
         const failed = results.filter((r) => r instanceof Error);
-        this._mediaBatchSelected.clear();
-        this._mediaBatchMode = false;
+        if (batch) {
+            this._mediaBatchSelected.clear();
+            this._mediaBatchMode = false;
+        }
         this._renderMediaGrid();
         this._refreshTimelineDuration();
         this._scheduleProgramPreview();
         if (failed.length) {
-            alert(T("removed_with_n_disk_delete_failures", { n: failed.length }));
+            alert(entries.length === 1
+                ? T("asset_removed_disk_delete_failed", { msg: failed[0].message })
+                : T("removed_with_n_disk_delete_failures", { n: failed.length }));
         }
     }
 
@@ -13766,8 +13810,7 @@ export class CapTimelineEditorApp {
     }
 
     _mediaKindForFile(file) {
-        if (!file) return "image";
-        return this._videoFiles.includes(file) ? "video" : "image";
+        return mediaKindFromFilename(file, this._videoFiles.includes(file) ? "video" : "image");
     }
 
     _swapStartEndFrames(clip) {
