@@ -1410,10 +1410,12 @@ export class CapTimelineEditorApp {
         const stamp = this._useClipSpecifiedVideoFilename !== false
             ? this._makeGenVideoStamp()
             : null;
+        const projectJson = JSON.stringify(this._buildProject());
         const jobs = clips.map((clip) => ({
             clipId: String(clip.id),
             stamp,
             expectedFile: stamp ? this._clipSpecifiedVideoPath(clip.id, stamp) : null,
+            projectJson,
         }));
 
         CapTimelineEditorApp._installClipRunJobHook();
@@ -1516,7 +1518,15 @@ export class CapTimelineEditorApp {
             if (job && editor && !editor._destroyed) {
                 editor._runtimeOnlyClipIds = [String(job.clipId)];
                 editor._genVideoStamp = job.stamp || null;
-                try { editor._saveToWidgets(); } catch { /* ignore */ }
+                try {
+                    const project = JSON.parse(job.projectJson);
+                    project.settings = {
+                        ...(project.settings || {}),
+                        runtime_only_clip_ids: [String(job.clipId)],
+                        ...(job.stamp ? { gen_video_stamp: job.stamp } : {}),
+                    };
+                    editor._writeProjectJson(JSON.stringify(project));
+                } catch { /* ignore */ }
             }
             try {
                 return await orig.apply(this, args);
@@ -1526,7 +1536,10 @@ export class CapTimelineEditorApp {
                     if (editor && !editor._destroyed) {
                         editor._runtimeOnlyClipIds = null;
                         editor._genVideoStamp = null;
-                        try { editor._saveToWidgets(); } catch { /* ignore */ }
+                        try {
+                            if (editor._timeline && editor._timelineReady) editor._saveToWidgets();
+                            else editor._writeProjectJson(job.projectJson);
+                        } catch { /* ignore */ }
                     }
                 }
             }
@@ -13064,6 +13077,8 @@ export class CapTimelineEditorApp {
             clip._audioBuffer = snap.audioBuffer ?? null;
             const meta = this._cloneClipMeta(snap.meta);
             meta.trackIndex = this._trackIndex(track);
+            meta.resourceStartSec = start;
+            meta.resourceDurationSec = Math.max(0.05, snap.duration);
             if (track.type === "audio") {
                 meta.fadeInMs = Math.round((clip.fadeIn || 0) * 1000);
                 meta.fadeOutMs = Math.round((clip.fadeOut || 0) * 1000);
@@ -13117,6 +13132,7 @@ export class CapTimelineEditorApp {
             clipId: String(clip.id),
             stamp,
             expectedFile,
+            projectJson: JSON.stringify(this._buildProject()),
         };
         CapTimelineEditorApp._clipRunEditor = this;
         CapTimelineEditorApp._clipRunJobs = [job];
