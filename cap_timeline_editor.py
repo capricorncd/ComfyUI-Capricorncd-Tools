@@ -21,6 +21,22 @@ from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_proj
 from .timecode import resolve_media_path
 
 
+_SETTING_PROMPT_PREFIX_DEFAULTS = {
+    "global_prompt": "",
+    "style_prompt": "(填写MiniMax H3规范里的风格提示词英文：)",
+    "non_diegetic_music": "non_diegetic_music:",
+    "negative_prompt": "Negative:",
+}
+
+
+def _setting_prompt(settings: dict, key: str) -> str:
+    text = _strip_comment_lines(settings.get(key) or "").strip()
+    if not text:
+        return ""
+    prefix = str(settings.get(f"{key}_prefix_line", _SETTING_PROMPT_PREFIX_DEFAULTS.get(key, "")) or "").strip()
+    return f"{prefix}\n\n{text}" if prefix else text
+
+
 def _safe_filename_part(value, fallback: str = "Untitled") -> str:
     text = str(value or "").strip()
     out = []
@@ -623,10 +639,10 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         fps = max(1.0, float(fps))
         width = max(1, int(width))
         height = max(1, int(height))
-        global_prompt = _strip_comment_lines(settings.get("global_prompt") or "")
-        style_prompt = _strip_comment_lines(settings.get("style_prompt") or "")
-        non_diegetic_music = _strip_comment_lines(settings.get("non_diegetic_music") or "")
-        negative_prompt = _strip_comment_lines(settings.get("negative_prompt") or "")
+        global_prompt = _setting_prompt(settings, "global_prompt")
+        style_prompt = _setting_prompt(settings, "style_prompt")
+        non_diegetic_music = _setting_prompt(settings, "non_diegetic_music")
+        negative_prompt = _setting_prompt(settings, "negative_prompt")
         prompt_concat_order = _normalize_prompt_concat_order(settings.get("prompt_concat_order"))
         use_clip_video_name = settings.get("use_clip_specified_video_filename", True) is not False
         gen_video_stamp = str(settings.get("gen_video_stamp") or "").strip()

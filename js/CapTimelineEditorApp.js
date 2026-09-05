@@ -3085,7 +3085,7 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="global_prompt">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("global_prompt_label")}</div>
-                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="global_prompt" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="global_prompt" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("global_prompt_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input cat-te-global-prompt-input" data-setting-prompt-input="global_prompt" placeholder="${T("global_prompt_placeholder")}"></textarea>
@@ -3094,7 +3094,7 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="style_prompt">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("style_prompt_label")}</div>
-                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="style_prompt" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="style_prompt" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("style_prompt_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="style_prompt" placeholder="${T("style_prompt_placeholder")}"></textarea>
@@ -3103,7 +3103,7 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="non_diegetic_music">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("non_diegetic_music_label")}</div>
-                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="non_diegetic_music" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="non_diegetic_music" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("non_diegetic_music_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="non_diegetic_music" placeholder="${T("non_diegetic_music_placeholder")}"></textarea>
@@ -3112,7 +3112,7 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="negative_prompt">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("negative_prompt_label")}</div>
-                        <button type="button" class="cat-te-prompt-comment-btn" data-setting-prompt-comment="negative_prompt" title="${T("comment_toggle_title")}">${iconHtml("comment", 12)}</button>
+                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="negative_prompt" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("negative_prompt_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="negative_prompt" placeholder="${T("negative_prompt_placeholder")}"></textarea>
@@ -3940,14 +3940,14 @@ export class CapTimelineEditorApp {
         this.voAudioAddBtn = el.querySelector(".cat-te-vo-audio-add");
         this.voAudioEditBtn = el.querySelector(".cat-te-vo-audio-edit");
         this.globalPromptInput = el.querySelector('[data-setting-prompt-input="global_prompt"]');
-        this.globalPromptCommentBtn = el.querySelector('[data-setting-prompt-comment="global_prompt"]');
         this._settingPromptInputs = Object.fromEntries(
             SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-input="${key}"]`)]),
         );
-        this._settingPromptCommentBtns = Object.fromEntries(
-            SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-comment="${key}"]`)]),
+        this._settingPromptPrefixInputs = Object.fromEntries(
+            SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-prefix="${key}"]`)]),
         );
         this._settingPromptUndoArmed = Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [key, false]));
+        this._settingPromptPrefixUndoArmed = Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [key, false]));
         this.mediaStarFilterHost = el.querySelector(".cat-te-media-header-actions");
         this.mediaTabs = el.querySelectorAll(".cat-te-media-tab");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
@@ -4272,7 +4272,7 @@ export class CapTimelineEditorApp {
         this.brandProjectBtn?.addEventListener("click", () => this._focusProjectNameFromBrand());
         for (const key of SETTING_PROMPT_KEYS) {
             const input = this._settingPromptInputs?.[key];
-            const commentBtn = this._settingPromptCommentBtns?.[key];
+            const prefixInput = this._settingPromptPrefixInputs?.[key];
             input?.addEventListener("focus", () => {
                 if (this._settingPromptUndoArmed) this._settingPromptUndoArmed[key] = true;
             });
@@ -4280,12 +4280,13 @@ export class CapTimelineEditorApp {
                 if (this._settingPromptUndoArmed) this._settingPromptUndoArmed[key] = false;
             });
             input?.addEventListener("input", () => this._onSettingPromptInput(key));
-            commentBtn?.addEventListener("click", () => {
-                if (!input) return;
-                input.focus();
-                toggleComment(input);
-                this._onSettingPromptInput(key);
+            prefixInput?.addEventListener("focus", () => {
+                if (this._settingPromptPrefixUndoArmed) this._settingPromptPrefixUndoArmed[key] = true;
             });
+            prefixInput?.addEventListener("blur", () => {
+                if (this._settingPromptPrefixUndoArmed) this._settingPromptPrefixUndoArmed[key] = false;
+            });
+            prefixInput?.addEventListener("input", () => this._onSettingPromptPrefixInput(key));
         }
         el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
         this.settingsModal.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
@@ -11398,6 +11399,7 @@ export class CapTimelineEditorApp {
         project.settings.height = Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height);
         for (const key of SETTING_PROMPT_KEYS) {
             project.settings[key] = this._readSettingPrompt(key);
+            project.settings[settingPromptPrefixKey(key)] = this._readSettingPromptPrefix(key);
         }
         project.settings.prompt_concat_order = this._getPromptConcatOrder();
         delete project.settings.ignore_occluded;
@@ -11456,6 +11458,10 @@ export class CapTimelineEditorApp {
                 key,
                 String(settings[key] ?? this._readSettingPrompt(key) ?? ""),
             ])),
+            ...Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [
+                settingPromptPrefixKey(key),
+                String(settings[settingPromptPrefixKey(key)] ?? SETTING_PROMPT_PREFIX_DEFAULTS[key] ?? ""),
+            ])),
             prompt_concat_order: this._getPromptConcatOrder(),
             use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
         };
@@ -11468,6 +11474,10 @@ export class CapTimelineEditorApp {
                 if (settings[key] != null) {
                     setRichPromptValue(input, String(settings[key]), true);
                     wroteAnySettingPrompt = true;
+                }
+                const prefixInput = this._settingPromptPrefixInputs?.[key];
+                if (prefixInput) {
+                    prefixInput.value = String(settings[settingPromptPrefixKey(key)] ?? SETTING_PROMPT_PREFIX_DEFAULTS[key] ?? "");
                 }
             }
         } finally {
@@ -15832,6 +15842,14 @@ export class CapTimelineEditorApp {
         return this._readSettingPrompt("global_prompt");
     }
 
+    _readSettingPromptPrefix(key) {
+        const input = this._settingPromptPrefixInputs?.[key];
+        if (input && typeof input.value === "string") return input.value;
+        const settings = this._parseProjectWidgetValue()?.project?.settings;
+        const stored = settings?.[settingPromptPrefixKey(key)];
+        return String(stored ?? SETTING_PROMPT_PREFIX_DEFAULTS[key] ?? "");
+    }
+
     _writeSettingPrompt(key, text) {
         const next = String(text ?? "");
         this._settingPromptSyncing = true;
@@ -15850,6 +15868,14 @@ export class CapTimelineEditorApp {
         this._writeSettingPrompt("global_prompt", text);
     }
 
+    _writeSettingPromptPrefix(key, text) {
+        const input = this._settingPromptPrefixInputs?.[key];
+        if (input) input.value = String(text ?? "");
+        this._syncScalarsToProjectJson();
+        this.node.setDirtyCanvas?.(true, true);
+        this._refreshFinalPromptDisplay();
+    }
+
     _syncSettingPromptInputs() {
         if (this._settingPromptSyncing) return;
         for (const key of SETTING_PROMPT_KEYS) {
@@ -15862,6 +15888,11 @@ export class CapTimelineEditorApp {
                 continue;
             }
             setRichPromptValue(input, value, true);
+        }
+        for (const key of SETTING_PROMPT_KEYS) {
+            const input = this._settingPromptPrefixInputs?.[key];
+            if (!input || document.activeElement === input) continue;
+            input.value = this._readSettingPromptPrefix(key);
         }
     }
 
@@ -15879,6 +15910,14 @@ export class CapTimelineEditorApp {
 
     _onGlobalPromptInput() {
         this._onSettingPromptInput("global_prompt");
+    }
+
+    _onSettingPromptPrefixInput(key) {
+        if (this._settingPromptPrefixUndoArmed?.[key]) {
+            this._recordUndo();
+            this._settingPromptPrefixUndoArmed[key] = false;
+        }
+        this._writeSettingPromptPrefix(key, this._settingPromptPrefixInputs?.[key]?.value ?? "");
     }
 
     _parseExtendSec(input) {
@@ -15907,11 +15946,20 @@ export class CapTimelineEditorApp {
             non_diegetic_music: this._readSettingPrompt("non_diegetic_music"),
             negative: this._readSettingPrompt("negative_prompt"),
         };
+        const settingKeys = {
+            global: "global_prompt",
+            style: "style_prompt",
+            non_diegetic_music: "non_diegetic_music",
+            negative: "negative_prompt",
+        };
         const parts = [];
         for (const key of this._getPromptConcatOrder()) {
             if (!includes.includes(key)) continue;
             const text = this._stripPromptComments(values[key]);
-            if (text) parts.push(text);
+            if (!text) continue;
+            const settingKey = settingKeys[key];
+            const prefix = settingKey ? this._readSettingPromptPrefix(settingKey).trim() : "";
+            parts.push(prefix ? `${prefix}\n\n${text}` : text);
         }
         for (const item of this._clipItems(m)) {
             if (item.enabled === false || item.useMediaPrompt === false) continue;
@@ -16845,6 +16893,10 @@ export class CapTimelineEditorApp {
                     key,
                     this._readSettingPrompt(key),
                 ])),
+                ...Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [
+                    settingPromptPrefixKey(key),
+                    this._readSettingPromptPrefix(key),
+                ])),
                 prompt_concat_order: this._getPromptConcatOrder(),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
                 current_time: Number(this._timeline?.currentTime ?? 0) || 0,
@@ -17055,6 +17107,10 @@ export class CapTimelineEditorApp {
                     if (snapSettings[key] != null) {
                         setRichPromptValue(input, String(snapSettings[key]), true);
                         wroteAnySettingPrompt = true;
+                    }
+                    const prefixInput = this._settingPromptPrefixInputs?.[key];
+                    if (prefixInput) {
+                        prefixInput.value = String(snapSettings[settingPromptPrefixKey(key)] ?? SETTING_PROMPT_PREFIX_DEFAULTS[key] ?? "");
                     }
                 }
             } finally {
