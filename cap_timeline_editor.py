@@ -652,6 +652,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             # Subtitle / text tracks are editor preview overlays only.
             if _is_subtitle_track(track_type):
                 continue
+            if track_type == "media":
+                continue
             if is_audio_track:
                 if not self._audio_track_active(track):
                     continue

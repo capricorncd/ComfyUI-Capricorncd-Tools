@@ -1,4 +1,5 @@
-export { ICONS } from "../cap_icons.js";
+import { ICONS } from "../cap_icons.js";
+export { ICONS };
 import { t as i18nT } from "../i18n/timeline_widget.js";
 
 let _id = 0;
@@ -29,7 +30,7 @@ export const formatTime = (secs, fps = null) => {
 // happened to be active when this module was first imported. Use
 // trackTypeLabel(type) below instead of TRACK_TYPES[type].label.
 export const TRACK_TYPES = {
-  video: { color: '#4a9eff', icon: '▶', height: 76 },
+  video: { color: '#4a9eff', icon: ICONS.film, height: 76 },
   audio: { color: '#3dd68c', icon: '♫', height: 76 },
   image: { color: '#c86aff', icon: '⬛', height: 76 },
   text:  { color: '#ff9e4a', icon: 'T',  height: 39 },

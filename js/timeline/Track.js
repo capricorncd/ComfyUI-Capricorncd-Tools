@@ -28,6 +28,7 @@ export class Track extends EventEmitter {
     el.className = `tl-track tl-track-${this.type}`;
     el.dataset.trackId = this.id;
     el.style.height = `${this.height}px`;
+    el.style.setProperty('--track-color', this.color);
     return el;
   }
 
@@ -37,12 +38,13 @@ export class Track extends EventEmitter {
     el.dataset.trackId = this.id;
     el.style.height = `${this.height}px`;
     el.style.setProperty('--track-color', this.color);
-    el.title = this.name;
 
     const icon = document.createElement('span');
     icon.className = 'tl-track-icon';
     icon.innerHTML = this.type === 'image'
         ? ICONS.clapperboard
+        : this.type === 'video'
+          ? ICONS.film
         : (ICONS[this.type] || ICONS.video);
 
     // Icon-only header — no visible name/type text (hover the row for its
@@ -86,7 +88,6 @@ export class Track extends EventEmitter {
     this.isMain = true;
     this.el.classList.add('tl-track-main');
     this.headerEl.classList.add('tl-track-header-main');
-    this.headerEl.title = `${this.name} (MAIN)`;
   }
 
   addClip(data) {

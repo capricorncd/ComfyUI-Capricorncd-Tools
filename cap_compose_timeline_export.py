@@ -1,4 +1,4 @@
-"""Compose Timeline Editor generated videos (+ unmuted audio) into one MP4."""
+"""Compose Timeline Editor director output, media, subtitles and audio into one MP4."""
 
 from __future__ import annotations
 
@@ -143,7 +143,47 @@ def _collect_plan(
                 })
             continue
 
-        if track_type in ("visual", "image", "video", ""):
+        if track_type == "media":
+            if track.get("visible", True) is False:
+                continue
+            for clip in _as_list(track.get("clips")):
+                if not isinstance(clip, dict) or clip.get("enabled", True) is False or clip.get("visible", True) is False:
+                    continue
+                start_sec = _ms(clip.get("start_ms")) / 1000.0
+                clip_duration = max(1, _ms(clip.get("duration_ms"), 1)) / 1000.0
+                enabled_flags = _as_list(clip.get("media_enabled"))
+                media_rows = []
+                for media_index, media_id in enumerate(_as_list(clip.get("media_ids"))):
+                    if media_index < len(enabled_flags) and enabled_flags[media_index] is False:
+                        continue
+                    media = media_map.get(str(media_id or ""))
+                    if isinstance(media, dict) and str(media.get("kind") or "").lower() in ("image", "video"):
+                        media_rows.append(media)
+                media_duration = clip_duration / max(1, len(media_rows))
+                source = _as_dict(clip.get("source"))
+                for media_index, media in enumerate(media_rows):
+                    kind = str(media.get("kind") or "image").lower()
+                    file = str(media.get("file") or "").strip()
+                    path = resolve_media_path(file, location="input")
+                    if not path or not os.path.isfile(path):
+                        key = "video_file_not_found" if kind == "video" else "image_file_not_found"
+                        raise ValueError(_t(key, get_last_known_lang(), file=file))
+                    segment_start = start_sec + media_index * media_duration
+                    source_in = _ms(source.get("in_ms")) / 1000.0 if kind == "video" and len(media_rows) == 1 else 0.0
+                    video_segs.append({
+                        "path": path,
+                        "kind": kind,
+                        "layer": "media",
+                        "start_sec": segment_start,
+                        "duration_sec": media_duration,
+                        "end_sec": segment_start + media_duration,
+                        "source_in_sec": source_in,
+                        "muted": kind != "video" or bool(track.get("muted")) or bool(clip.get("muted")),
+                    })
+                    end_ms = max(end_ms, round((segment_start + media_duration) * 1000))
+            continue
+
+        if track_type in ("director", "visual", "image", "video", ""):
             if track.get("visible", True) is False:
                 continue
             for clip in _as_list(track.get("clips")):
@@ -155,7 +195,6 @@ def _collect_plan(
                     continue
                 start_sec = _ms(clip.get("start_ms")) / 1000.0
                 clip_duration = max(1, _ms(clip.get("duration_ms"), 1)) / 1000.0
-                video_count_before = len(video_segs)
                 # Saved rows follow subtrack order, top first; paint bottom first.
                 for gen in reversed(_as_list(clip.get("generated_videos"))):
                     if not isinstance(gen, dict) or gen.get("enabled", True) is False:
@@ -177,41 +216,14 @@ def _collect_plan(
                     end_ms = max(end_ms, round((start_sec + clip_duration) * 1000))
                     video_segs.append({
                         "path": path,
+                        "kind": "video",
+                        "layer": "director",
                         "start_sec": start_sec + offset,
                         "duration_sec": duration,
                         "end_sec": start_sec + offset + duration,
                         "source_in_sec": source_in,
                         "muted": bool(gen.get("muted")) or bool(track.get("muted")) or bool(clip.get("muted")),
                     })
-                if len(video_segs) == video_count_before and clip.get("export_source_video", True) is not False:
-                    enabled_flags = _as_list(clip.get("media_enabled"))
-                    media_rows = []
-                    for media_index, media_id in enumerate(_as_list(clip.get("media_ids"))):
-                        if media_index < len(enabled_flags) and enabled_flags[media_index] is False:
-                            continue
-                        media = media_map.get(str(media_id or ""))
-                        if isinstance(media, dict) and str(media.get("kind") or "").lower() in ("image", "video"):
-                            media_rows.append(media)
-                    media_duration = clip_duration / max(1, len(media_rows))
-                    source = _as_dict(clip.get("source"))
-                    for media_index, media in enumerate(media_rows):
-                        if str(media.get("kind") or "").lower() != "video":
-                            continue
-                        file = str(media.get("file") or "").strip()
-                        path = resolve_media_path(file, location="input")
-                        if not path or not os.path.isfile(path):
-                            raise ValueError(_t("video_file_not_found", get_last_known_lang(), file=file))
-                        segment_start = start_sec + media_index * media_duration
-                        source_in = _ms(source.get("in_ms")) / 1000.0 if len(media_rows) == 1 else 0.0
-                        video_segs.append({
-                            "path": path,
-                            "start_sec": segment_start,
-                            "duration_sec": media_duration,
-                            "end_sec": segment_start + media_duration,
-                            "source_in_sec": source_in,
-                            "muted": bool(track.get("muted")) or bool(clip.get("muted")),
-                        })
-                        end_ms = max(end_ms, round((segment_start + media_duration) * 1000))
                 if not ignore_audio_tracks and not track.get("muted") and not clip.get("muted"):
                     for audio in _as_list(clip.get("gen_edit_audios")):
                         if not isinstance(audio, dict) or audio.get("muted"):
@@ -586,7 +598,10 @@ def compose_timeline_project(
         "-i", f"color=c=black:s={width}x{height}:d={total:.6f}:r={fps}",
     ]
     for seg in video_segs:
-        cmd += ["-i", _ffmpeg_path(seg["path"])]
+        if seg.get("kind") == "image":
+            cmd += ["-loop", "1", "-t", f"{seg['duration_sec']:.6f}", "-i", _ffmpeg_path(seg["path"])]
+        else:
+            cmd += ["-i", _ffmpeg_path(seg["path"])]
     audio_input_offset = 1 + len(video_segs)
     for seg in audio_segs:
         cmd += ["-i", _ffmpeg_path(seg["path"])]
@@ -608,12 +623,20 @@ def compose_timeline_project(
         idx = i + 1
         start = float(seg["start_sec"])
         dur = float(seg["duration_sec"])
-        filters.append(
-            f"[{idx}:v]trim=start={seg['source_in_sec']:.6f}:duration={dur:.6f},setpts=PTS-STARTPTS+{start:.6f}/TB,"
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
-            f"format=yuv420p[v{i}]"
-        )
+        if seg.get("layer") == "media":
+            filters.append(
+                f"[{idx}:v]trim=start={seg['source_in_sec']:.6f}:duration={dur:.6f},setpts=PTS-STARTPTS+{start:.6f}/TB,"
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,fps={fps},"
+                f"format=rgba[v{i}]"
+            )
+        else:
+            filters.append(
+                f"[{idx}:v]trim=start={seg['source_in_sec']:.6f}:duration={dur:.6f},setpts=PTS-STARTPTS+{start:.6f}/TB,"
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
+                f"format=yuv420p[v{i}]"
+            )
 
     prev = "0:v"
     for i, seg in enumerate(video_segs):
@@ -647,7 +670,7 @@ def compose_timeline_project(
 
     amix_labels: list[str] = []
     for i, seg in enumerate(video_segs):
-        if seg["muted"]:
+        if seg["muted"] or seg.get("kind") == "image":
             continue
         idx = i + 1
         if not _probe_has_audio(seg["path"]):

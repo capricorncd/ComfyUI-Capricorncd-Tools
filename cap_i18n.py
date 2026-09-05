@@ -262,9 +262,9 @@ _STRINGS: dict[str, dict[str, str]] = {
         "ja": "音声ファイルが見つかりません: {file}",
     },
     "no_generated_videos_to_compose": {
-        "en": "No videos to compose (add a video clip or enable a generated video first)",
-        "zh": "没有可合成的视频（请添加视频 Clip，或启用生成视频）",
-        "ja": "合成する動画がありません（動画クリップを追加するか、生成動画を有効にしてください）",
+        "en": "No exportable media (add an image/video to a media track or enable a generated video)",
+        "zh": "没有可导出的画面（请在媒体轨道添加图片/视频，或启用生成视频）",
+        "ja": "書き出せる映像がありません（メディアトラックに画像/動画を追加するか、生成動画を有効にしてください）",
     },
     "watermark_image_not_found": {
         "en": "Watermark image not found: {file}",
