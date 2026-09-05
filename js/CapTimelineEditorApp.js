@@ -1336,6 +1336,8 @@ export class CapTimelineEditorApp {
         const r = e.currentTarget.getBoundingClientRect();
         this._buildCtxMenu([
             { label: T("run_all_clips_menu"), fn: () => void this._runAllActiveClipsDownstream() },
+            { label: T("run_track_left_menu"), fn: () => void this._runSelectedTrackSide("left") },
+            { label: T("run_track_right_menu"), fn: () => void this._runSelectedTrackSide("right") },
             {
                 label: T("run_clips_without_generated_menu"),
                 fn: () => void this._runAllActiveClipsDownstream({ withoutGenerated: true }),
@@ -1412,12 +1414,18 @@ export class CapTimelineEditorApp {
     }
 
     /** Visual clips that are not disabled (and whose track is enabled). */
-    _listActiveVisualClips({ withoutGenerated = false } = {}) {
+    _listActiveVisualClips({ withoutGenerated = false, track: onlyTrack = null, anchor = null, side = null } = {}) {
         const out = [];
-        for (const track of this._allImageTracks()) {
+        const tracks = onlyTrack ? [onlyTrack] : this._allImageTracks();
+        for (const track of tracks) {
+            if (!this._allImageTracks().includes(track)) continue;
             const info = this._trackInfo.get(track.id) || {};
             if (info.enabled === false) continue;
             for (const clip of track.clips) {
+                if (anchor && clip.id !== anchor.id) {
+                    if (side === "left" && clip.startTime > anchor.startTime) continue;
+                    if (side === "right" && clip.startTime < anchor.startTime) continue;
+                }
                 const meta = this._meta.get(clip.id) ?? defaultImageMeta();
                 if (meta.disabled || meta.clipType === "audio" || meta.clipType === "subtitle" || meta.clipType === "voiceover") continue;
                 if (isSubtitleClipMeta(meta, track)) continue;
@@ -1435,6 +1443,24 @@ export class CapTimelineEditorApp {
         return out;
     }
 
+    async _runSelectedTrackSide(side) {
+        const anchor = this.getSelectedClip();
+        if (!anchor || !this._allImageTracks().includes(anchor.track)) {
+            alert(T("select_visual_clip_for_side_run"));
+            return;
+        }
+        const clips = this._listActiveVisualClips({
+            track: anchor.track,
+            anchor,
+            side,
+        });
+        if (!clips.some((clip) => clip.id === anchor.id)) {
+            alert(T("no_active_clips_to_run"));
+            return;
+        }
+        await this._runAllActiveClipsDownstream({ clips });
+    }
+
     async _runWorkflow() {
         if (typeof app?.queuePrompt !== "function") {
             alert(T("queue_prompt_not_found"));
@@ -1448,8 +1474,10 @@ export class CapTimelineEditorApp {
         }
     }
 
-    async _runAllActiveClipsDownstream({ withoutGenerated = false } = {}) {
-        const clips = this._listActiveVisualClips({ withoutGenerated });
+    async _runAllActiveClipsDownstream({ withoutGenerated = false, clips: requestedClips = null } = {}) {
+        const clips = Array.isArray(requestedClips)
+            ? requestedClips
+            : this._listActiveVisualClips({ withoutGenerated });
         if (!clips.length) {
             alert(withoutGenerated
                 ? T("no_clips_without_generated_to_run")
@@ -12970,6 +12998,9 @@ export class CapTimelineEditorApp {
             waveformPeaks: clip._waveform?.length ? clip._waveform.slice() : null,
             audioBuffer: clip._audioBuffer ?? null,
             meta: this._cloneClipMeta(meta),
+            subtitleStyle: isSubtitle
+                ? pickSubtitleStyle(this._trackInfo.get(clip.track.id)?.subtitleStyle || meta)
+                : null,
         };
     }
 
@@ -13020,23 +13051,26 @@ export class CapTimelineEditorApp {
             ?? this._createInsertTrack("image");
     }
 
-    /** Earliest start on `track` at/after `desired` that fits `duration`. */
-    _findFreeStart(track, desired, duration) {
-        if (!track) return desired;
-        const dur = Math.max(0.05, duration);
-        const eps = 0.5 / Math.max(1, this.getFps());
-        if (this._trackHasRoom(track, desired, dur)) return desired;
-        const sorted = [...track.clips].sort((a, b) => a.startTime - b.startTime);
-        let t = Math.max(0, desired);
-        for (const c of sorted) {
-            if (c.endTime <= t + eps) {
-                t = Math.max(t, c.endTime);
-                continue;
+    _createPasteTrack(snap) {
+        let track = null;
+        if (snap.trackType === "audio") {
+            track = this._createInsertTrack("audio");
+        } else if (isVoiceoverTrackType(snap.trackType)) {
+            track = this._addUserTrack("voiceover") || this._createInsertTrack("voiceover");
+        } else if (isSubtitleTrackType(snap.trackType)) {
+            track = this._addUserTrack("text");
+            const info = track ? (this._trackInfo.get(track.id) || {}) : null;
+            if (info) {
+                info.subtitleStyle = {
+                    ...pickSubtitleStyle(defaultSubtitleMeta()),
+                    ...pickSubtitleStyle(snap.subtitleStyle || snap.meta),
+                };
+                this._trackInfo.set(track.id, info);
             }
-            if (t + dur <= c.startTime + eps) return t;
-            t = c.endTime;
+        } else {
+            track = this._createInsertTrack("image");
         }
-        return t;
+        return track;
     }
 
     /** True if every snapshot fits on its paste track when the group starts at `base`. */
@@ -13048,19 +13082,10 @@ export class CapTimelineEditorApp {
         return true;
     }
 
-    /** Latest clip end among the paste target tracks. */
-    _pasteTracksEndTime(tracks) {
-        let end = 0;
-        for (const track of tracks) {
-            for (const c of track.clips) end = Math.max(end, c.endTime);
-        }
-        return end;
-    }
-
     /**
      * Paste clipboard clips keeping relative offsets within the copied group.
-     * Prefer the seek (playhead) when the whole group fits there; otherwise
-     * append after the last clip on the target tracks.
+     * Paste at the seek (playhead); create compatible tracks for copied track
+     * groups that do not fit there.
      * @returns {boolean} true if anything was pasted
      */
     _pasteClips() {
@@ -13077,25 +13102,24 @@ export class CapTimelineEditorApp {
         const seek = typeof tl._snapTime === "function"
             ? tl._snapTime(tl.currentTime)
             : Math.max(0, tl.currentTime);
-        let pasteBase;
-        if (this._pasteGroupFitsAt(snaps, tracks, minStart, seek)) {
-            pasteBase = seek;
-        } else {
-            pasteBase = this._pasteTracksEndTime(tracks);
-            // Safety: nudge forward if the group still collides (e.g. same-track overlaps).
-            for (let guard = 0; guard < 64; guard++) {
-                if (this._pasteGroupFitsAt(snaps, tracks, minStart, pasteBase)) break;
-                let bump = null;
-                for (let i = 0; i < snaps.length; i++) {
+        const pasteBase = seek;
+        if (!this._pasteGroupFitsAt(snaps, tracks, minStart, pasteBase)) {
+            const groups = new Map();
+            for (let i = 0; i < snaps.length; i++) {
+                const key = `${snaps[i].trackId || ""}:${snaps[i].trackType || "image"}`;
+                const indices = groups.get(key) || [];
+                indices.push(i);
+                groups.set(key, indices);
+            }
+            for (const indices of groups.values()) {
+                const fits = indices.every((i) => {
                     const start = pasteBase + (snaps[i].startTime - minStart);
-                    if (!this._trackHasRoom(tracks[i], start, snaps[i].duration)) {
-                        const free = this._findFreeStart(tracks[i], start, snaps[i].duration);
-                        const need = free - (snaps[i].startTime - minStart);
-                        bump = bump == null ? need : Math.max(bump, need);
-                    }
-                }
-                if (bump == null) break;
-                pasteBase = Math.max(pasteBase, bump);
+                    return this._trackHasRoom(tracks[i], start, snaps[i].duration);
+                });
+                if (fits) continue;
+                const newTrack = this._createPasteTrack(snaps[indices[0]]);
+                if (!newTrack) return false;
+                for (const i of indices) tracks[i] = newTrack;
             }
         }
 
