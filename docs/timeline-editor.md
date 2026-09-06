@@ -73,6 +73,9 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 
 - Modal: model, output language, Agent prompt, Prompt Skill, result
 - Background-audio mode, Generate BGM, and Lyrics controls were removed
+- The modal **Preview** button runs an imported API-format workflow containing **Generate Timeline Preview** (`CAP_TimelinePreview`).
+- Connect only the MiniMax H3 model, CLIP, video VAE, and audio VAE to that node. The editor injects the current `project_json`, Clip ID, canvas size, and saved Clip seed automatically.
+- The node resolves the selected Clip, references and timeline audio; assembles the final prompt; samples and decodes; then returns an in-memory `VIDEO` plus frames, audio, prompt, used seed, and Clip ID. Saving is optional.
 
 ---
 

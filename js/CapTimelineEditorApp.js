@@ -6257,6 +6257,7 @@ export class CapTimelineEditorApp {
         this._onTeClipRunning = (e) => this._onTimelineClipRunning(e);
         this._onTeVideoSaved = (e) => this._onTimelineVideoSaved(e);
         this._onKjPreviewOverride = (e) => this._onKjPreviewOverrideEvent(e);
+        this._onTimelinePreview = (e) => this._onTimelinePreviewEvent(e);
         api.addEventListener("executed", this._onExecuted);
         api.addEventListener("execution_success", this._onExecSuccess);
         api.addEventListener("execution_error", this._onExecAbort);
@@ -6268,6 +6269,7 @@ export class CapTimelineEditorApp {
         api.addEventListener("cat_te_clip_running", this._onTeClipRunning);
         api.addEventListener("cat_te_video_saved", this._onTeVideoSaved);
         api.addEventListener("kj_preview_override", this._onKjPreviewOverride);
+        api.addEventListener("cap_timeline_preview", this._onTimelinePreview);
     }
 
     _unbindExecutionWatch() {
@@ -6284,6 +6286,7 @@ export class CapTimelineEditorApp {
         api.removeEventListener?.("cat_te_clip_running", this._onTeClipRunning);
         api.removeEventListener?.("cat_te_video_saved", this._onTeVideoSaved);
         api.removeEventListener?.("kj_preview_override", this._onKjPreviewOverride);
+        api.removeEventListener?.("cap_timeline_preview", this._onTimelinePreview);
         if (this._queueReconcileTimer) {
             clearTimeout(this._queueReconcileTimer);
             this._queueReconcileTimer = 0;
@@ -6298,6 +6301,7 @@ export class CapTimelineEditorApp {
         this._onTeClipRunning = null;
         this._onTeVideoSaved = null;
         this._onKjPreviewOverride = null;
+        this._onTimelinePreview = null;
     }
 
     _promptIdFromQueueResult(result) {
@@ -6693,7 +6697,7 @@ export class CapTimelineEditorApp {
             this._renderModelPreview(null, T("model_preview_config_required"));
             return;
         }
-        if (!Object.values(workflow).some((node) => node?.class_type === "ModelPreviewOverrideKJ")) {
+        if (!Object.values(workflow).some((node) => node?.class_type === "CAP_TimelinePreview")) {
             this._renderModelPreview(null, T("model_preview_override_required"));
             return;
         }
@@ -6722,7 +6726,23 @@ export class CapTimelineEditorApp {
             if (file.kind === "image") values[`image_${index + 1}`] = file.file;
             if (file.kind === "video") values[`video_${index + 1}`] = file.file;
         });
+        this._saveToWidgets();
+        const projectValue = this._w("project_json")?.value;
+        const projectJson = typeof projectValue === "string"
+            ? projectValue
+            : JSON.stringify(projectValue || {});
         const prompt = this._replaceModelPreviewTokens(workflow, values);
+        for (const node of Object.values(prompt)) {
+            if (node?.class_type !== "CAP_TimelinePreview") continue;
+            node.inputs = {
+                ...(node.inputs || {}),
+                project_json: projectJson,
+                clip_id: String(clip.id),
+                width: values.width,
+                height: values.height,
+                seed: values.seed,
+            };
+        }
         const requestPromptId = crypto.randomUUID();
         this._modelPreviewClipId = String(clip.id);
         this._modelPreviewPromptId = requestPromptId;
@@ -6786,6 +6806,32 @@ export class CapTimelineEditorApp {
         if (String(this._aiOptimizeClipId) === String(clipId)) {
             this._renderModelPreview(this._modelPreviewEntry, status);
         }
+    }
+
+    _onTimelinePreviewEvent(e) {
+        if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        const d = e?.detail;
+        const promptId = String(d?.prompt_id || "").trim();
+        if (!d || promptId !== String(this._modelPreviewPromptId || "")) return;
+        if (typeof d.video !== "string" || d.mime !== "video/mp4") return;
+        let blob;
+        try {
+            blob = this._b64ToBlob(d.video, d.mime);
+        } catch {
+            return;
+        }
+        if (this._modelPreviewEntry?.url) {
+            try { URL.revokeObjectURL(this._modelPreviewEntry.url); } catch { /* ignore */ }
+        }
+        this._modelPreviewEntry = {
+            url: URL.createObjectURL(blob),
+            mime: d.mime,
+            clipId: String(d.clip_id || this._modelPreviewClipId || ""),
+            step: 0,
+            total: 0,
+            seed: Number(d.seed),
+        };
+        this._renderModelPreview(this._modelPreviewEntry, T("model_preview_receiving"));
     }
 
     /**

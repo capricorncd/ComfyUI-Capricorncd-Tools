@@ -715,6 +715,32 @@
       }
     }
   },
+  "CAP_TimelinePreview": {
+    "display_name": "タイムラインプレビュー生成",
+    "inputs": {
+      "model": { "name": "MiniMax H3 モデル" },
+      "clip": { "name": "MiniMax H3 CLIP" },
+      "video_vae": { "name": "映像 VAE" },
+      "audio_vae": { "name": "音声 VAE" },
+      "project_json": { "name": "プロジェクト JSON" },
+      "clip_id": { "name": "Clip ID" },
+      "width": { "name": "幅（0 = プロジェクト）" },
+      "height": { "name": "高さ（0 = プロジェクト）" },
+      "steps": { "name": "ステップ数" },
+      "seed": { "name": "シード（-1 = Clip/ランダム）" },
+      "ref_image_size": { "name": "参照画像サイズ" },
+      "shift_video": { "name": "映像 Shift" },
+      "shift_audio": { "name": "音声 Shift" }
+    },
+    "outputs": {
+      "preview_video": { "name": "プレビュー動画（メモリ）" },
+      "frames": { "name": "フレーム" },
+      "audio": { "name": "音声" },
+      "prompt": { "name": "最終プロンプト" },
+      "seed": { "name": "使用シード" },
+      "clip_id": { "name": "Clip ID" }
+    }
+  },
   "CAP_H3MotionContextSaveLatentOptional": {
     "display_name": "H3 Motion Context Save Latent（任意）",
     "inputs": {

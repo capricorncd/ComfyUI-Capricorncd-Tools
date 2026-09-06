@@ -293,6 +293,9 @@ class CAP_MiniMaxH3ReferenceToVideo:
             "negative_prompt": clip.get("negative_prompt", ""),
             "prompt_concat_order": clip.get("prompt_concat_order"),
         }
+        if any(key in clip for key in ("prepend_prompt", "append_prompt", "prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix")):
+            data["prepend_prompt"] = clip.get("prepend_prompt") or clip.get("prefix_prompt") or clip.get("prompt_prefix") or ""
+            data["append_prompt"] = clip.get("append_prompt") or clip.get("suffix_prompt") or clip.get("prompt_suffix") or ""
         return data, clip, materials, parser
 
     def _visual_refs(self, clip: dict, parser: CAP_DataJsonClipParser) -> list:
@@ -485,6 +488,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
             n = len(ref_audios) + 1
             ref_audios[f"ref_audio_{n}"] = audio
 
+        fixed_prompts = "prepend_prompt" in data or "append_prompt" in data
         prompt = parser._compose_prompt(
             clip_row, data.get("global_prompt", ""),
             materials=materials,
@@ -492,6 +496,8 @@ class CAP_MiniMaxH3ReferenceToVideo:
             non_diegetic_music=data.get("non_diegetic_music", ""),
             negative_prompt=data.get("negative_prompt", ""),
             prompt_concat_order=data.get("prompt_concat_order"),
+            prepend_prompt=data.get("prepend_prompt", "") if fixed_prompts else None,
+            append_prompt=data.get("append_prompt", "") if fixed_prompts else None,
         )
 
         if parser._uses_master_audio(data, clip_row):

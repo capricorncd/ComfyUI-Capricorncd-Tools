@@ -715,6 +715,32 @@
       }
     }
   },
+  "CAP_TimelinePreview": {
+    "display_name": "生成时间轴预览",
+    "inputs": {
+      "model": { "name": "MiniMax H3 模型" },
+      "clip": { "name": "MiniMax H3 CLIP" },
+      "video_vae": { "name": "视频 VAE" },
+      "audio_vae": { "name": "音频 VAE" },
+      "project_json": { "name": "工程 JSON" },
+      "clip_id": { "name": "Clip ID" },
+      "width": { "name": "宽度（0 = 工程设置）" },
+      "height": { "name": "高度（0 = 工程设置）" },
+      "steps": { "name": "采样步数" },
+      "seed": { "name": "种子（-1 = Clip/随机）" },
+      "ref_image_size": { "name": "参考图尺寸" },
+      "shift_video": { "name": "视频 Shift" },
+      "shift_audio": { "name": "音频 Shift" }
+    },
+    "outputs": {
+      "preview_video": { "name": "预览视频（内存）" },
+      "frames": { "name": "画面帧" },
+      "audio": { "name": "音频" },
+      "prompt": { "name": "最终提示词" },
+      "seed": { "name": "实际种子" },
+      "clip_id": { "name": "Clip ID" }
+    }
+  },
   "CAP_H3MotionContextSaveLatentOptional": {
     "display_name": "H3 Motion Context Save Latent（可选）",
     "inputs": {

@@ -715,6 +715,32 @@
       }
     }
   },
+  "CAP_TimelinePreview": {
+    "display_name": "Generate Timeline Preview",
+    "inputs": {
+      "model": { "name": "MiniMax H3 Model" },
+      "clip": { "name": "MiniMax H3 CLIP" },
+      "video_vae": { "name": "Video VAE" },
+      "audio_vae": { "name": "Audio VAE" },
+      "project_json": { "name": "Project JSON" },
+      "clip_id": { "name": "Clip ID" },
+      "width": { "name": "Width (0 = Project)" },
+      "height": { "name": "Height (0 = Project)" },
+      "steps": { "name": "Steps" },
+      "seed": { "name": "Seed (-1 = Clip/Random)" },
+      "ref_image_size": { "name": "Reference Image Size" },
+      "shift_video": { "name": "Video Shift" },
+      "shift_audio": { "name": "Audio Shift" }
+    },
+    "outputs": {
+      "preview_video": { "name": "Preview Video (Memory)" },
+      "frames": { "name": "Frames" },
+      "audio": { "name": "Audio" },
+      "prompt": { "name": "Final Prompt" },
+      "seed": { "name": "Used Seed" },
+      "clip_id": { "name": "Clip ID" }
+    }
+  },
   "CAP_H3MotionContextSaveLatentOptional": {
     "display_name": "H3 Motion Context Save Latent (Optional)",
     "inputs": {

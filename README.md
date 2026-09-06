@@ -32,6 +32,7 @@ The flagship node: a fullscreen, multi-track timeline for building image/video/a
 | **Prompt From Batch** | Slice scene prompts by index/length; optionally merge global prompt | [→](docs/prompt-from-batch.md) · [中文](docs/zh/prompt-from-batch.md) |
 | **Audio Timeline** | Waveform trim + image keyframe clip track + per-clip prompts | [→](docs/audio-timeline.md) · [中文](docs/zh/audio-timeline.md) |
 | **Timeline Editor** | Fullscreen multi-track editor; generated-video preview/mute; Export → Compose Video; `swap_wh`; outputs `data_json` and `frame_seq_dir` | [→](docs/timeline-editor.md) · [中文](docs/zh/timeline-editor.md) |
+| **Generate Timeline Preview** | Current project + Clip ID → complete in-memory MiniMax H3 preview; sampling and AV decode are built in | [→](docs/timeline-editor.md#ai-optimize-prompt) · [中文](docs/zh/timeline-editor.md#ai-优化提示词) |
 | **Data Json Clip Parser** | Extracts a single clip from Audio Timeline / Timeline Editor `data_json` output | [→](docs/data-json-clip-parser.md) · [中文](docs/zh/data-json-clip-parser.md) |
 | **MiniMaxH3** | Timeline `data_json` clip → MiniMax H3 Reference to Video (refs + prompt + latent) | [→](docs/minimax-h3.md) · [中文](docs/zh/minimax-h3.md) |
 | **Save Images** | Saves an `IMAGE` batch to disk; optional `{prefix}.json` sidecar with prompts and models | [→](docs/save-images.md) · [中文](docs/zh/save-images.md) |
