@@ -62,6 +62,8 @@ const SETTING_PROMPT_KEYS = [
  */
 const PROMPT_PART_KEYS = ["clip", "detailed_description", "media"];
 const PROMPT_PART_KEY_SET = new Set(PROMPT_PART_KEYS);
+const PROMPT_TOGGLE_KEYS = ["prepend_prompt", ...PROMPT_PART_KEYS, "append_prompt"];
+const PROMPT_TOGGLE_KEY_SET = new Set(PROMPT_TOGGLE_KEYS);
 const DEFAULT_PROMPT_CONCAT_ORDER = [...PROMPT_PART_KEYS];
 const DEFAULT_PROMPT_INCLUDES = ["clip", "detailed_description"];
 const WATERMARK_FIXED_POSITIONS = [
@@ -427,6 +429,8 @@ function defaultImageMeta(trackIndex = 0) {
         detailedDescription: "",
         endImage: null,
         promptIncludes,
+        usePrependPrompt: true,
+        useAppendPrompt: true,
         disabled: false,
         visible: true,
         muted: false,
@@ -3830,9 +3834,11 @@ export class CapTimelineEditorApp {
                   <div class="cat-te-prompt-includes" aria-label="${T("prompt_includes_label")}">
                     <div class="cat-te-prompt-includes-label">${T("prompt_includes_label")}</div>
                     <div class="cat-te-prompt-includes-chips" role="group">
+                      <button type="button" class="cat-te-prompt-include-chip" data-include="prepend_prompt" title="${T("prompt_include_prepend_title")}">${T("prompt_include_prepend")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="clip" title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="detailed_description" title="${T("prompt_include_ai_title")}">${T("prompt_include_ai")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="media" title="${T("prompt_include_media_title")}">${T("prompt_include_media")}</button>
+                      <button type="button" class="cat-te-prompt-include-chip" data-include="append_prompt" title="${T("prompt_include_append_title")}">${T("prompt_include_append")}</button>
                     </div>
                   </div>
                   <div class="cat-te-ai-field-row">
@@ -5451,6 +5457,10 @@ export class CapTimelineEditorApp {
         for (const track of src.tracks) {
             for (const clip of track?.clips || []) {
                 if (!clip || typeof clip !== "object") continue;
+                if (!("use_prepend_prompt" in clip)) {
+                    clip.use_prepend_prompt = clip.use_global_prompt !== false;
+                }
+                if (!("use_append_prompt" in clip)) clip.use_append_prompt = true;
                 clip.prompt_includes = promptIncludesFromClipJson(clip);
                 delete clip.use_global_prompt;
                 delete clip.use_ai_prompt;
@@ -10129,6 +10139,8 @@ export class CapTimelineEditorApp {
         else meta.agentCustom = String(meta.agentCustom || "").trim();
         meta.seed = this._normalizeClipSeed(meta.seed);
         meta.promptIncludes = normalizePromptIncludes(meta.promptIncludes);
+        meta.usePrependPrompt = meta.usePrependPrompt !== false;
+        meta.useAppendPrompt = meta.useAppendPrompt !== false;
         if (!items.length) {
             clip.thumbnail = null;
             clip.hasAudio = false;
@@ -12335,6 +12347,8 @@ export class CapTimelineEditorApp {
                 prompt: c.prompt ?? "",
                 detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
                 promptIncludes,
+                usePrependPrompt: c.use_prepend_prompt !== false,
+                useAppendPrompt: c.use_append_prompt !== false,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
                 items,
@@ -12419,6 +12433,8 @@ export class CapTimelineEditorApp {
                 detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
                 endImage: c.end_image ?? null,
                 promptIncludes,
+                usePrependPrompt: c.use_prepend_prompt !== false,
+                useAppendPrompt: c.use_append_prompt !== false,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
                 sourceDuration: sourceDur,
@@ -12479,6 +12495,8 @@ export class CapTimelineEditorApp {
             detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
             endImage: c.end_image ?? null,
             promptIncludes,
+            usePrependPrompt: c.use_prepend_prompt !== false,
+            useAppendPrompt: c.use_append_prompt !== false,
             disabled: !!c.disabled,
             visible: c.visible !== false,
             headExtendSec: Math.max(0, Math.round(Number(c.head_extend_sec) || 0)),
@@ -15926,18 +15944,28 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _setPromptIncludesEnabled(enabled, includes = null) {
+    _setPromptIncludesEnabled(enabled, includes = null, usePrepend = true, useAppend = true) {
         const selected = normalizePromptIncludes(includes);
         this.promptIncludeChips?.forEach((chip) => {
             chip.disabled = !enabled;
             const key = chip.dataset.include;
-            chip.classList.toggle("is-active", enabled && selected.includes(key));
+            const active = key === "prepend_prompt"
+                ? usePrepend !== false
+                : key === "append_prompt"
+                    ? useAppend !== false
+                    : selected.includes(key);
+            chip.classList.toggle("is-active", enabled && active);
         });
         this.promptIncludesHost?.classList.toggle("is-disabled", !enabled);
     }
 
     _syncPromptIncludesUi(meta) {
-        this._setPromptIncludesEnabled(true, normalizePromptIncludes(meta?.promptIncludes));
+        this._setPromptIncludesEnabled(
+            true,
+            normalizePromptIncludes(meta?.promptIncludes),
+            meta?.usePrependPrompt,
+            meta?.useAppendPrompt,
+        );
     }
 
     _updatePromptPanel() {
@@ -16385,7 +16413,7 @@ export class CapTimelineEditorApp {
         };
         const parts = [];
         const prepend = this._stripPromptComments(this._readSettingPrompt("prepend_prompt"));
-        if (prepend) parts.push(prepend);
+        if (m.usePrependPrompt !== false && prepend) parts.push(prepend);
         for (const key of this._getPromptConcatOrder()) {
             if (!includes.includes(key)) continue;
             const text = this._stripPromptComments(values[key]);
@@ -16397,7 +16425,7 @@ export class CapTimelineEditorApp {
             }
         }
         const append = this._stripPromptComments(this._readSettingPrompt("append_prompt"));
-        if (append) parts.push(append);
+        if (m.useAppendPrompt !== false && append) parts.push(append);
         return parts.join("\n\n");
     }
 
@@ -16903,14 +16931,20 @@ export class CapTimelineEditorApp {
     }
 
     _onPromptIncludeToggle(key) {
-        if (!this._selClip || !PROMPT_PART_KEY_SET.has(key)) return;
+        if (!this._selClip || !PROMPT_TOGGLE_KEY_SET.has(key)) return;
         this._recordUndo();
         const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
-        const current = normalizePromptIncludes(m.promptIncludes);
-        const next = current.includes(key)
-            ? current.filter((k) => k !== key)
-            : [...current, key];
-        m.promptIncludes = PROMPT_PART_KEYS.filter((k) => next.includes(k));
+        if (key === "prepend_prompt") {
+            m.usePrependPrompt = m.usePrependPrompt === false;
+        } else if (key === "append_prompt") {
+            m.useAppendPrompt = m.useAppendPrompt === false;
+        } else {
+            const current = normalizePromptIncludes(m.promptIncludes);
+            const next = current.includes(key)
+                ? current.filter((k) => k !== key)
+                : [...current, key];
+            m.promptIncludes = PROMPT_PART_KEYS.filter((k) => next.includes(k));
+        }
         this._meta.set(this._selClip.id, m);
         this._syncPromptIncludesUi(m);
         this._refreshFinalPromptDisplay(this._selClip, m);
@@ -17257,6 +17291,8 @@ export class CapTimelineEditorApp {
                     row.prompt = m.prompt ?? "";
                     row.detailed_description = m.detailedDescription ?? "";
                     row.prompt_includes = normalizePromptIncludes(m.promptIncludes);
+                    row.use_prepend_prompt = m.usePrependPrompt !== false;
+                    row.use_append_prompt = m.useAppendPrompt !== false;
                     row.media_enabled = items.map((item) => item.enabled !== false);
                     row.head_extend_sec = Math.max(0, Math.round(Number(m.headExtendSec) || 0));
                     row.tail_extend_sec = Math.max(0, Math.round(Number(m.tailExtendSec) || 0));

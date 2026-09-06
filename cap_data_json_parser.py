@@ -198,7 +198,7 @@ class CAP_DataJsonClipParser:
         parts = []
         if prepend_prompt is not None or append_prompt is not None:
             prepend = self._strip_comment_lines(prepend_prompt or "").strip()
-            if prepend:
+            if clip.get("use_prepend_prompt", True) is not False and prepend:
                 parts.append(prepend)
             includes.intersection_update(("clip", "detailed_description", "media"))
             order = [key for key in order if key in ("clip", "detailed_description", "media")]
@@ -212,7 +212,7 @@ class CAP_DataJsonClipParser:
                 parts.append(text)
         if prepend_prompt is not None or append_prompt is not None:
             append = self._strip_comment_lines(append_prompt or "").strip()
-            if append:
+            if clip.get("use_append_prompt", True) is not False and append:
                 parts.append(append)
         return "\n\n".join(part for part in parts if part)
 

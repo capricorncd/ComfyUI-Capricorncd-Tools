@@ -111,6 +111,8 @@ def _preview_data(project_json: str, clip_id: str, width: int, height: int) -> t
         "prompt": str(clip.get("prompt") or ""),
         "detailed_description": str(clip.get("detailed_description") or clip.get("ai_prompt") or ""),
         "prompt_includes": _timeline_prompt_includes(clip),
+        "use_prepend_prompt": clip.get("use_prepend_prompt", True) is not False,
+        "use_append_prompt": clip.get("use_append_prompt", True) is not False,
         "h3_motion_context_length": 0,
         "seed": clip.get("seed", -1),
     }

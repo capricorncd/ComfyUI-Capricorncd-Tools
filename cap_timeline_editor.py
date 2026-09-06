@@ -771,6 +771,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                     clip.get("detailed_description") or clip.get("ai_prompt") or ""
                 ).strip(),
                 "prompt_includes": prompt_includes,
+                "use_prepend_prompt": clip.get("use_prepend_prompt", True) is not False,
+                "use_append_prompt": clip.get("use_append_prompt", True) is not False,
                 "z_index": z_index,
                 "audios": self._audio_slices(
                     ext_start, ext_end, audio_clips, resolve_media, project, materials, seen_materials,

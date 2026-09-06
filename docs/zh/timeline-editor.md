@@ -250,6 +250,8 @@
 | `prompt` | Clip 提示词；MiniMax H3 工程在这里保存 `subject_definitions`、`summary`、`retention_analysis` |
 | `detailed_description` | MiniMax H3 的 `detailed_description` 正文 |
 | `prompt_includes` | Clip 内启用的提示词部分：`clip`、`detailed_description` 和/或 `media` |
+| `use_prepend_prompt` | 是否在该 Clip 的排序内容之前拼接工程 `prepend_prompt`（默认 `true`） |
+| `use_append_prompt` | 是否在该 Clip 的排序内容之后拼接工程 `append_prompt`（默认 `true`） |
 | `use_media_prompts` | 与 `media_ids` 等长的 bool[]：是否用对应素材 prompt |
 | `media_enabled` | 与 `media_ids` 等长的 bool[]：该槽位是否启用 |
 | `head_extend_sec` / `tail_extend_sec` | 首 / 尾扩展秒数 |
@@ -297,6 +299,7 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
 - `detailed_description`：只写正文，不得再次包含 `detailed_description:` 标题或其他结构段；运行时拼接器会在需要时补上标题。
 - `settings.append_prompt`：在后置内容中完整保存两个声音段落，先写 `overall_soundscape: ...`，再写 `non_diegetic_music: ...`，之后写负面约束。
 - `prompt_includes`：需要同时送入模型时，必须包含 `clip` 与 `detailed_description`。
+- `use_prepend_prompt` 与 `use_append_prompt` 只控制两个固定的工程级边界，不属于 `prompt_concat_order`，也不会进入拖拽拼接排序。
 
 ### 示例（schema 3，字段示意）
 
@@ -372,6 +375,8 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
           "prompt": "subject_definitions:\n<Picture 1>: 角色参考图\n\nsummary: [reference generation] 角色在舞台上演奏。\n\nretention_analysis:\n<Picture 1>: fully_preserved",
           "detailed_description": "[Shot 1] 镜头缓慢推近，角色按照音乐节奏演奏。",
           "prompt_includes": ["clip", "detailed_description", "media"],
+          "use_prepend_prompt": true,
+          "use_append_prompt": true,
           "use_media_prompts": [true],
           "media_enabled": [true],
           "head_extend_sec": 0,

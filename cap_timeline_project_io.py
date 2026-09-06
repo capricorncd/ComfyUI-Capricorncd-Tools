@@ -258,6 +258,10 @@ def _normalize_timeline_prompt_selection(project: dict) -> None:
                 if clip.get("use_ai_prompt", True) is not False:
                     includes.append("detailed_description")
             clip["prompt_includes"] = includes
+            if "use_prepend_prompt" not in clip:
+                clip["use_prepend_prompt"] = clip.get("use_global_prompt", True) is not False
+            if "use_append_prompt" not in clip:
+                clip["use_append_prompt"] = True
             clip.pop("use_global_prompt", None)
             clip.pop("use_ai_prompt", None)
 
