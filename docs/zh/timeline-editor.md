@@ -148,7 +148,7 @@
 
 ## `project_json`（可编辑）
 
-编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 3`**（整数，与 Python 包版本 `project_version` 无关），唯一版本值来自 `pyproject.toml` 的 `[tool.capricorncd].schema_version`。加载旧工程时会自动迁移：`global_prompt` + `style_prompt` 合并进 `prepend_prompt`，`non_diegetic_music` + `negative_prompt` 合并进 `append_prompt`；`prefix_prompt`、`prompt_prefix`、`suffix_prompt`、`prompt_suffix` 只作为迁移别名读取，不再写出。schema 2 中结构完整的 MiniMax H3 `ai_prompt` 会拆分写入 `prompt` 和 `detailed_description`，非结构化内容则写入 `detailed_description`。
+编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 3`**（整数，与 Python 包版本 `project_version` 无关），唯一版本值来自 `pyproject.toml` 的 `[tool.capricorncd].schema_version`。加载旧工程时会自动迁移：`global_prompt` + `style_prompt` 合并进 `prepend_prompt`，`non_diegetic_music` + `negative_prompt` 合并进 `append_prompt`；`prefix_prompt`、`prompt_prefix`、`suffix_prompt`、`prompt_suffix` 只作为迁移别名读取，不再写出。旧工程的 `ai_prompt` 与 `detailed_description` 会合并进 `prompt`，不再作为独立 Clip 字段写出。
 
 通常由全屏编辑器读写，一般无需手改；下表与示例对应编辑器 `_buildProject()` 的写出格式。
 
@@ -248,8 +248,7 @@
 | `source` | 可选；视频等含 `in_ms` / `out_ms` / `duration_ms`（源内裁剪） |
 | `name` | 标题 |
 | `prompt` | Clip 提示词；MiniMax H3 工程在这里保存 `subject_definitions`、`summary`、`retention_analysis` |
-| `detailed_description` | MiniMax H3 的 `detailed_description` 正文 |
-| `prompt_includes` | Clip 内启用的提示词部分：`clip`、`detailed_description` 和/或 `media` |
+| `prompt_includes` | Clip 内启用的提示词部分：`clip` 和/或 `resource` |
 | `use_prepend_prompt` | 是否在该 Clip 的排序内容之前拼接工程 `prepend_prompt`（默认 `true`） |
 | `use_append_prompt` | 是否在该 Clip 的排序内容之后拼接工程 `append_prompt`（默认 `true`） |
 | `use_media_prompts` | 与 `media_ids` 等长的 bool[]：是否用对应素材 prompt |
@@ -296,9 +295,9 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
 
 - 工程级提示词只使用 `settings.prepend_prompt` 与 `settings.append_prompt`：前者写全局要求和风格提示词，后者写环境音效、BGM 与负面约束。生成器不得写出旧全局提示词字段或独立的 `*_prefix_line` 字段。
 - `prompt`：完整写入 `subject_definitions`、`summary`、`retention_analysis` 三段，并保留段落标题。
-- `detailed_description`：只写正文，不得再次包含 `detailed_description:` 标题或其他结构段；运行时拼接器会在需要时补上标题。
+- `prompt`：保存完整的 Clip 提示词；MiniMax H3 内容包含带标题的 `subject_definitions`、`summary`、`retention_analysis` 与 `detailed_description`。
 - `settings.append_prompt`：在后置内容中完整保存两个声音段落，先写 `overall_soundscape: ...`，再写 `non_diegetic_music: ...`，之后写负面约束。
-- `prompt_includes`：需要同时送入模型时，必须包含 `clip` 与 `detailed_description`。
+- `prompt_includes`：`clip` 表示完整 Clip 提示词，`resource` 表示已启用素材的提示词；旧工程中的 `media` 会迁移为 `resource`。
 - `use_prepend_prompt` 与 `use_append_prompt` 只控制两个固定的工程级边界，不属于 `prompt_concat_order`，也不会进入拖拽拼接排序。
 
 ### 示例（schema 3，字段示意）
@@ -372,9 +371,8 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
           "duration_ms": 5000,
           "media_ids": ["md_abc123"],
           "name": "Clip",
-          "prompt": "subject_definitions:\n<Picture 1>: 角色参考图\n\nsummary: [reference generation] 角色在舞台上演奏。\n\nretention_analysis:\n<Picture 1>: fully_preserved",
-          "detailed_description": "[Shot 1] 镜头缓慢推近，角色按照音乐节奏演奏。",
-          "prompt_includes": ["clip", "detailed_description", "media"],
+          "prompt": "subject_definitions:\n<Picture 1>: 角色参考图\n\nsummary: [reference generation] 角色在舞台上演奏。\n\nretention_analysis:\n<Picture 1>: fully_preserved\n\ndetailed_description:\n[Shot 1] 镜头缓慢推近，角色按照音乐节奏演奏。",
+          "prompt_includes": ["clip", "resource"],
           "use_prepend_prompt": true,
           "use_append_prompt": true,
           "use_media_prompts": [true],

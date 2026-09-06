@@ -60,12 +60,12 @@ const SETTING_PROMPT_KEYS = [
  * Prompt parts for clip.prompt_includes and settings.prompt_concat_order.
  * Order of this constant is the default concatenation order.
  */
-const PROMPT_PART_KEYS = ["clip", "detailed_description", "media"];
+const PROMPT_PART_KEYS = ["clip", "resource"];
 const PROMPT_PART_KEY_SET = new Set(PROMPT_PART_KEYS);
 const PROMPT_TOGGLE_KEYS = ["prepend_prompt", ...PROMPT_PART_KEYS, "append_prompt"];
 const PROMPT_TOGGLE_KEY_SET = new Set(PROMPT_TOGGLE_KEYS);
 const DEFAULT_PROMPT_CONCAT_ORDER = [...PROMPT_PART_KEYS];
-const DEFAULT_PROMPT_INCLUDES = ["clip", "detailed_description"];
+const DEFAULT_PROMPT_INCLUDES = ["clip"];
 const WATERMARK_FIXED_POSITIONS = [
     "top-left", "top-center", "top-right",
     "bottom-left", "bottom-center", "bottom-right",
@@ -134,7 +134,7 @@ function splitH3ProjectPrompt(value) {
         const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
         sections[key] = text.slice(start, end).trim();
     }
-    const clipKeys = ["subject_definitions", "summary", "retention_analysis"];
+    const clipKeys = ["subject_definitions", "summary", "retention_analysis", "detailed_description"];
     if (!clipKeys.every((key) => sections[key]) || !sections.detailed_description) return null;
     const soundAndMusic = ["overall_soundscape", "non_diegetic_music"]
         .filter((key) => sections[key])
@@ -142,7 +142,6 @@ function splitH3ProjectPrompt(value) {
         .join("\n\n");
     return {
         clipPrompt: clipKeys.map((key) => `${key}:\n${sections[key]}`).join("\n\n"),
-        detailedDescription: sections.detailed_description,
         soundAndMusic,
     };
 }
@@ -362,7 +361,9 @@ function normalizePromptConcatOrder(raw) {
     if (Array.isArray(raw)) {
         for (const value of raw) {
             const rawKey = String(value || "").trim();
-            const key = rawKey === "ai" ? "detailed_description" : rawKey;
+            const key = rawKey === "ai" || rawKey === "detailed_description"
+                ? "clip"
+                : rawKey === "media" ? "resource" : rawKey;
             if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
             seen.add(key);
             out.push(key);
@@ -378,29 +379,24 @@ function normalizePromptIncludes(raw, { useAiPrompt, migrateLegacyFlags = false 
     if (Array.isArray(raw)) {
         const seen = new Set();
         for (const value of raw) {
-            const key = String(value || "").trim();
+            const rawKey = String(value || "").trim();
+            const key = rawKey === "ai" || rawKey === "detailed_description"
+                ? "clip"
+                : rawKey === "media" ? "resource" : rawKey;
             if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
             seen.add(key);
         }
-        // Old projects wrote prompt_includes without clip/detailed_description, plus separate use_* flags.
+        // Old projects used separate clip/detailed_description parts and use_* flags.
         if (migrateLegacyFlags) {
-            const hasNewKeys = seen.has("clip") || seen.has("detailed_description");
+            const hasNewKeys = seen.has("clip");
             if (!hasNewKeys) {
                 seen.add("clip");
-                if (useAiPrompt !== false) seen.add("detailed_description");
-            } else if (useAiPrompt === true) {
-                seen.add("detailed_description");
-            } else if (useAiPrompt === false) {
-                seen.delete("detailed_description");
             }
         }
         return PROMPT_PART_KEYS.filter((k) => seen.has(k));
     }
     if (migrateLegacyFlags || useAiPrompt !== undefined) {
-        const out = [];
-        out.push("clip");
-        if (useAiPrompt !== false) out.push("detailed_description");
-        return out;
+        return ["clip"];
     }
     return [...DEFAULT_PROMPT_INCLUDES];
 }
@@ -426,7 +422,6 @@ function defaultImageMeta(trackIndex = 0) {
         clipType: "image",
         mediaKind: "clip",
         prompt: "",
-        detailedDescription: "",
         endImage: null,
         promptIncludes,
         usePrependPrompt: true,
@@ -3822,9 +3817,8 @@ export class CapTimelineEditorApp {
               <div class="cat-te-ai-optimize-body">
                 <div class="cat-te-ai-optimize-left">
                   <div class="cat-te-ai-optimize-tabs">
-                    <button type="button" class="cat-te-ai-src-tab is-clip-scope is-active" data-src="detailed_description">${T("ai_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-clip-scope" data-src="clip">${T("clip_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="media">${T("media_prompt_tab")}</button>
+                    <button type="button" class="cat-te-ai-src-tab is-clip-scope is-active" data-src="clip">${T("clip_prompt_tab")}</button>
+                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="resource">${T("media_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="prepend">${T("prepend_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="append">${T("append_prompt_tab")}</button>
                   </div>
@@ -3836,8 +3830,7 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-includes-chips" role="group">
                       <button type="button" class="cat-te-prompt-include-chip" data-include="prepend_prompt" title="${T("prompt_include_prepend_title")}">${T("prompt_include_prepend")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="clip" title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="detailed_description" title="${T("prompt_include_ai_title")}">${T("prompt_include_ai")}</button>
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="media" title="${T("prompt_include_media_title")}">${T("prompt_include_media")}</button>
+                      <button type="button" class="cat-te-prompt-include-chip" data-include="resource" title="${T("prompt_include_media_title")}">${T("prompt_include_media")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="append_prompt" title="${T("prompt_include_append_title")}">${T("prompt_include_append")}</button>
                     </div>
                   </div>
@@ -5475,25 +5468,15 @@ export class CapTimelineEditorApp {
         for (const track of project.tracks || []) {
             for (const clip of track?.clips || []) {
                 if (!clip || typeof clip !== "object") continue;
-                if (!("detailed_description" in clip) && "ai_prompt" in clip) {
+                if ("ai_prompt" in clip) {
                     const split = splitH3ProjectPrompt(clip.ai_prompt);
+                    const legacyPrompt = split?.clipPrompt || String(clip.ai_prompt || "").trim();
                     if (split) {
-                        const currentPrompt = String(clip.prompt || "").trim();
-                        clip.prompt = currentPrompt
-                            ? `${split.clipPrompt}\n\n${currentPrompt}`
-                            : split.clipPrompt;
-                        clip.detailed_description = split.detailedDescription;
                         this._storeH3SoundAndMusic(project, split.soundAndMusic);
-                    } else {
-                        clip.detailed_description = clip.ai_prompt || "";
                     }
+                    clip.prompt = joinPromptParts(legacyPrompt, clip.prompt);
                 }
                 delete clip.ai_prompt;
-                if (Array.isArray(clip.prompt_includes)) {
-                    clip.prompt_includes = clip.prompt_includes.map((key) => (
-                        key === "ai" ? "detailed_description" : key
-                    ));
-                }
             }
         }
     }
@@ -5511,18 +5494,28 @@ export class CapTimelineEditorApp {
         for (const track of project.tracks || []) {
             for (const clip of track?.clips || []) {
                 if (!clip || typeof clip !== "object") continue;
-                const split = splitH3ProjectPrompt(clip.detailed_description);
-                if (!split) continue;
-                const currentPrompt = String(clip.prompt || "").trim();
-                if (!currentPrompt) clip.prompt = split.clipPrompt;
-                else if (!currentPrompt.includes(split.clipPrompt)) clip.prompt = `${split.clipPrompt}\n\n${currentPrompt}`;
-                clip.detailed_description = split.detailedDescription;
-                const includes = Array.isArray(clip.prompt_includes) ? clip.prompt_includes : [];
-                for (const key of ["clip", "detailed_description"]) {
-                    if (!includes.includes(key)) includes.push(key);
+                let prompt = String(clip.prompt || "").trim();
+                const promptSplit = splitH3ProjectPrompt(prompt);
+                if (promptSplit) {
+                    prompt = promptSplit.clipPrompt;
+                    this._storeH3SoundAndMusic(project, promptSplit.soundAndMusic);
                 }
-                clip.prompt_includes = includes;
-                this._storeH3SoundAndMusic(project, split.soundAndMusic);
+                const legacyDetailed = String(clip.detailed_description || clip.ai_prompt || "").trim();
+                if (legacyDetailed) {
+                    const detailedSplit = splitH3ProjectPrompt(legacyDetailed);
+                    if (detailedSplit) {
+                        prompt = joinPromptParts(detailedSplit.clipPrompt, prompt);
+                        this._storeH3SoundAndMusic(project, detailedSplit.soundAndMusic);
+                    } else {
+                        const detailed = /^detailed_description\s*:/i.test(legacyDetailed)
+                            ? legacyDetailed
+                            : `detailed_description:\n${legacyDetailed}`;
+                        prompt = joinPromptParts(prompt, detailed);
+                    }
+                }
+                clip.prompt = prompt;
+                delete clip.detailed_description;
+                delete clip.ai_prompt;
             }
         }
     }
@@ -12345,7 +12338,6 @@ export class CapTimelineEditorApp {
                 clipType: isMediaTrackType(track.type) ? "media" : "image",
                 mediaKind: isMediaTrackType(track.type) ? "media" : "clip",
                 prompt: c.prompt ?? "",
-                detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
                 promptIncludes,
                 usePrependPrompt: c.use_prepend_prompt !== false,
                 useAppendPrompt: c.use_append_prompt !== false,
@@ -12430,7 +12422,6 @@ export class CapTimelineEditorApp {
                 agent: c.agent || "MiniMaxH3",
                 agentCustom: c.agent_custom ?? "",
                 prompt: c.prompt ?? "",
-                detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
                 endImage: c.end_image ?? null,
                 promptIncludes,
                 usePrependPrompt: c.use_prepend_prompt !== false,
@@ -12492,7 +12483,6 @@ export class CapTimelineEditorApp {
             agent: c.agent || "MiniMaxH3",
             agentCustom: c.agent_custom ?? "",
             prompt: c.prompt ?? "",
-            detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
             endImage: c.end_image ?? null,
             promptIncludes,
             usePrependPrompt: c.use_prepend_prompt !== false,
@@ -16401,8 +16391,7 @@ export class CapTimelineEditorApp {
         const includes = normalizePromptIncludes(m.promptIncludes);
         const values = {
             clip: m.prompt,
-            detailed_description: m.detailedDescription,
-            media: this._clipItems(m)
+            resource: this._clipItems(m)
                 .filter((item) => item.enabled !== false)
                 .map((item) => {
                     const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
@@ -16418,11 +16407,7 @@ export class CapTimelineEditorApp {
             if (!includes.includes(key)) continue;
             const text = this._stripPromptComments(values[key]);
             if (!text) continue;
-            if (key === "detailed_description" && !text.startsWith("detailed_description:")) {
-                parts.push(`detailed_description:\n\n${text}`);
-            } else {
-                parts.push(text);
-            }
+            parts.push(text);
         }
         const append = this._stripPromptComments(this._readSettingPrompt("append_prompt"));
         if (m.useAppendPrompt !== false && append) parts.push(append);
@@ -16443,22 +16428,20 @@ export class CapTimelineEditorApp {
     _promptManagerValue(tab, clip) {
         if (!clip) return "";
         const meta = this._ensureClipMeta(clip);
-        if (tab === "detailed_description") return String(meta.detailedDescription || "");
         if (tab === "clip") return String(meta.prompt || "");
-        if (tab === "media") return this._mediaPromptBlock(clip);
+        if (tab === "resource") return this._mediaPromptBlock(clip);
         const key = this._promptManagerSettingKey(tab);
         return key ? this._readSettingPrompt(key) : "";
     }
 
     _writePromptManagerValue(tab, text, { recordUndo = true } = {}) {
         const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
-        if (!clip || tab === "media") return false;
+        if (!clip || tab === "resource") return false;
         if (recordUndo) this._recordUndo();
         const value = String(text ?? "");
-        if (tab === "detailed_description" || tab === "clip") {
+        if (tab === "clip") {
             const meta = this._ensureClipMeta(clip);
-            if (tab === "detailed_description") meta.detailedDescription = value;
-            else meta.prompt = value;
+            meta.prompt = value;
             this._meta.set(clip.id, meta);
         } else {
             const key = this._promptManagerSettingKey(tab);
@@ -16471,7 +16454,7 @@ export class CapTimelineEditorApp {
     }
 
     _onPromptManagerSourceInput() {
-        if (!this.aiSrcText || this.aiSrcText.readOnly || this._aiOptimizeSrc === "media") return;
+        if (!this.aiSrcText || this.aiSrcText.readOnly || this._aiOptimizeSrc === "resource") return;
         if (this._promptManagerUndoArmed) {
             this._recordUndo();
             this._promptManagerUndoArmed = false;
@@ -16520,17 +16503,17 @@ export class CapTimelineEditorApp {
     }
 
     _setAiOptimizeSrcTab(tab) {
-        const allowed = new Set(["detailed_description", "clip", "media", "prepend", "append"]);
-        const next = allowed.has(tab) ? tab : "detailed_description";
+        const allowed = new Set(["clip", "resource", "prepend", "append"]);
+        const next = allowed.has(tab) ? tab : "clip";
         this._aiOptimizeSrc = next;
         this.aiSrcTabs?.forEach((btn) => {
             btn.classList.toggle("is-active", btn.dataset.src === next);
             btn.setAttribute("aria-selected", btn.dataset.src === next ? "true" : "false");
         });
         if (this.aiSrcText) {
-            this.aiSrcText.readOnly = next === "media";
-            this.aiSrcText.classList.toggle("is-readonly", next === "media");
-            this.aiSrcText.title = next === "media" ? T("material_prompt_readonly_hint") : "";
+            this.aiSrcText.readOnly = next === "resource";
+            this.aiSrcText.classList.toggle("is-readonly", next === "resource");
+            this.aiSrcText.title = next === "resource" ? T("material_prompt_readonly_hint") : "";
         }
         this._promptManagerUndoArmed = false;
         this._fillAiOptimizeSrc();
@@ -16544,9 +16527,9 @@ export class CapTimelineEditorApp {
             setRichPromptValue(this.aiSrcText, "", true);
             return;
         }
-        const tab = this._aiOptimizeSrc || "detailed_description";
+        const tab = this._aiOptimizeSrc || "clip";
         setRichPromptValue(this.aiSrcText, this._promptManagerValue(tab, clip), true);
-        this.aiSrcText.placeholder = tab === "media" ? T("material_prompt_readonly_hint") : "";
+        this.aiSrcText.placeholder = tab === "resource" ? T("material_prompt_readonly_hint") : "";
     }
 
     _restoreAiOutputLanguage() {
@@ -16563,7 +16546,7 @@ export class CapTimelineEditorApp {
     async _openAiOptimizeModal(clip = this._selClip) {
         if (!clip || !isDirectorTrackType(clip.track?.type) || !this.aiOptimizeModal) return;
         this.aiOptimizeModal.hidden = false;
-        this._aiOptimizeSrc = "detailed_description";
+        this._aiOptimizeSrc = "clip";
         if (this.aiResultInput) this.aiResultInput.value = "";
         await this._bindAiOptimizeToClip(clip, { reloadModels: true });
     }
@@ -16607,7 +16590,7 @@ export class CapTimelineEditorApp {
             this.aiSkillInput.value = localStorage.getItem(STORAGE_AI_PROMPT_SKILL) || "";
         }
         this._restoreAiOutputLanguage();
-        this._setAiOptimizeSrcTab(this._aiOptimizeSrc || "detailed_description");
+        this._setAiOptimizeSrcTab(this._aiOptimizeSrc || "clip");
         this._syncPromptIncludesUi(meta);
         if (reloadModels) await this._loadAiOptimizeModels();
         await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
@@ -16727,7 +16710,7 @@ export class CapTimelineEditorApp {
             if (span) span.textContent = busy ? T("terminate_label") : T("edit_btn");
         }
         if (this.aiGenerateBtn) {
-            this.aiGenerateBtn.disabled = !busy && this._aiOptimizeSrc === "media";
+            this.aiGenerateBtn.disabled = !busy && this._aiOptimizeSrc === "resource";
             this.aiGenerateBtn.classList.toggle("is-loading", false);
             this.aiGenerateBtn.classList.toggle("is-cancel", busy);
             this.aiGenerateBtn.innerHTML = busy
@@ -16738,8 +16721,8 @@ export class CapTimelineEditorApp {
 
     async _runAiOptimize() {
         const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
-        const targetTab = this._aiOptimizeSrc || "detailed_description";
-        if (!clip || clip.track?.type === "audio" || this._aiOptimizeBusy || targetTab === "media") return;
+        const targetTab = this._aiOptimizeSrc || "clip";
+        if (!clip || clip.track?.type === "audio" || this._aiOptimizeBusy || targetTab === "resource") return;
         const meta = this._ensureClipMeta(clip);
         const modelChoice = String(this.aiModelSelect?.value || "").trim();
         if (!modelChoice) {
@@ -16789,14 +16772,11 @@ export class CapTimelineEditorApp {
             if (!text) throw new Error(T("model_no_prompt_returned"));
             const preview = text.length > 800 ? `${text.slice(0, 800)}…` : text;
             const h3Sections = meta.agent === "MiniMaxH3" ? splitH3ProjectPrompt(text) : null;
-            const target = h3Sections
-                ? `${this._promptManagerTabLabel("clip")} + ${this._promptManagerTabLabel("detailed_description")}`
-                : this._promptManagerTabLabel(targetTab);
+            const target = this._promptManagerTabLabel(targetTab);
             if (!confirm(T("confirm_apply_generated_prompt", { target, preview }))) return;
             if (h3Sections) {
                 this._recordUndo();
                 meta.prompt = h3Sections.clipPrompt;
-                meta.detailedDescription = h3Sections.detailedDescription;
                 if (h3Sections.soundAndMusic) {
                     const input = this._settingPromptInputs?.append_prompt;
                     if (input) {
@@ -16953,9 +16933,8 @@ export class CapTimelineEditorApp {
 
     _promptManagerTabLabel(key) {
         switch (key) {
-            case "detailed_description": return T("ai_prompt_tab");
             case "clip": return T("clip_prompt_tab");
-            case "media": return T("media_prompt_tab");
+            case "resource": return T("media_prompt_tab");
             case "prepend": return T("prepend_prompt_tab");
             case "append": return T("append_prompt_tab");
             default: return key;
@@ -16965,8 +16944,7 @@ export class CapTimelineEditorApp {
     _promptPartLabel(key) {
         switch (key) {
             case "clip": return T("prompt_include_clip");
-            case "detailed_description": return T("prompt_include_ai");
-            case "media": return T("prompt_include_media");
+            case "resource": return T("prompt_include_media");
             default: return key;
         }
     }
@@ -17289,7 +17267,6 @@ export class CapTimelineEditorApp {
                 } else {
                     row.name = clip.name || DEFAULT_CLIP_NAME;
                     row.prompt = m.prompt ?? "";
-                    row.detailed_description = m.detailedDescription ?? "";
                     row.prompt_includes = normalizePromptIncludes(m.promptIncludes);
                     row.use_prepend_prompt = m.usePrependPrompt !== false;
                     row.use_append_prompt = m.useAppendPrompt !== false;

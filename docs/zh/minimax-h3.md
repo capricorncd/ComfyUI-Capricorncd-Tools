@@ -31,7 +31,7 @@
 
 ## 提示词
 
-Timeline Editor 的提示词按 `prepend_prompt` → 依据 `prompt_concat_order` 排列且由 `prompt_includes` 启用的 Clip 内容 → `append_prompt` 拼接。MiniMax H3 工程中，`clip.prompt` 保存 `subject_definitions`、`summary`、`retention_analysis`，`clip.detailed_description` 只保存镜头描述正文；拼接器会补上 `detailed_description:` 标题。旧 Audio Timeline JSON 仍保留原有全局提示词行为。
+Timeline Editor 的提示词按 `prepend_prompt` → 依据 `prompt_concat_order` 排列且由 `prompt_includes` 启用的 Clip 内容 → `append_prompt` 拼接。MiniMax H3 工程中，`clip.prompt` 统一保存带标题的 `subject_definitions`、`summary`、`retention_analysis` 与 `detailed_description`，形成一个完整结构化提示词。旧 Audio Timeline JSON 仍保留原有全局提示词行为。
 
 ---
 

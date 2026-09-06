@@ -31,7 +31,7 @@ Accepts either:
 
 ## Prompt
 
-Timeline Editor prompts are assembled as `prepend_prompt` → Clip parts enabled by `prompt_includes` in `prompt_concat_order` → `append_prompt`. For MiniMax H3 projects, `clip.prompt` contains `subject_definitions`, `summary`, and `retention_analysis`; `clip.detailed_description` contains only the shot-description body. The composer adds the `detailed_description:` heading. Legacy Audio Timeline JSON keeps its older global-prompt behavior.
+Timeline Editor prompts are assembled as `prepend_prompt` → Clip parts enabled by `prompt_includes` in `prompt_concat_order` → `append_prompt`. For MiniMax H3 projects, `clip.prompt` contains `subject_definitions`, `summary`, `retention_analysis`, and `detailed_description` as one complete structured prompt. Legacy Audio Timeline JSON keeps its older global-prompt behavior.
 
 ---
 

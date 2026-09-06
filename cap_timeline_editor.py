@@ -12,8 +12,6 @@ import torch
 
 from .cap_audio_timeline import (
     CAP_AudioTimeline,
-    _clip_prompt_includes,
-    _normalize_prompt_concat_order,
     _strip_comment_lines,
 )
 from .cap_clip_prompt_vl import clear_clip_prompt_vl
@@ -25,17 +23,32 @@ def _setting_prompt(settings: dict, key: str) -> str:
     return _strip_comment_lines(settings.get(key) or "").strip()
 
 
-_TIMELINE_PROMPT_PART_KEYS = ("clip", "detailed_description", "media")
+_TIMELINE_PROMPT_PART_KEYS = ("clip", "resource")
 
 
 def _timeline_prompt_includes(clip: dict) -> list[str]:
-    includes = set(_clip_prompt_includes(clip))
+    raw = clip.get("prompt_includes")
+    if not isinstance(raw, list):
+        return ["clip"]
+    includes = {
+        "clip" if str(key) in {"ai", "detailed_description"} else (
+            "resource" if str(key) == "media" else str(key)
+        )
+        for key in raw
+    }
     return [key for key in _TIMELINE_PROMPT_PART_KEYS if key in includes]
 
 
 def _timeline_prompt_concat_order(raw) -> list[str]:
-    order = _normalize_prompt_concat_order(raw)
-    return [key for key in order if key in _TIMELINE_PROMPT_PART_KEYS]
+    order = []
+    if isinstance(raw, list):
+        for value in raw:
+            key = "clip" if str(value) in {"ai", "detailed_description"} else (
+                "resource" if str(value) == "media" else str(value)
+            )
+            if key in _TIMELINE_PROMPT_PART_KEYS and key not in order:
+                order.append(key)
+    return order + [key for key in _TIMELINE_PROMPT_PART_KEYS if key not in order]
 
 
 def _safe_filename_part(value, fallback: str = "Untitled") -> str:
@@ -715,10 +728,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 continue
             entries = _clip_visual_entries(project, clip)
             has_media = any(e.get("enabled") and e.get("id") for e in entries)
-            has_prompt = bool(
-                _strip_comment_lines(clip.get("detailed_description") or clip.get("ai_prompt") or "").strip()
-                or _strip_comment_lines(clip.get("prompt") or "").strip()
-            )
+            has_prompt = bool(_strip_comment_lines(clip.get("prompt") or "").strip())
             # Empty package clips are timeline placeholders (preview only).
             if not has_media and not has_prompt:
                 continue
@@ -767,9 +777,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "seed": _clip_seed(clip),
                 "images": _clip_image_refs(entries),
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
-                "detailed_description": _strip_comment_lines(
-                    clip.get("detailed_description") or clip.get("ai_prompt") or ""
-                ).strip(),
                 "prompt_includes": prompt_includes,
                 "use_prepend_prompt": clip.get("use_prepend_prompt", True) is not False,
                 "use_append_prompt": clip.get("use_append_prompt", True) is not False,

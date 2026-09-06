@@ -228,14 +228,17 @@ def _migrate_setting_prompts(project: dict) -> None:
 
 
 def _normalize_timeline_prompt_selection(project: dict) -> None:
-    allowed = ("clip", "detailed_description", "media")
+    allowed = ("clip", "resource")
     settings = project.get("settings")
     if isinstance(settings, dict):
         raw_order = settings.get("prompt_concat_order")
         order = []
         if isinstance(raw_order, list):
             for value in raw_order:
-                key = "detailed_description" if str(value) == "ai" else str(value)
+                raw_key = str(value)
+                key = "clip" if raw_key in {"ai", "detailed_description"} else (
+                    "resource" if raw_key == "media" else raw_key
+                )
                 if key in allowed and key not in order:
                     order.append(key)
         settings["prompt_concat_order"] = order + [key for key in allowed if key not in order]
@@ -249,14 +252,15 @@ def _normalize_timeline_prompt_selection(project: dict) -> None:
             selected = set()
             if isinstance(raw, list):
                 for value in raw:
-                    key = "detailed_description" if str(value) == "ai" else str(value)
+                    raw_key = str(value)
+                    key = "clip" if raw_key in {"ai", "detailed_description"} else (
+                        "resource" if raw_key == "media" else raw_key
+                    )
                     if key in allowed:
                         selected.add(key)
                 includes = [key for key in allowed if key in selected]
             else:
                 includes = ["clip"]
-                if clip.get("use_ai_prompt", True) is not False:
-                    includes.append("detailed_description")
             clip["prompt_includes"] = includes
             if "use_prepend_prompt" not in clip:
                 clip["use_prepend_prompt"] = clip.get("use_global_prompt", True) is not False
@@ -266,7 +270,7 @@ def _normalize_timeline_prompt_selection(project: dict) -> None:
             clip.pop("use_ai_prompt", None)
 
 
-def _split_h3_prompt(value: str) -> tuple[str, str, str] | None:
+def _split_h3_prompt(value: str) -> tuple[str, str] | None:
     text = str(value or "").strip()
     matches = list(re.finditer(
         r"^(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:\s*",
@@ -277,8 +281,8 @@ def _split_h3_prompt(value: str) -> tuple[str, str, str] | None:
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         sections[match.group(1).lower()] = text[match.end():end].strip()
-    clip_keys = ("subject_definitions", "summary", "retention_analysis")
-    if not all(sections.get(key) for key in clip_keys) or not sections.get("detailed_description"):
+    clip_keys = ("subject_definitions", "summary", "retention_analysis", "detailed_description")
+    if not all(sections.get(key) for key in clip_keys):
         return None
     prompt = "\n\n".join(f"{key}:\n{sections[key]}" for key in clip_keys)
     sound = "\n\n".join(
@@ -286,7 +290,7 @@ def _split_h3_prompt(value: str) -> tuple[str, str, str] | None:
         for key in ("overall_soundscape", "non_diegetic_music")
         if sections.get(key)
     )
-    return prompt, sections["detailed_description"], sound
+    return prompt, sound
 
 
 def _normalize_h3_prompt_fields(project: dict) -> None:
@@ -297,21 +301,28 @@ def _normalize_h3_prompt_fields(project: dict) -> None:
         for clip in track.get("clips") or []:
             if not isinstance(clip, dict):
                 continue
-            split = _split_h3_prompt(clip.get("detailed_description") or "")
-            if not split:
-                continue
-            h3_prompt, detailed_description, sound = split
             current_prompt = str(clip.get("prompt") or "").strip()
-            if not current_prompt:
-                clip["prompt"] = h3_prompt
-            elif h3_prompt not in current_prompt:
-                clip["prompt"] = f"{h3_prompt}\n\n{current_prompt}"
-            clip["detailed_description"] = detailed_description
-            includes = clip.get("prompt_includes")
-            if isinstance(includes, list):
-                for key in ("clip", "detailed_description"):
-                    if key not in includes:
-                        includes.append(key)
+            prompt_split = _split_h3_prompt(current_prompt)
+            sound_parts = []
+            if prompt_split:
+                current_prompt, sound = prompt_split
+                sound_parts.append(sound)
+            legacy_detailed = str(clip.get("detailed_description") or clip.get("ai_prompt") or "").strip()
+            if legacy_detailed:
+                detailed_split = _split_h3_prompt(legacy_detailed)
+                if detailed_split:
+                    h3_prompt, sound = detailed_split
+                    current_prompt = _join_prompt_parts(h3_prompt, current_prompt)
+                    sound_parts.append(sound)
+                else:
+                    detailed = legacy_detailed if re.match(
+                        r"^detailed_description\s*:", legacy_detailed, re.IGNORECASE,
+                    ) else f"detailed_description:\n{legacy_detailed}"
+                    current_prompt = _join_prompt_parts(current_prompt, detailed)
+            clip["prompt"] = current_prompt
+            clip.pop("detailed_description", None)
+            clip.pop("ai_prompt", None)
+            sound = _join_prompt_parts(*sound_parts)
             current_sound = str(settings.get("append_prompt") or "").strip()
             if sound and not current_sound:
                 settings["append_prompt"] = sound
@@ -326,14 +337,13 @@ def _migrate_schema_2_to_3(project: dict) -> None:
         for clip in track.get("clips") or []:
             if not isinstance(clip, dict):
                 continue
-            if "detailed_description" not in clip and "ai_prompt" in clip:
+            if "ai_prompt" in clip:
                 legacy_prompt = clip.get("ai_prompt") or ""
                 split = _split_h3_prompt(legacy_prompt)
                 if split:
-                    h3_prompt, detailed_description, sound = split
+                    h3_prompt, sound = split
                     current_prompt = str(clip.get("prompt") or "").strip()
                     clip["prompt"] = h3_prompt if not current_prompt else f"{h3_prompt}\n\n{current_prompt}"
-                    clip["detailed_description"] = detailed_description
                     settings = project.setdefault("settings", {})
                     current_sound = str(settings.get("append_prompt") or "").strip()
                     if sound and not current_sound:
@@ -341,14 +351,8 @@ def _migrate_schema_2_to_3(project: dict) -> None:
                     elif sound and sound not in current_sound:
                         settings["append_prompt"] = f"{sound}\n\n{current_sound}"
                 else:
-                    clip["detailed_description"] = legacy_prompt
+                    clip["prompt"] = _join_prompt_parts(legacy_prompt, clip.get("prompt"))
             clip.pop("ai_prompt", None)
-            includes = clip.get("prompt_includes")
-            if isinstance(includes, list):
-                clip["prompt_includes"] = [
-                    "detailed_description" if str(value) == "ai" else value
-                    for value in includes
-                ]
 
 
 def _migrate_schema_1_to_2(project: dict) -> None:

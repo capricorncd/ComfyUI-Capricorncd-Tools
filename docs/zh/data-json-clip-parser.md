@@ -55,7 +55,7 @@
       "start_image": "/absolute/path/to/start.jpg",
       "end_image": "/absolute/path/to/end.jpg",
       "prompt": "close up",
-      "prompt_includes": ["clip", "detailed_description", "media"],
+      "prompt_includes": ["clip", "resource"],
       "audios": [
         {
           "file": "/absolute/path/to/voice.wav",
@@ -115,7 +115,7 @@
 | `images` | IMAGE | 片段全部静帧组成的 IMAGE 批次 |
 | `clip_role` | STRING | 片段类型（供 Agent） |
 | `agent` | STRING | Agent id |
-| `detailed_description` | STRING | MiniMax H3 的 `detailed_description` 文本 |
+| `detailed_description` | STRING | 兼容输出，从 `prompt` 内的 `detailed_description` 段落提取 |
 | `clip_json` | STRING | 自包含片段 JSON：含 `fps`、`global_prompt`，以及 `images` / `videos` 绝对 `file` 路径、已解析的 `audios`、内嵌 `materials` |
 
 `clip_json` 供 [MiniMaxH3](minimax-h3.md) 等节点直接使用，无需再接完整 `data_json` + `index`。

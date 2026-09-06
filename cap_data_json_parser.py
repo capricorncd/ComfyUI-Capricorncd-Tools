@@ -2,6 +2,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 
 import numpy as np
 import torch
@@ -169,6 +170,36 @@ class CAP_DataJsonClipParser:
         from .cap_audio_timeline import _normalize_prompt_concat_order
         return _normalize_prompt_concat_order(raw)
 
+    def _prompt_section(self, prompt: str, section: str) -> str:
+        match = re.search(
+            rf"^{re.escape(section)}\s*:\s*(.*?)(?=^(?:subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:|\Z)",
+            str(prompt or ""),
+            re.IGNORECASE | re.MULTILINE | re.DOTALL,
+        )
+        return match.group(1).strip() if match else ""
+
+    def _timeline_prompt_includes(self, clip: dict) -> list[str]:
+        raw = clip.get("prompt_includes")
+        values = raw if isinstance(raw, list) else ["clip"]
+        out = []
+        for value in values:
+            key = "clip" if str(value) in {"ai", "detailed_description"} else (
+                "resource" if str(value) == "media" else str(value)
+            )
+            if key in {"clip", "resource"} and key not in out:
+                out.append(key)
+        return out
+
+    def _timeline_prompt_order(self, raw) -> list[str]:
+        out = []
+        for value in raw if isinstance(raw, list) else []:
+            key = "clip" if str(value) in {"ai", "detailed_description"} else (
+                "resource" if str(value) == "media" else str(value)
+            )
+            if key in {"clip", "resource"} and key not in out:
+                out.append(key)
+        return out + [key for key in ("clip", "resource") if key not in out]
+
     def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None,
                         *, style_prompt: str = "", non_diegetic_music: str = "",
                         negative_prompt: str = "", prompt_concat_order=None,
@@ -192,23 +223,22 @@ class CAP_DataJsonClipParser:
                 clip.get("detailed_description") or clip.get("ai_prompt") or ""
             ).strip(),
             "media": "\n\n".join(media_parts),
+            "resource": "\n\n".join(media_parts),
             "non_diegetic_music": self._strip_comment_lines(non_diegetic_music).strip(),
             "negative": self._strip_comment_lines(negative_prompt).strip(),
         }
         parts = []
         if prepend_prompt is not None or append_prompt is not None:
+            includes = set(self._timeline_prompt_includes(clip))
+            order = self._timeline_prompt_order(prompt_concat_order)
             prepend = self._strip_comment_lines(prepend_prompt or "").strip()
             if clip.get("use_prepend_prompt", True) is not False and prepend:
                 parts.append(prepend)
-            includes.intersection_update(("clip", "detailed_description", "media"))
-            order = [key for key in order if key in ("clip", "detailed_description", "media")]
         for key in order:
             if key not in includes:
                 continue
             text = texts.get(key) or ""
             if text:
-                if key == "detailed_description" and not text.lstrip().startswith("detailed_description:"):
-                    text = f"detailed_description:\n\n{text}"
                 parts.append(text)
         if prepend_prompt is not None or append_prompt is not None:
             append = self._strip_comment_lines(append_prompt or "").strip()
@@ -465,8 +495,10 @@ class CAP_DataJsonClipParser:
         order = self._normalize_prompt_concat_order(prompt_concat_order)
         includes = self._clip_prompt_includes(out)
         if prepend_prompt is not None or append_prompt is not None:
-            order = [key for key in order if key in ("clip", "detailed_description", "media")]
-            includes = [key for key in includes if key in ("clip", "detailed_description", "media")]
+            order = self._timeline_prompt_order(prompt_concat_order)
+            includes = self._timeline_prompt_includes(out)
+            out.pop("detailed_description", None)
+            out.pop("ai_prompt", None)
         out["prompt_concat_order"] = order
         out["prompt_includes"] = includes
         images = []
@@ -638,9 +670,7 @@ class CAP_DataJsonClipParser:
         images = self._load_images_batch(refs, materials, blank)
         clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
         agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
-        detailed_description = self._strip_comment_lines(
-            clip.get("detailed_description") or clip.get("ai_prompt") or ""
-        ).strip()
+        detailed_description = self._prompt_section(clip.get("prompt") or "", "detailed_description")
         clip_json = self._build_clip_json(
             clip,
             materials,

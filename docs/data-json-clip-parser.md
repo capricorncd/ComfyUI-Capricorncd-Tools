@@ -51,7 +51,7 @@ Top-level fields include `project_version`, `schema_version`, and no `audio_path
       "start_image": "/absolute/path/to/start.jpg",
       "end_image": "/absolute/path/to/end.jpg",
       "prompt": "close up",
-      "prompt_includes": ["clip", "detailed_description", "media"],
+      "prompt_includes": ["clip", "resource"],
       "audios": [
         {
           "file": "/absolute/path/to/voice.wav",
@@ -111,7 +111,7 @@ Adds extra seconds to the clip's audio end time. This is useful when the generat
 | `images` | IMAGE | All clip stills as one IMAGE batch |
 | `clip_role` | STRING | Clip role for agents |
 | `agent` | STRING | Agent id |
-| `detailed_description` | STRING | MiniMax H3 `detailed_description` text |
+| `detailed_description` | STRING | Compatibility output extracted from the `detailed_description` section inside `prompt` |
 | `clip_json` | STRING | Self-contained clip JSON: `fps`, `global_prompt`, `images` / `videos` with absolute `file` paths, resolved `audios`, and embedded `materials` |
 
 `clip_json` is meant for nodes such as [MiniMaxH3](minimax-h3.md) that should not need the full `data_json` + `index`.

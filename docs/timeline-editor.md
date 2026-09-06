@@ -150,7 +150,7 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 
 ## `project_json` (editable)
 
-Full project document stored on the node widget. Current shape is **`schema_version: 3`** (integer; independent of the Python package `project_version`), sourced from `[tool.capricorncd].schema_version` in `pyproject.toml`. Older documents are migrated on load. Legacy `global_prompt` + `style_prompt` values migrate into `prepend_prompt`; `non_diegetic_music` + `negative_prompt` migrate into `append_prompt`. The aliases `prefix_prompt`, `prompt_prefix`, `suffix_prompt`, and `prompt_suffix` are accepted as migration input but are never written back. A structured MiniMax H3 value in schema 2 `ai_prompt` is split between `prompt` and `detailed_description`; unstructured values become `detailed_description`.
+Full project document stored on the node widget. Current shape is **`schema_version: 3`** (integer; independent of the Python package `project_version`), sourced from `[tool.capricorncd].schema_version` in `pyproject.toml`. Older documents are migrated on load. Legacy `global_prompt` + `style_prompt` values migrate into `prepend_prompt`; `non_diegetic_music` + `negative_prompt` migrate into `append_prompt`. The aliases `prefix_prompt`, `prompt_prefix`, `suffix_prompt`, and `prompt_suffix` are accepted as migration input but are never written back. Legacy `ai_prompt` and `detailed_description` values are merged into `prompt` and are no longer written as separate Clip fields.
 
 Normally owned by the fullscreen editor — you do not edit it by hand. The tables and example below match what the editor writes via `_buildProject()`.
 
@@ -250,8 +250,7 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 | `source` | Optional; video trim: `in_ms` / `out_ms` / `duration_ms` |
 | `name` | Title |
 | `prompt` | Clip prompt. MiniMax H3 projects store `subject_definitions`, `summary`, and `retention_analysis` here |
-| `detailed_description` | MiniMax H3 `detailed_description` body |
-| `prompt_includes` | Ordered enabled Clip parts: `clip`, `detailed_description`, and/or `media` |
+| `prompt_includes` | Enabled Clip parts: `clip` and/or `resource` |
 | `use_prepend_prompt` | Whether to place the project `prepend_prompt` before this Clip’s ordered parts (default `true`) |
 | `use_append_prompt` | Whether to place the project `append_prompt` after this Clip’s ordered parts (default `true`) |
 | `use_media_prompts` | bool[] aligned with `media_ids` |
@@ -298,9 +297,9 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
 
 - Project-level prompts use only `settings.prepend_prompt` and `settings.append_prompt`. The former contains global/style requirements and the latter contains soundscape, BGM, and negative constraints. Generators must not emit the legacy global prompt fields or separate `*_prefix_line` fields.
 - `prompt`: the complete `subject_definitions`, `summary`, and `retention_analysis` sections, including their headings.
-- `detailed_description`: the body only, without another `detailed_description:` heading or any other structured section. The runtime prompt composer adds the heading when needed.
+- `prompt`: stores the complete Clip prompt. For MiniMax H3 this includes `subject_definitions`, `summary`, `retention_analysis`, and `detailed_description` with their headings.
 - `settings.append_prompt`: keep both complete sound sections in the appended value: `overall_soundscape: ...`, then `non_diegetic_music: ...`; negative constraints follow them.
-- `prompt_includes`: include both `clip` and `detailed_description` when both should be sent to the model.
+- `prompt_includes`: use `clip` to include the complete Clip prompt and `resource` to include enabled media prompts. Legacy `media` values migrate to `resource`.
 - `use_prepend_prompt` and `use_append_prompt` control the two fixed project-level boundaries. They are not members of `prompt_concat_order` and never enter its drag ordering.
 
 ### Example (schema 3, illustrative)
@@ -374,9 +373,8 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
           "duration_ms": 5000,
           "media_ids": ["md_abc123"],
           "name": "Clip",
-          "prompt": "subject_definitions:\n<Picture 1>: the character reference\n\nsummary: [reference generation] The character performs on stage.\n\nretention_analysis:\n<Picture 1>: fully_preserved",
-          "detailed_description": "[Shot 1] The camera slowly pushes toward the performer as she plays in time with the music.",
-          "prompt_includes": ["clip", "detailed_description", "media"],
+          "prompt": "subject_definitions:\n<Picture 1>: the character reference\n\nsummary: [reference generation] The character performs on stage.\n\nretention_analysis:\n<Picture 1>: fully_preserved\n\ndetailed_description:\n[Shot 1] The camera slowly pushes toward the performer as she plays in time with the music.",
+          "prompt_includes": ["clip", "resource"],
           "use_prepend_prompt": true,
           "use_append_prompt": true,
           "use_media_prompts": [true],

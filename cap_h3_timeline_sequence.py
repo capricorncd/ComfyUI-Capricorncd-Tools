@@ -28,6 +28,10 @@ _LEADING_TIME_RANGE_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*(?:秒|s(?:ec(?:onds?)?)?)",
     re.IGNORECASE,
 )
+_DETAILED_DESCRIPTION_RE = re.compile(
+    r"^detailed_description\s*:\s*(.*?)(?=^(?:subject_definitions|summary|retention_analysis|overall_soundscape|non_diegetic_music)\s*:|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
 
 
 def _sequence_rows(data_json: str) -> tuple[dict, list[dict], float]:
@@ -142,9 +146,23 @@ def _scope_timed_description(text: str, part_start_ms: int, part_end_ms: int) ->
     return f"{header}\n\n{scoped}" if header else scoped
 
 
+def _prompt_detailed_description(prompt: str) -> str:
+    match = _DETAILED_DESCRIPTION_RE.search(str(prompt or ""))
+    return match.group(1).strip() if match else ""
+
+
+def _scope_prompt_description(prompt: str, part_start_ms: int, part_end_ms: int) -> str:
+    text = str(prompt or "")
+    match = _DETAILED_DESCRIPTION_RE.search(text)
+    if not match:
+        return text.strip()
+    scoped = _scope_timed_description(match.group(1), part_start_ms, part_end_ms)
+    return f"{text[:match.start(1)]}{scoped}{text[match.end(1):]}".strip()
+
+
 def _segment_ranges(clip: dict, duration_ms: int, max_segment_ms: int) -> list[tuple[int, int]]:
     boundaries = {0, duration_ms}
-    for block in re.split(r"\n\s*\n", str(clip.get("detailed_description") or "")):
+    for block in re.split(r"\n\s*\n", _prompt_detailed_description(clip.get("prompt") or "")):
         match = _LEADING_TIME_RANGE_RE.match(block)
         if match is None:
             continue
@@ -200,16 +218,16 @@ def _split_long_clips(clips: list[dict], max_segment_ms: int) -> list[tuple[int,
             row["start_ms"] = start_ms + local_start
             row["end_ms"] = start_ms + local_end
             row["audios"] = _slice_audio_rows(clip.get("audios"), local_start, local_end)
-            row["detailed_description"] = _scope_timed_description(
-                clip.get("detailed_description", ""), local_start, local_end,
-            )
             segment_scope = (
                 f"internal_segment_scope: part {part_index + 1}/{count}, original timeline "
                 f"{local_start / 1000:g}—{local_end / 1000:g} seconds. Do not restart or summarize "
                 "the full clip; render only this interval and continue the same take."
             )
             row["prompt"] = "\n\n".join(
-                value for value in (str(clip.get("prompt") or "").strip(), segment_scope) if value
+                value for value in (
+                    _scope_prompt_description(clip.get("prompt") or "", local_start, local_end),
+                    segment_scope,
+                ) if value
             )
             if part_index > 0:
                 row["h3_motion_context_length"] = AUTO_CONTEXT_FRAMES
