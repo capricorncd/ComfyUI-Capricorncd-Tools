@@ -179,11 +179,21 @@ class CAP_DataJsonClipParser:
                         negative_prompt: str = "", prompt_concat_order=None) -> str:
         includes = set(self._clip_prompt_includes(clip))
         order = self._normalize_prompt_concat_order(prompt_concat_order)
+        materials = materials if isinstance(materials, dict) else {}
+        media_parts = []
+        refs = self._ref_list(clip.get("images")) + self._ref_list(clip.get("videos"))
+        for ref in refs:
+            mid = self._ref_id(ref)
+            row = materials.get(mid) if mid else None
+            text = self._strip_comment_lines(row.get("prompt") or "").strip() if isinstance(row, dict) else ""
+            if text:
+                media_parts.append(text)
         texts = {
             "global": self._strip_comment_lines(global_prompt).strip(),
             "style": self._strip_comment_lines(style_prompt).strip(),
             "clip": self._strip_comment_lines(clip.get("prompt") or "").strip(),
             "ai": self._strip_comment_lines(clip.get("ai_prompt") or "").strip(),
+            "media": "\n\n".join(media_parts),
             "non_diegetic_music": self._strip_comment_lines(non_diegetic_music).strip(),
             "negative": self._strip_comment_lines(negative_prompt).strip(),
         }
@@ -194,28 +204,12 @@ class CAP_DataJsonClipParser:
             text = texts.get(key) or ""
             if text:
                 parts.append(text)
-        materials = materials if isinstance(materials, dict) else {}
-        for ref in self._ref_list(clip.get("images")):
-            if not self._ref_use_media_prompt(ref):
-                continue
-            mid = self._ref_id(ref)
-            row = materials.get(mid) if mid else None
-            text = ""
-            if isinstance(row, dict):
-                text = self._strip_comment_lines(row.get("prompt") or "").strip()
-            if text:
-                parts.append(text)
         return "\n\n".join(part for part in parts if part)
 
     def _ref_id(self, ref) -> str:
         if isinstance(ref, dict):
             return str(ref.get("id") or "").strip()
         return str(ref or "").strip()
-
-    def _ref_use_media_prompt(self, ref) -> bool:
-        if isinstance(ref, dict):
-            return ref.get("use_media_prompt") is not False
-        return True
 
     def _frame_count(self, start_ms: int, end_ms: int, fps: float) -> int:
         duration_ms = max(0, int(end_ms) - int(start_ms))
@@ -433,7 +427,6 @@ class CAP_DataJsonClipParser:
             "id": mid,
             "file": path,
             "kind": kind,
-            "use_media_prompt": self._ref_use_media_prompt(ref),
         }
         for key in ("name", "prompt", "media_type", "tags", "location", "stars"):
             if key in mat:
@@ -485,7 +478,6 @@ class CAP_DataJsonClipParser:
                 images.append({
                     "file": path,
                     "kind": self._infer_kind(path),
-                    "use_media_prompt": True,
                 })
 
         out["images"] = images

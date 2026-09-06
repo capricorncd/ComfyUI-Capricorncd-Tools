@@ -12,7 +12,7 @@ def _strip_comment_lines(text: str) -> str:
     )
 
 
-_PROMPT_PART_KEYS = ("global", "style", "clip", "ai", "non_diegetic_music", "negative")
+_PROMPT_PART_KEYS = ("global", "style", "clip", "ai", "media", "non_diegetic_music", "negative")
 _PROMPT_PART_KEY_SET = set(_PROMPT_PART_KEYS)
 _DEFAULT_PROMPT_CONCAT_ORDER = list(_PROMPT_PART_KEYS)
 _DEFAULT_PROMPT_INCLUDES = ["global", "clip", "ai"]

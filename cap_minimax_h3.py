@@ -332,39 +332,6 @@ class CAP_MiniMaxH3ReferenceToVideo:
             path = parser._resolve_file_path(path, location)
         return os.path.normpath(path) if path else "", row if isinstance(row, dict) else {}
 
-    def _material_prompt_line(self, parser: CAP_DataJsonClipParser, label: str, row: dict) -> str:
-        text = parser._strip_comment_lines((row or {}).get("prompt") or "").strip()
-        media_type = str((row or {}).get("media_type") or "").strip()
-        tags = (row or {}).get("tags") if isinstance((row or {}).get("tags"), list) else []
-        tags = [str(tag).strip() for tag in tags if str(tag).strip()]
-        meta = ", ".join(part for part in [media_type, *tags] if part)
-        body = ". ".join(part for part in [meta, text] if part)
-        if not body:
-            return ""
-        return f"{label}: {body}"
-
-    def _compose_prompt(self, parser: CAP_DataJsonClipParser, clip: dict, global_prompt: str,
-                        media_lines: list[str], *, style_prompt: str = "",
-                        non_diegetic_music: str = "", negative_prompt: str = "",
-                        prompt_concat_order=None) -> str:
-        # Media ref tags stay MiniMax-specific; text parts follow project order.
-        base = parser._compose_prompt(
-            clip,
-            global_prompt,
-            materials=None,
-            style_prompt=style_prompt,
-            non_diegetic_music=non_diegetic_music,
-            negative_prompt=negative_prompt,
-            prompt_concat_order=prompt_concat_order,
-        )
-        media = [line for line in (media_lines or []) if line]
-        parts = []
-        if media:
-            parts.append("\n".join(media))
-        if base:
-            parts.append(base)
-        return "\n\n".join(parts)
-
     def _load_video_ref(self, path: str):
         try:
             video = VideoFromFile(path, start_time=0, duration=REF_VIDEO_MAX_SEC)
@@ -490,9 +457,6 @@ class CAP_MiniMaxH3ReferenceToVideo:
         ref_videos = {}
         ref_video_audios = {}
         ref_audios = {}
-        picture_lines = []
-        video_lines = []
-        audio_lines = []
         image_frames = []
         video_frames = []
 
@@ -501,7 +465,6 @@ class CAP_MiniMaxH3ReferenceToVideo:
             if not path or not os.path.isfile(path):
                 continue
             kind = _kind_of(row, path)
-            use_prompt = parser._ref_use_media_prompt(ref)
             if kind == "video":
                 if len(ref_videos) >= MAX_REF_VIDEOS:
                     continue
@@ -513,10 +476,6 @@ class CAP_MiniMaxH3ReferenceToVideo:
                 video_frames.append(frames)
                 if soundtrack is not None:
                     ref_video_audios[f"ref_video_audio_{n}"] = soundtrack
-                if use_prompt:
-                    line = self._material_prompt_line(parser, f"<Video {n}>", row)
-                    if line:
-                        video_lines.append(line)
                 continue
             if kind != "image" or len(ref_images) >= MAX_REF_IMAGES:
                 continue
@@ -526,12 +485,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
             n = len(ref_images) + 1
             ref_images[f"ref_image_{n}"] = img
             image_frames.append(img)
-            if use_prompt:
-                line = self._material_prompt_line(parser, f"<Picture {n}>", row)
-                if line:
-                    picture_lines.append(line)
 
-        audio_n = len(ref_video_audios)
         for row in clip_row.get("audios") if isinstance(clip_row.get("audios"), list) else []:
             if len(ref_audios) >= MAX_REF_AUDIOS:
                 break
@@ -545,18 +499,10 @@ class CAP_MiniMaxH3ReferenceToVideo:
                 continue
             n = len(ref_audios) + 1
             ref_audios[f"ref_audio_{n}"] = audio
-            mid = str(row.get("id") or "").strip()
-            mat = materials.get(mid) if mid else None
-            if not isinstance(mat, dict):
-                mat = row
-            audio_n += 1
-            line = self._material_prompt_line(parser, f"<Audio {audio_n}>", mat)
-            if line:
-                audio_lines.append(line)
 
-        prompt = self._compose_prompt(
-            parser, clip_row, data.get("global_prompt", ""),
-            picture_lines + video_lines + audio_lines,
+        prompt = parser._compose_prompt(
+            clip_row, data.get("global_prompt", ""),
+            materials=materials,
             style_prompt=data.get("style_prompt", ""),
             non_diegetic_music=data.get("non_diegetic_music", ""),
             negative_prompt=data.get("negative_prompt", ""),

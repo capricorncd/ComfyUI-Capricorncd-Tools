@@ -23,9 +23,13 @@ from .timecode import resolve_media_path
 
 _SETTING_PROMPT_PREFIX_DEFAULTS = {
     "global_prompt": "",
-    "style_prompt": "(填写MiniMax H3规范里的风格提示词英文：)",
+    "style_prompt": "Style opening:",
     "non_diegetic_music": "non_diegetic_music:",
     "negative_prompt": "Negative:",
+}
+_LEGACY_STYLE_PROMPT_PREFIXES = {
+    "(填写MiniMax H3规范里的风格提示词英文：)",
+    "MiniMax H3规范里的风格提示词英文标题",
 }
 
 
@@ -34,6 +38,8 @@ def _setting_prompt(settings: dict, key: str) -> str:
     if not text:
         return ""
     prefix = str(settings.get(f"{key}_prefix_line", _SETTING_PROMPT_PREFIX_DEFAULTS.get(key, "")) or "").strip()
+    if key == "style_prompt" and prefix in _LEGACY_STYLE_PROMPT_PREFIXES:
+        prefix = _SETTING_PROMPT_PREFIX_DEFAULTS[key]
     return f"{prefix}\n\n{text}" if prefix else text
 
 
@@ -71,12 +77,6 @@ def _is_subtitle_clip(clip: dict, track_type: str = "") -> bool:
     return ct in ("text", "subtitle")
 
 
-def _use_media_prompt(flags, index: int) -> bool:
-    if not isinstance(flags, list) or index >= len(flags):
-        return True
-    return flags[index] is not False
-
-
 def _media_enabled(flags, index: int) -> bool:
     if not isinstance(flags, list) or index >= len(flags):
         return True
@@ -89,7 +89,6 @@ def _clip_visual_entries(project: dict, clip: dict) -> list[dict]:
         row for row in (rows or [])
         if isinstance(row, dict) and str(row.get("kind") or "image").lower() != "audio"
     ]
-    prompt_flags = clip.get("use_media_prompts") if isinstance(clip, dict) else None
     enabled_flags = clip.get("media_enabled") if isinstance(clip, dict) else None
     out = []
     for index, row in enumerate(visual):
@@ -97,7 +96,6 @@ def _clip_visual_entries(project: dict, clip: dict) -> list[dict]:
             "row": row,
             "id": str(row.get("id") or ""),
             "enabled": _media_enabled(enabled_flags, index),
-            "use_prompt": _use_media_prompt(prompt_flags, index),
         })
     return out
 
@@ -108,10 +106,7 @@ def _clip_image_refs(entries: list) -> list[dict]:
         mid = str(entry.get("id") or "").strip()
         if not entry.get("enabled") or not mid:
             continue
-        out.append({
-            "id": mid,
-            "use_media_prompt": entry.get("use_prompt") is not False,
-        })
+        out.append({"id": mid})
     return out
 
 

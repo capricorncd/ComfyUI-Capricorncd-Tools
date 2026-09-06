@@ -2645,16 +2645,6 @@ body.cat-te-media-dnd-over-tl {
     cursor: pointer;
 }
 
-.cat-te-use-global,
-.cat-te-use-media-prompt,
-.cat-te-use-ai-prompt {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: #8888b0;
-    cursor: pointer;
-}
 .cat-te-prompt-includes {
     display: flex;
     flex-direction: column;
@@ -2757,8 +2747,6 @@ body.cat-te-media-dnd-over-tl {
     opacity: 0.35;
     cursor: default;
 }
-.cat-te-use-media-prompt[hidden] { display: none !important; }
-
 .cat-te-shortcuts {
     padding: 8px 12px;
     font-size: 10px;
