@@ -217,7 +217,7 @@
       },
       "load_context": {
         "name": "加载 Context",
-        "tooltip": "当本片段 h3_motion_context_length > 5 时为 true，表示应通过 H3 Motion Context Load Latent 加载上一段 latent。"
+        "tooltip": "当本片段 h3_motion_context_length > 0 时为 true，表示应通过 H3 Motion Context Load Latent 加载上一段 latent。"
       }
     }
   },

@@ -66,7 +66,7 @@ class CAP_DataJsonClipParser:
         "image/video file paths and embedded materials), second_sample, output_video "
         "(CapTimelineEditor-specified save path when enabled), save_latent "
         "(whether to run H3 Motion Context Save Latent for this clip), and "
-        "load_context (true when clip h3_motion_context_length > 5)."
+        "load_context (true when clip h3_motion_context_length > 0)."
     )
 
     @classmethod
@@ -566,7 +566,7 @@ class CAP_DataJsonClipParser:
             h3_ctx_len = int(round(float(clip.get("h3_motion_context_length", 0) or 0)))
         except (TypeError, ValueError):
             h3_ctx_len = 0
-        load_context = h3_ctx_len > 5
+        load_context = h3_ctx_len > 0
 
         preview_start_ms = clip.get("preview_start_ms", None)
         preview_end_ms = clip.get("preview_end_ms", None)

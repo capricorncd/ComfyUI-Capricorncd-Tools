@@ -3230,7 +3230,16 @@ export class CapTimelineEditorApp {
                 </label>
                 <label class="cat-te-clip-setting-row" title="${T("h3_motion_context_length_title")}">
                   <span>${T("h3_motion_context_length_label")}</span>
-                  <input class="cat-te-h3-motion-context" type="number" min="0" max="72" step="24" value="0" disabled />
+                  <input class="cat-te-h3-motion-context" type="number" min="0" step="1" list="cat-te-h3-motion-context-values" value="0" disabled />
+                  <datalist id="cat-te-h3-motion-context-values">
+                    <option value="0"></option>
+                    <option value="5"></option>
+                    <option value="22"></option>
+                    <option value="39"></option>
+                    <option value="90"></option>
+                    <option value="141"></option>
+                    <option value="192"></option>
+                  </datalist>
                 </label>
                 <label class="cat-te-clip-setting-check" title="${T("save_latent_title")}">
                   <input class="cat-te-save-latent" type="checkbox" disabled />
@@ -15475,12 +15484,7 @@ export class CapTimelineEditorApp {
             this.secondSampleCb.checked = enabled && !!m?.secondSample;
         }
         if (this.h3MotionContextInput) {
-            const fps = Math.max(1, Math.round(Number(this.getFps?.() || 24) || 24));
-            const max = 3 * fps;
             this.h3MotionContextInput.disabled = disabled;
-            this.h3MotionContextInput.min = "0";
-            this.h3MotionContextInput.step = String(fps);
-            this.h3MotionContextInput.max = String(max);
             this.h3MotionContextInput.value = enabled
                 ? String(this._clampH3MotionContextLength(m?.h3MotionContextLength))
                 : "0";
@@ -16687,11 +16691,7 @@ export class CapTimelineEditorApp {
     }
 
     _clampH3MotionContextLength(frames) {
-        const fps = Math.max(1, Math.round(Number(this.getFps?.() || 24) || 24));
-        const max = 3 * fps;
-        let n = Math.max(0, Math.round(Number(frames) || 0));
-        n = Math.min(max, n);
-        return Math.round(n / fps) * fps;
+        return Math.max(0, Math.round(Number(frames) || 0));
     }
 
     _onH3MotionContextChange() {

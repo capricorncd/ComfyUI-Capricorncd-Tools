@@ -67,6 +67,10 @@ from .cap_minimax_h3 import (
     NODE_CLASS_MAPPINGS as _CMH_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CMH_NAMES,
 )
+from .cap_h3_timeline_sequence import (
+    NODE_CLASS_MAPPINGS as _HTS_CLASS,
+    NODE_DISPLAY_NAME_MAPPINGS as _HTS_NAMES,
+)
 from .cap_h3_fast_audio_refine import (
     NODE_CLASS_MAPPINGS as _H3FAR_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _H3FAR_NAMES,
@@ -107,6 +111,7 @@ NODE_CLASS_MAPPINGS = {
     "CAP_ShowAnything": CAP_ShowAnything,
     **_CPG_CLASS,
     **_CMH_CLASS,
+    **_HTS_CLASS,
     **_H3FAR_CLASS,
     **_CVP_CLASS,
     "CAP_JoinStrings": CAP_JoinStrings,
@@ -129,6 +134,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CAP_ShowAnything": "Show Anything",
     **_CPG_NAMES,
     **_CMH_NAMES,
+    **_HTS_NAMES,
     **_H3FAR_NAMES,
     **_CVP_NAMES,
     "CAP_JoinStrings": "Join Strings",

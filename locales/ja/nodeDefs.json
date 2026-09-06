@@ -217,7 +217,7 @@
       },
       "load_context": {
         "name": "Context を読込",
-        "tooltip": "クリップの h3_motion_context_length > 5 のとき true。H3 Motion Context Load Latent で前クリップ latent を読み込む。"
+        "tooltip": "クリップの h3_motion_context_length > 0 のとき true。H3 Motion Context Load Latent で前クリップ latent を読み込む。"
       }
     }
   },

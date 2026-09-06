@@ -217,7 +217,7 @@
       },
       "load_context": {
         "name": "Load Context",
-        "tooltip": "True when this clip h3_motion_context_length > 5 (pin previous clip via H3 Motion Context Load Latent)."
+        "tooltip": "True when this clip h3_motion_context_length > 0 (pin previous clip via H3 Motion Context Load Latent)."
       }
     }
   },

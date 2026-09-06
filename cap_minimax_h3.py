@@ -21,8 +21,6 @@ MAX_REF_AUDIOS = 3
 REF_VIDEO_FPS = 24
 REF_VIDEO_MAX_SEC = 15.0
 
-# Same grid as ComfyUI-H3-Motion-Context: VAE only distinguishes these run lengths.
-_VIDEO_RUN_GRID = (124, 107, 90, 73, 56, 39, 22, 5, 1)
 _LOG = logging.getLogger("cap_minimax_h3")
 
 
@@ -63,20 +61,7 @@ def _snap_h3_grid(n: int) -> int:
     n = int(n)
     if n < 5:
         return 0
-    for g in _VIDEO_RUN_GRID:
-        if g <= n and g >= 5:
-            return g
-    return 0
-
-
-def _project_frames_to_h3_pin(project_frames: int, project_fps: float) -> int:
-    """Convert Timeline fps frame count → H3-native frames, snap to VAE grid."""
-    project_frames = max(0, int(project_frames or 0))
-    if project_frames <= 0:
-        return 0
-    fps = max(1.0, float(project_fps) or float(H3_FPS))
-    h3_frames = max(0, int(round(project_frames / fps * float(H3_FPS))))
-    return _snap_h3_grid(h3_frames)
+    return (n - 5) // 17 * 17 + 5
 
 
 def _motion_context_cls():
@@ -227,7 +212,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
                         "If missing/unusable, falls back to the previous clip's "
                         "output_video tail frames + audio (needs clip-specified "
                         "filenames and that file already on disk). "
-                        "Pin length snaps down to the H3 VAE grid (5/22/39/56…). "
+                        "Pin length snaps down to the H3 VAE grid (17k+5). "
                         "Wire Decode -> H3 Motion Context Trim with trim_frames."
                     ),
                 }),
@@ -418,7 +403,7 @@ class CAP_MiniMaxH3ReferenceToVideo:
             req_ctx = max(0, int(round(float(clip_row.get("h3_motion_context_length", 0) or 0))))
         except (TypeError, ValueError):
             req_ctx = 0
-        pin = _project_frames_to_h3_pin(req_ctx, fps)
+        pin = _snap_h3_grid(req_ctx)
 
         use_context = False
         context_frames = None
@@ -585,7 +570,7 @@ class CAP_H3MotionContextLoadLatentOptional:
                 "load": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "From Data Json Clip Parser load_context "
-                               "(h3_motion_context_length > 5). False skips "
+                               "(h3_motion_context_length > 0). False skips "
                                "disk load without error.",
                 }),
                 "latent_path": ("STRING", {
