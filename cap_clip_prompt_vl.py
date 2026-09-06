@@ -900,13 +900,7 @@ def _file_label(index: int, kind: str, row: dict) -> str:
     tags = [str(tag).strip() for tag in tags if str(tag).strip()]
     meta = ", ".join(part for part in [media_type, *tags] if part)
     include_description = (row or {}).get("include_description") is not False
-    include_prompt = (row or {}).get("include_prompt") is not False
     description = str((row or {}).get("setting_description") or "").strip() if include_description else ""
-    prompts = []
-    if include_prompt:
-        text = str((row or {}).get("generation_prompt") or "").strip()
-        if text:
-            prompts.append(text)
     bits = [tag]
     if name:
         bits.append(name)
@@ -922,8 +916,6 @@ def _file_label(index: int, kind: str, row: dict) -> str:
     details = []
     if description:
         details.append(f"Resource description: {description}")
-    if prompts:
-        details.append(f"Resource prompt: {' '.join(prompts)}")
     return "\n".join((line, *details))
 
 

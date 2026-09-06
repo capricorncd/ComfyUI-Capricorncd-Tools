@@ -108,7 +108,6 @@ const CLIP_AGENTS = [
 const DEFAULT_AI_PROMPT_CONTEXT = {
     clip_prompt: true,
     resource_description: true,
-    resource_prompt: true,
     image_data: true,
     video_data: true,
     audio_data: true,
@@ -3828,7 +3827,6 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-ai-context-grid">
                       <label><input type="checkbox" data-context="clip_prompt" checked /><span>${T("ai_context_clip_prompt")}</span></label>
                       <label><input type="checkbox" data-context="resource_description" checked /><span>${T("ai_context_resource_description")}</span></label>
-                      <label><input type="checkbox" data-context="resource_prompt" checked /><span>${T("ai_context_resource_prompt")}</span></label>
                       <label><input type="checkbox" data-context="image_data" checked /><span>${T("ai_context_image_data")}</span></label>
                       <label><input type="checkbox" data-context="video_data" checked /><span>${T("ai_context_video_data")}</span></label>
                       <label><input type="checkbox" data-context="audio_data" checked /><span>${T("ai_context_audio_data")}</span></label>
@@ -16498,12 +16496,10 @@ export class CapTimelineEditorApp {
                 kind: item.kind,
                 file: item.file,
                 location: status?.location || media?.location || "input",
-                generation_prompt: String(media?.generation_prompt || ""),
                 setting_description: String(media?.setting_description || ""),
                 media_type: String(media?.media_type || ""),
                 tags: Array.isArray(media?.tags) ? media.tags : [],
                 include_description: context.resource_description !== false && item.useMediaPrompt !== false,
-                include_prompt: context.resource_prompt !== false,
                 include_data: item.kind === "video"
                     ? context.video_data !== false
                     : item.kind === "audio" ? context.audio_data !== false : context.image_data !== false,
@@ -16530,18 +16526,16 @@ export class CapTimelineEditorApp {
                     kind: "audio",
                     file,
                     location: status?.location || media?.location || "input",
-                    generation_prompt: String(media?.generation_prompt || ""),
                     setting_description: String(media?.setting_description || ""),
                     media_type: String(media?.media_type || ""),
                     tags: Array.isArray(media?.tags) ? media.tags : [],
                     include_description: context.resource_description !== false,
-                    include_prompt: context.resource_prompt !== false,
                     include_data: context.audio_data !== false,
                     timeline_overlap_sec: [Math.max(start, audioStart), Math.min(end, audioEnd)],
                 });
             }
         }
-        return rows.filter((row) => row.include_data || row.include_description || row.include_prompt);
+        return rows.filter((row) => row.include_data || row.include_description);
     }
 
     _setAiOptimizeSrcTab() {

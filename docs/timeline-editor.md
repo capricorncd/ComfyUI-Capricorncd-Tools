@@ -72,7 +72,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 ### AI optimize prompt
 
 - The modal only generates or edits the current `clip.prompt`; it does not write project-level prepend or append prompts.
-- “Provide to model” independently controls the current Clip prompt, asset descriptions, generation prompts, image/keyframe data, video-reference data, and overlapping timeline audio data.
+- “Provide to model” independently controls the current Clip prompt, asset descriptions, image/keyframe data, video-reference data, and overlapping timeline audio data. Stored image-generation prompts are not sent to the Clip-prompt Agent.
 - Target Agent selects the output contract, while generation mode selects multi-reference, first/last-frame, text-to-video, video-reference, or video-edit behavior. The execution model is selected separately from configured Agents such as ChatGPT or Gemini, or a local Qwen3-VL model.
 - Local Qwen3-VL does not receive audio. When audio data is enabled, use a configured Agent that accepts audio; audio usage can be automatic, performance-driven, lip-sync, or disabled.
 - Prompt Skill is enabled only for MiniMaxH3. The picker lists the official MiniMax repository first and the community repository second; Update synchronizes both. Applying a Skill includes its main/localized `SKILL.md` and text references under `references/` in the Agent instructions.
