@@ -105,12 +105,14 @@ def _clip_visual_entries(project: dict, clip: dict) -> list[dict]:
         if isinstance(row, dict) and str(row.get("kind") or "image").lower() != "audio"
     ]
     enabled_flags = clip.get("media_enabled") if isinstance(clip, dict) else None
+    prompt_flags = clip.get("use_media_prompts") if isinstance(clip, dict) else None
     out = []
     for index, row in enumerate(visual):
         out.append({
             "row": row,
             "id": str(row.get("id") or ""),
             "enabled": _media_enabled(enabled_flags, index),
+            "use_prompt": _media_enabled(prompt_flags, index),
         })
     return out
 
@@ -121,7 +123,7 @@ def _clip_image_refs(entries: list) -> list[dict]:
         mid = str(entry.get("id") or "").strip()
         if not entry.get("enabled") or not mid:
             continue
-        out.append({"id": mid})
+        out.append({"id": mid, "use_prompt": entry.get("use_prompt", True) is not False})
     return out
 
 

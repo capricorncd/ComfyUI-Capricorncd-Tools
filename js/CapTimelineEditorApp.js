@@ -175,13 +175,19 @@ function legacySettingPrompt(settings, key) {
     return `${prefix}\n\n${text}`;
 }
 
-function migrateProjectSettingPrompts(settings) {
+function migrateProjectSettingPrompts(settings, legacyRoot = null) {
+    const root = legacyRoot && legacyRoot !== settings ? legacyRoot : {};
     settings.prepend_prompt = joinPromptParts(
         settings.prepend_prompt,
         settings.prefix_prompt,
         settings.prompt_prefix,
         legacySettingPrompt(settings, "global_prompt"),
         legacySettingPrompt(settings, "style_prompt"),
+        root.prepend_prompt,
+        root.prefix_prompt,
+        root.prompt_prefix,
+        legacySettingPrompt(root, "global_prompt"),
+        legacySettingPrompt(root, "style_prompt"),
     );
     settings.append_prompt = joinPromptParts(
         settings.append_prompt,
@@ -189,12 +195,26 @@ function migrateProjectSettingPrompts(settings) {
         settings.prompt_suffix,
         legacySettingPrompt(settings, "non_diegetic_music"),
         legacySettingPrompt(settings, "negative_prompt"),
+        root.append_prompt,
+        root.suffix_prompt,
+        root.prompt_suffix,
+        legacySettingPrompt(root, "non_diegetic_music"),
+        legacySettingPrompt(root, "negative_prompt"),
     );
     for (const key of ["global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt"]) {
         delete settings[key];
         delete settings[`${key}_prefix_line`];
     }
     for (const key of ["prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix"]) delete settings[key];
+    if (legacyRoot && legacyRoot !== settings) {
+        for (const key of [
+            "prepend_prompt", "append_prompt", "prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix",
+            "global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt",
+        ]) {
+            delete legacyRoot[key];
+            delete legacyRoot[`${key}_prefix_line`];
+        }
+    }
 }
 
 function genVideoUid() {
@@ -3471,24 +3491,6 @@ export class CapTimelineEditorApp {
                   <button type="button" class="cat-te-btn" role="tab" aria-selected="false" data-media-tab="info">${T("media_file_info")}</button>
                 </div>
                 <div class="cat-te-media-settings-panel" role="tabpanel">
-                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
-                    <span class="cat-te-media-preview-desc-label">${T("desc_prompt_label")}</span>
-                    <div class="cat-te-media-preview-desc-wrap">
-                      <textarea class="cat-te-media-preview-desc" rows="3" placeholder="${T("asset_desc_placeholder")}"></textarea>
-                    </div>
-                  </div>
-                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
-                    <span class="cat-te-media-preview-desc-label">${T("media_generation_prompt")}</span>
-                    <div class="cat-te-media-preview-desc-wrap">
-                      <textarea class="cat-te-media-generation-prompt" rows="3" placeholder="${T("media_generation_prompt_placeholder")}"></textarea>
-                    </div>
-                  </div>
-                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
-                    <span class="cat-te-media-preview-desc-label">${T("media_asset_description")}</span>
-                    <div class="cat-te-media-preview-desc-wrap">
-                      <textarea class="cat-te-media-setting-description" rows="3" placeholder="${T("media_asset_description_placeholder")}"></textarea>
-                    </div>
-                  </div>
                   <div class="cat-te-media-preview-meta-grid">
                     <label class="cat-te-media-preview-meta-row">
                       <span>${T("type_label")}</span>
@@ -3508,6 +3510,18 @@ export class CapTimelineEditorApp {
                       <span>${T("tags_label")}</span>
                       <input class="cat-te-media-preview-tags" type="text" placeholder="${T("tags_placeholder")}" />
                     </label>
+                  </div>
+                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
+                    <span class="cat-te-media-preview-desc-label">${T("media_asset_description")}</span>
+                    <div class="cat-te-media-preview-desc-wrap">
+                      <textarea class="cat-te-media-setting-description" rows="3" placeholder="${T("media_asset_description_placeholder")}"></textarea>
+                    </div>
+                  </div>
+                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
+                    <span class="cat-te-media-preview-desc-label">${T("media_generation_prompt")}</span>
+                    <div class="cat-te-media-preview-desc-wrap">
+                      <textarea class="cat-te-media-generation-prompt" rows="3" placeholder="${T("media_generation_prompt_placeholder")}"></textarea>
+                    </div>
                   </div>
                 </div>
                 <div class="cat-te-media-info-panel" role="tabpanel" hidden></div>
@@ -3933,7 +3947,7 @@ export class CapTimelineEditorApp {
                     </div>
                   </div>
                   <div class="cat-te-ai-optimize-actions">
-                    <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span></button>
+                    <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>${T("generate_clip_prompt_btn")}</span></button>
                     <button type="button" class="cat-te-btn cat-te-ai-preview-run">${iconHtml("eye", 12)}<span>${T("preview_btn")}</span></button>
                     <button type="button" class="cat-te-btn cat-te-ai-run">${iconHtml("play", 12)}<span>${T("run_and_close")}</span></button>
                   </div>
@@ -4211,8 +4225,6 @@ export class CapTimelineEditorApp {
         this.mediaPreviewInsertBtn = el.querySelector(".cat-te-media-preview-insert");
         this.mediaPreviewFooter = el.querySelector(".cat-te-media-preview-footer");
         this.mediaPreviewHint = el.querySelector(".cat-te-media-preview-hint");
-        this.mediaPreviewDesc = el.querySelector(".cat-te-media-preview-desc");
-        attachRichPromptHandler(this.mediaPreviewDesc, { mode: "widget" });
         this.mediaGenerationPrompt = el.querySelector(".cat-te-media-generation-prompt");
         this.mediaSettingDescription = el.querySelector(".cat-te-media-setting-description");
         attachRichPromptHandler(this.mediaGenerationPrompt, { mode: "widget" });
@@ -4664,9 +4676,6 @@ export class CapTimelineEditorApp {
             void this._runComposeVideoExport();
         });
         this._bindWatermarkUi();
-        this.mediaPreviewDesc?.addEventListener("input", () => this._saveMediaPreviewMeta());
-        this.mediaPreviewDesc?.addEventListener("change", () => this._saveMediaPreviewMeta());
-        this.mediaPreviewDesc?.addEventListener("blur", () => this._saveMediaPreviewMeta());
         this.mediaPreviewType?.addEventListener("change", () => this._onMediaPreviewTypeChange());
         this.mediaPreviewTypeCustom?.addEventListener("change", () => this._saveMediaPreviewMeta());
         this.mediaPreviewTypeCustom?.addEventListener("blur", () => this._saveMediaPreviewMeta());
@@ -5495,7 +5504,7 @@ export class CapTimelineEditorApp {
         const schemaVersion = parseSchemaVersion(src);
         if (!Array.isArray(src.tracks)) src.tracks = [];
         if (!src.settings || typeof src.settings !== "object") src.settings = {};
-        migrateProjectSettingPrompts(src.settings);
+        migrateProjectSettingPrompts(src.settings, src);
         src.name = String(src.name || T("untitled_project")).trim() || T("untitled_project");
         this._loadMediaStarsForDir();
         if (schemaVersion < 2) this._migrateProjectSchema1To2(src);
@@ -13185,7 +13194,6 @@ export class CapTimelineEditorApp {
     _fillMediaPreviewMeta(kind, file) {
         const meta = this._getMediaMeta(kind, file);
         const known = MEDIA_ASSET_TYPES.some((t) => t.id === meta.mediaType);
-        if (this.mediaPreviewDesc) setRichPromptValue(this.mediaPreviewDesc, meta.prompt || "", true);
         if (this.mediaGenerationPrompt) setRichPromptValue(this.mediaGenerationPrompt, meta.generationPrompt || "", true);
         if (this.mediaSettingDescription) setRichPromptValue(this.mediaSettingDescription, meta.settingDescription || "", true);
         if (this.mediaPreviewType) {
@@ -13218,7 +13226,6 @@ export class CapTimelineEditorApp {
         }
         this._writeMediaMeta(kind, file, {
             ...prev,
-            prompt: String(this.mediaPreviewDesc?.value || ""),
             generationPrompt: String(this.mediaGenerationPrompt?.value || ""),
             settingDescription: String(this.mediaSettingDescription?.value || ""),
             mediaType,
@@ -16448,10 +16455,10 @@ export class CapTimelineEditorApp {
         const values = {
             clip: m.prompt,
             resource: this._clipItems(m)
-                .filter((item) => item.enabled !== false)
+                .filter((item) => item.enabled !== false && item.useMediaPrompt !== false)
                 .map((item) => {
                     const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
-                    return this._stripPromptComments(media?.prompt);
+                    return this._stripPromptComments(media?.setting_description);
                 })
                 .filter(Boolean)
                 .join("\n\n"),
@@ -16514,12 +16521,11 @@ export class CapTimelineEditorApp {
                 kind: item.kind,
                 file: item.file,
                 location: status?.location || media?.location || "input",
-                prompt: String(media?.prompt || ""),
                 generation_prompt: String(media?.generation_prompt || ""),
                 setting_description: String(media?.setting_description || ""),
                 media_type: String(media?.media_type || ""),
                 tags: Array.isArray(media?.tags) ? media.tags : [],
-                include_description: context.resource_description !== false,
+                include_description: context.resource_description !== false && item.useMediaPrompt !== false,
                 include_prompt: context.resource_prompt !== false,
                 include_data: item.kind === "video"
                     ? context.video_data !== false
@@ -16547,7 +16553,6 @@ export class CapTimelineEditorApp {
                     kind: "audio",
                     file,
                     location: status?.location || media?.location || "input",
-                    prompt: String(media?.prompt || ""),
                     generation_prompt: String(media?.generation_prompt || ""),
                     setting_description: String(media?.setting_description || ""),
                     media_type: String(media?.media_type || ""),
@@ -16840,7 +16845,7 @@ export class CapTimelineEditorApp {
             this.aiGenerateBtn.classList.toggle("is-cancel", busy);
             this.aiGenerateBtn.innerHTML = busy
                 ? `${iconHtml("sparkles", 12)}<span>${T("terminate_label")}</span>`
-                : `${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span>`;
+                : `${iconHtml("sparkles", 12)}<span>${T("generate_clip_prompt_btn")}</span>`;
         }
         this._syncAiPromptContextControls();
         this._syncAiPromptTargetControls();

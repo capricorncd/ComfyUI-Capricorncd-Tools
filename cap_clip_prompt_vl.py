@@ -904,10 +904,9 @@ def _file_label(index: int, kind: str, row: dict) -> str:
     description = str((row or {}).get("setting_description") or "").strip() if include_description else ""
     prompts = []
     if include_prompt:
-        for key in ("prompt", "generation_prompt"):
-            text = str((row or {}).get(key) or "").strip()
-            if text and text not in prompts:
-                prompts.append(text)
+        text = str((row or {}).get("generation_prompt") or "").strip()
+        if text:
+            prompts.append(text)
     bits = [tag]
     if name:
         bits.append(name)

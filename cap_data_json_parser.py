@@ -210,9 +210,11 @@ class CAP_DataJsonClipParser:
         media_parts = []
         refs = self._ref_list(clip.get("images")) + self._ref_list(clip.get("videos"))
         for ref in refs:
+            if isinstance(ref, dict) and ref.get("use_prompt") is False:
+                continue
             mid = self._ref_id(ref)
             row = materials.get(mid) if mid else None
-            text = self._strip_comment_lines(row.get("prompt") or "").strip() if isinstance(row, dict) else ""
+            text = self._strip_comment_lines(row.get("setting_description") or "").strip() if isinstance(row, dict) else ""
             if text:
                 media_parts.append(text)
         texts = {

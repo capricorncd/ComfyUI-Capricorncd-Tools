@@ -5,6 +5,50 @@ import { CapTimelineEditorApp } from "./CapTimelineEditorApp.js";
 const NODE_CLASS = "CAP_TimelineEditor";
 const SCALAR_WIDGETS = ["fps", "width", "height"];
 const OBSOLETE_WIDGETS = ["ignore_occluded", "assets_dir", "global_prompt"];
+const LEGACY_PROMPT_FIELDS = [
+    "global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt",
+    "prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix",
+];
+
+function configuredNamedValues(info) {
+    const named = { ...(info?.properties?.cat_named || {}) };
+    const inputs = Array.isArray(info?.inputs) ? info.inputs : [];
+    const values = Array.isArray(info?.widgets_values) ? info.widgets_values : [];
+    for (const key of ["project_json", ...LEGACY_PROMPT_FIELDS]) {
+        if (named[key] != null) continue;
+        const index = inputs.findIndex((row) => row?.name === key && row?.widget);
+        if (index >= 0 && values[index] != null) named[key] = values[index];
+    }
+    return named;
+}
+
+function preserveLegacyPromptFields(node, named = null) {
+    const values = {};
+    for (const key of LEGACY_PROMPT_FIELDS) {
+        const widget = node.widgets?.find((row) => row.name === key);
+        const value = named?.[key] ?? widget?.value;
+        if (String(value || "").trim()) values[key] = String(value);
+        const prefixKey = `${key}_prefix_line`;
+        const prefix = named?.[prefixKey];
+        if (String(prefix || "").trim()) values[prefixKey] = String(prefix);
+    }
+    if (!Object.keys(values).length) return;
+    const projectWidget = node.widgets?.find((row) => row.name === "project_json");
+    const raw = named?.project_json ?? projectWidget?.value;
+    let project;
+    try {
+        project = raw && typeof raw === "object" ? JSON.parse(JSON.stringify(raw)) : JSON.parse(String(raw || ""));
+    } catch {
+        return;
+    }
+    if (!project || typeof project !== "object" || Array.isArray(project)) return;
+    for (const [key, value] of Object.entries(values)) {
+        const current = String(project[key] || "").trim();
+        project[key] = current && current !== value.trim() ? `${current}\n\n${value}` : value;
+    }
+    if (projectWidget) projectWidget.value = JSON.stringify(project);
+}
+
 function flushOpenTimelineEditors() {
     const graph = app.rootGraph ?? app.graph;
     CapTimelineEditorApp.flushOpenEditors(graph);
@@ -314,7 +358,8 @@ function removeObsoleteWidgets(node) {
     }
 }
 
-function markNoSerialize(node) {
+function markNoSerialize(node, named = null) {
+    preserveLegacyPromptFields(node, named);
     removeObsoleteWidgets(node);
     for (const w of node.widgets ?? []) {
         if (w.name === "te_launcher") {
@@ -420,15 +465,15 @@ app.registerExtension({
 
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (info) {
+            const named = configuredNamedValues(info);
             onConfigure?.apply(this, arguments);
-            markNoSerialize(this);
-            const named = info?.properties?.cat_named;
-            if (named) {
+            if (Object.keys(named).length) {
                 for (const [k, v] of Object.entries(named)) {
                     const w = this.widgets?.find(w => w.name === k);
                     if (w) w.value = v;
                 }
             }
+            markNoSerialize(this, named);
             hookScalarWidgets(this);
             this._teApp?._syncScalarsToProjectJson?.();
         };

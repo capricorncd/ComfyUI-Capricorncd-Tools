@@ -70,7 +70,7 @@
 ### AI 优化提示词
 
 - 弹窗只生成或修改当前 `clip.prompt`，不会直接写入工程级前置或后置提示词。
-- “提供给大模型”可分别控制：当前 Clip 提示词、素材描述、素材提示词、图片/首尾帧数据、视频参考数据、时间轴背景音频数据。
+- “提供给大模型”可分别控制：当前 Clip 提示词、素材描述、生成提示词、图片/首尾帧数据、视频参考数据、时间轴背景音频数据。
 - “目标 Agent”决定返回格式；“生成模式”用于区分 MiniMax H3 多图参考、首尾帧、文生视频、视频参考/编辑等模式，也用于生成 LTX 等模型所需的相应格式。
 - “模型”选择实际执行请求的已配置 Agent（例如 ChatGPT、Gemini）或本地 Qwen3-VL；目标 Agent 与执行模型相互独立。
 - 本地 Qwen3-VL 不接收音频数据；勾选音频数据时需选择支持音频输入的已配置 Agent。音频用途可设为自动判断、按背景音频表演、口型同步或不使用。
@@ -152,7 +152,7 @@
 
 ## `project_json`（可编辑）
 
-编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 3`**（整数，与 Python 包版本 `project_version` 无关），唯一版本值来自 `pyproject.toml` 的 `[tool.capricorncd].schema_version`。加载旧工程时会自动迁移：`global_prompt` + `style_prompt` 合并进 `prepend_prompt`，`non_diegetic_music` + `negative_prompt` 合并进 `append_prompt`；`prefix_prompt`、`prompt_prefix`、`suffix_prompt`、`prompt_suffix` 只作为迁移别名读取，不再写出。旧工程的 `ai_prompt` 与 `detailed_description` 会合并进 `prompt`，不再作为独立 Clip 字段写出。
+编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 4`**（整数，与 Python 包版本 `project_version` 无关），唯一版本值来自 `pyproject.toml` 的 `[tool.capricorncd].schema_version`。加载旧工程时会自动迁移：无论旧提示词位于 `settings`、工程顶层还是旧节点的 `global_prompt` 控件，`global_prompt` + `style_prompt` 都合并进 `prepend_prompt`，`non_diegetic_music` + `negative_prompt` 合并进 `append_prompt`；`prefix_prompt`、`prompt_prefix`、`suffix_prompt`、`prompt_suffix` 只作为迁移别名读取，不再写出。旧工程的 `ai_prompt` 与 `detailed_description` 会合并进 `prompt`，不再作为独立 Clip 字段写出。
 
 通常由全屏编辑器读写，一般无需手改；下表与示例对应编辑器 `_buildProject()` 的写出格式。
 
@@ -161,7 +161,7 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `project_version` | string | 包版本字符串（如 `"0.x.y"`），写入时刷新 |
-| `schema_version` | int | 文档形状版本，现为 `3` |
+| `schema_version` | int | 文档形状版本，现为 `4` |
 | `name` | string | 项目名称 |
 | `media` | array | 素材目录；clip 用 `media_ids` 引用其中的 `id` |
 | `settings` | object | 工程设置（含前置/后置提示词、水印、时间轴视图状态等） |
@@ -178,7 +178,7 @@
 | `file` | string | 相对 ComfyUI `input/` 的路径（多为 `capricorncd-timeline/…`） |
 | `location` | string | 通常为 `"input"` |
 | `name` | string | 显示名 |
-| `prompt` | string | 素材级提示词 |
+| `prompt` | string | 旧素材提示词，仅为兼容而保留；素材预览不再显示或编辑 |
 | `generation_prompt` | string | 生成该图片时实际使用的完整提示词；无法读取时为空 |
 | `setting_description` | string | 人物、物品或场景设定图描述与一致性约束；无法读取时为空 |
 | `media_type` | string | 资产类型标签（如 character / scene / prop / other，可空） |
@@ -252,10 +252,10 @@
 | `source` | 可选；视频等含 `in_ms` / `out_ms` / `duration_ms`（源内裁剪） |
 | `name` | 标题 |
 | `prompt` | Clip 提示词；MiniMax H3 工程在这里保存 `subject_definitions`、`summary`、`retention_analysis` |
-| `prompt_includes` | Clip 内启用的提示词部分：`clip` 和/或 `resource` |
+| `prompt_includes` | Clip 内启用的提示词部分：`clip` 和/或 `resource`；`resource` 拼接素材的 `setting_description` |
 | `use_prepend_prompt` | 是否在该 Clip 的排序内容之前拼接工程 `prepend_prompt`（默认 `true`） |
 | `use_append_prompt` | 是否在该 Clip 的排序内容之后拼接工程 `append_prompt`（默认 `true`） |
-| `use_media_prompts` | 与 `media_ids` 等长的 bool[]：是否用对应素材 prompt |
+| `use_media_prompts` | 兼容字段名；与 `media_ids` 等长，控制是否使用对应素材描述 |
 | `media_enabled` | 与 `media_ids` 等长的 bool[]：该槽位是否启用 |
 | `head_extend_sec` / `tail_extend_sec` | 首 / 尾扩展秒数 |
 | `generate_preview_video` / `second_sample` | 生成相关开关 |
@@ -301,7 +301,7 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
 - `prompt`：完整写入 `subject_definitions`、`summary`、`retention_analysis` 三段，并保留段落标题。
 - `prompt`：保存完整的 Clip 提示词；MiniMax H3 内容包含带标题的 `subject_definitions`、`summary`、`retention_analysis` 与 `detailed_description`。
 - `settings.append_prompt`：在后置内容中完整保存两个声音段落，先写 `overall_soundscape: ...`，再写 `non_diegetic_music: ...`，之后写负面约束。
-- `prompt_includes`：`clip` 表示完整 Clip 提示词，`resource` 表示已启用素材的提示词；旧工程中的 `media` 会迁移为 `resource`。
+- `prompt_includes`：`clip` 表示完整 Clip 提示词，`resource` 表示已启用素材的 `setting_description`；旧工程中的 `media` 会迁移为 `resource`。
 - `use_prepend_prompt` 与 `use_append_prompt` 只控制两个固定的工程级边界，不属于 `prompt_concat_order`，也不会进入拖拽拼接排序。
 
 ### 示例（schema 3，字段示意）
@@ -309,7 +309,7 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
 ```json
 {
   "project_version": "0.x.y",
-  "schema_version": 3,
+  "schema_version": 4,
   "name": "未命名项目",
   "media": [
     {
@@ -456,7 +456,7 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
 ```json
 {
   "project_version": "x.y.z",
-  "schema_version": 3,
+  "schema_version": 4,
   "fps": 24.0,
   "width": 1344,
   "height": 768,

@@ -212,6 +212,11 @@ def _migrate_setting_prompts(project: dict) -> None:
         settings.get("prompt_prefix"),
         _legacy_setting_prompt(settings, "global_prompt"),
         _legacy_setting_prompt(settings, "style_prompt"),
+        project.get("prepend_prompt"),
+        project.get("prefix_prompt"),
+        project.get("prompt_prefix"),
+        _legacy_setting_prompt(project, "global_prompt"),
+        _legacy_setting_prompt(project, "style_prompt"),
     )
     settings["append_prompt"] = _join_prompt_parts(
         settings.get("append_prompt"),
@@ -219,12 +224,23 @@ def _migrate_setting_prompts(project: dict) -> None:
         settings.get("prompt_suffix"),
         _legacy_setting_prompt(settings, "non_diegetic_music"),
         _legacy_setting_prompt(settings, "negative_prompt"),
+        project.get("append_prompt"),
+        project.get("suffix_prompt"),
+        project.get("prompt_suffix"),
+        _legacy_setting_prompt(project, "non_diegetic_music"),
+        _legacy_setting_prompt(project, "negative_prompt"),
     )
     for key in ("global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt"):
         settings.pop(key, None)
         settings.pop(f"{key}_prefix_line", None)
     for key in ("prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix"):
         settings.pop(key, None)
+    for key in (
+        "prepend_prompt", "append_prompt", "prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix",
+        "global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt",
+    ):
+        project.pop(key, None)
+        project.pop(f"{key}_prefix_line", None)
 
 
 def _normalize_timeline_prompt_selection(project: dict) -> None:

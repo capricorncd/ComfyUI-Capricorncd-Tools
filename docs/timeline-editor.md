@@ -72,7 +72,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 ### AI optimize prompt
 
 - The modal only generates or edits the current `clip.prompt`; it does not write project-level prepend or append prompts.
-- “Provide to model” independently controls the current Clip prompt, resource descriptions, resource prompts, image/keyframe data, video-reference data, and overlapping timeline audio data.
+- “Provide to model” independently controls the current Clip prompt, asset descriptions, generation prompts, image/keyframe data, video-reference data, and overlapping timeline audio data.
 - Target Agent selects the output contract, while generation mode selects multi-reference, first/last-frame, text-to-video, video-reference, or video-edit behavior. The execution model is selected separately from configured Agents such as ChatGPT or Gemini, or a local Qwen3-VL model.
 - Local Qwen3-VL does not receive audio. When audio data is enabled, use a configured Agent that accepts audio; audio usage can be automatic, performance-driven, lip-sync, or disabled.
 - Prompt Skill is enabled only for MiniMaxH3. The picker lists the official MiniMax repository first and the community repository second; Update synchronizes both. Applying a Skill includes its main/localized `SKILL.md` and text references under `references/` in the Agent instructions.
@@ -153,7 +153,7 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 
 ## `project_json` (editable)
 
-Full project document stored on the node widget. Current shape is **`schema_version: 3`** (integer; independent of the Python package `project_version`), sourced from `[tool.capricorncd].schema_version` in `pyproject.toml`. Older documents are migrated on load. Legacy `global_prompt` + `style_prompt` values migrate into `prepend_prompt`; `non_diegetic_music` + `negative_prompt` migrate into `append_prompt`. The aliases `prefix_prompt`, `prompt_prefix`, `suffix_prompt`, and `prompt_suffix` are accepted as migration input but are never written back. Legacy `ai_prompt` and `detailed_description` values are merged into `prompt` and are no longer written as separate Clip fields.
+Full project document stored on the node widget. Current shape is **`schema_version: 4`** (integer; independent of the Python package `project_version`), sourced from `[tool.capricorncd].schema_version` in `pyproject.toml`. Older documents are migrated on load. Whether found under `settings`, at the project root, or in the removed node `global_prompt` widget, legacy `global_prompt` + `style_prompt` values migrate into `prepend_prompt`; `non_diegetic_music` + `negative_prompt` migrate into `append_prompt`. The aliases `prefix_prompt`, `prompt_prefix`, `suffix_prompt`, and `prompt_suffix` are accepted as migration input but are never written back. Legacy `ai_prompt` and `detailed_description` values are merged into `prompt` and are no longer written as separate Clip fields.
 
 Normally owned by the fullscreen editor — you do not edit it by hand. The tables and example below match what the editor writes via `_buildProject()`.
 
@@ -162,7 +162,7 @@ Normally owned by the fullscreen editor — you do not edit it by hand. The tabl
 | Field | Type | Description |
 |-------|------|-------------|
 | `project_version` | string | Package version string (e.g. `"0.x.y"`), refreshed on save |
-| `schema_version` | int | Document shape version; currently `3` |
+| `schema_version` | int | Document shape version; currently `4` |
 | `name` | string | Project name |
 | `media` | array | Media catalog; clips reference entries by `media_ids` |
 | `settings` | object | Project settings (prepend/append prompts, watermark, timeline view state, …) |
@@ -179,7 +179,7 @@ Legacy `resources` is migration input only and is not written back.
 | `file` | string | Path relative to ComfyUI `input/` (often under `capricorncd-timeline/`) |
 | `location` | string | Usually `"input"` |
 | `name` | string | Display name |
-| `prompt` | string | Per-media prompt |
+| `prompt` | string | Legacy per-media prompt retained for compatibility; no longer shown or edited in Asset Preview |
 | `generation_prompt` | string | Complete prompt originally used to generate the image; empty when unavailable |
 | `setting_description` | string | Character, object, or scene reference-sheet description; empty when unavailable |
 | `media_type` | string | Asset-type tag (character / scene / prop / other, or empty) |
@@ -253,10 +253,10 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 | `source` | Optional; video trim: `in_ms` / `out_ms` / `duration_ms` |
 | `name` | Title |
 | `prompt` | Clip prompt. MiniMax H3 projects store `subject_definitions`, `summary`, and `retention_analysis` here |
-| `prompt_includes` | Enabled Clip parts: `clip` and/or `resource` |
+| `prompt_includes` | Enabled Clip parts: `clip` and/or `resource`; `resource` composes media `setting_description` values |
 | `use_prepend_prompt` | Whether to place the project `prepend_prompt` before this Clip’s ordered parts (default `true`) |
 | `use_append_prompt` | Whether to place the project `append_prompt` after this Clip’s ordered parts (default `true`) |
-| `use_media_prompts` | bool[] aligned with `media_ids` |
+| `use_media_prompts` | Compatibility field name; bool[] aligned with `media_ids`, controlling their asset descriptions |
 | `media_enabled` | bool[] aligned with `media_ids` |
 | `head_extend_sec` / `tail_extend_sec` | Head / tail extend (seconds) |
 | `generate_preview_video` / `second_sample` | Generation flags |
@@ -302,7 +302,7 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
 - `prompt`: the complete `subject_definitions`, `summary`, and `retention_analysis` sections, including their headings.
 - `prompt`: stores the complete Clip prompt. For MiniMax H3 this includes `subject_definitions`, `summary`, `retention_analysis`, and `detailed_description` with their headings.
 - `settings.append_prompt`: keep both complete sound sections in the appended value: `overall_soundscape: ...`, then `non_diegetic_music: ...`; negative constraints follow them.
-- `prompt_includes`: use `clip` to include the complete Clip prompt and `resource` to include enabled media prompts. Legacy `media` values migrate to `resource`.
+- `prompt_includes`: use `clip` to include the complete Clip prompt and `resource` to include enabled media `setting_description` values. Legacy `media` values migrate to `resource`.
 - `use_prepend_prompt` and `use_append_prompt` control the two fixed project-level boundaries. They are not members of `prompt_concat_order` and never enter its drag ordering.
 
 ### Example (schema 3, illustrative)
@@ -310,7 +310,7 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
 ```json
 {
   "project_version": "0.x.y",
-  "schema_version": 3,
+  "schema_version": 4,
   "name": "Untitled",
   "media": [
     {
@@ -457,7 +457,7 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
 ```json
 {
   "project_version": "x.y.z",
-  "schema_version": 3,
+  "schema_version": 4,
   "fps": 24.0,
   "width": 1344,
   "height": 768,
