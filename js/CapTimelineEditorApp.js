@@ -55,31 +55,14 @@ const SETTING_PROMPT_KEYS = [
     "non_diegetic_music",
     "negative_prompt",
 ];
-const SETTING_PROMPT_PREFIX_DEFAULTS = {
-    global_prompt: "",
-    style_prompt: "Style opening:",
-    non_diegetic_music: "non_diegetic_music:",
-    negative_prompt: "Negative:",
-};
-const LEGACY_STYLE_PROMPT_PREFIXES = new Set([
-    "(填写MiniMax H3规范里的风格提示词英文：)",
-    "MiniMax H3规范里的风格提示词英文标题",
-]);
-const settingPromptPrefixKey = (key) => `${key}_prefix_line`;
-const normalizeSettingPromptPrefix = (key, value) => {
-    const text = String(value ?? SETTING_PROMPT_PREFIX_DEFAULTS[key] ?? "");
-    return key === "style_prompt" && LEGACY_STYLE_PROMPT_PREFIXES.has(text)
-        ? SETTING_PROMPT_PREFIX_DEFAULTS.style_prompt
-        : text;
-};
 /**
  * Prompt parts for clip.prompt_includes and settings.prompt_concat_order.
  * Order of this constant is the default concatenation order.
  */
-const PROMPT_PART_KEYS = ["global", "style", "clip", "ai", "media", "non_diegetic_music", "negative"];
+const PROMPT_PART_KEYS = ["global", "style", "clip", "detailed_description", "media", "non_diegetic_music", "negative"];
 const PROMPT_PART_KEY_SET = new Set(PROMPT_PART_KEYS);
 const DEFAULT_PROMPT_CONCAT_ORDER = [...PROMPT_PART_KEYS];
-const DEFAULT_PROMPT_INCLUDES = ["global", "clip", "ai"];
+const DEFAULT_PROMPT_INCLUDES = ["global", "clip", "detailed_description"];
 /** @deprecated alias — prefer PROMPT_PART_KEYS */
 const PROMPT_INCLUDE_KEYS = PROMPT_PART_KEYS;
 const PROMPT_INCLUDE_KEY_SET = PROMPT_PART_KEY_SET;
@@ -134,12 +117,34 @@ const MEDIA_ASSET_TYPES = [
 ];
 const DEFAULT_CLIP_NAME = "Clip";
 const LEGACY_CLIP_NAMES = new Set(["Clip", "Package", "clip", "package"]);
-/** Integer project document shape. Independent of the Python package version. */
-const SCHEMA_VERSION = 3;
-
 function parseSchemaVersion(project) {
     const n = Number(project?.schema_version);
     return Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
+function splitH3ProjectPrompt(value) {
+    const text = String(value || "").replace(/^```[^\n]*\n?|```$/gm, "").trim();
+    const pattern = /^(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:\s*/gmi;
+    const matches = [...text.matchAll(pattern)];
+    const sections = {};
+    for (let index = 0; index < matches.length; index += 1) {
+        const match = matches[index];
+        const key = match[1].toLowerCase();
+        const start = match.index + match[0].length;
+        const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+        sections[key] = text.slice(start, end).trim();
+    }
+    const clipKeys = ["subject_definitions", "summary", "retention_analysis"];
+    if (!clipKeys.every((key) => sections[key]) || !sections.detailed_description) return null;
+    const soundAndMusic = ["overall_soundscape", "non_diegetic_music"]
+        .filter((key) => sections[key])
+        .map((key) => `${key}:\n${sections[key]}`)
+        .join("\n\n");
+    return {
+        clipPrompt: clipKeys.map((key) => `${key}:\n${sections[key]}`).join("\n\n"),
+        detailedDescription: sections.detailed_description,
+        soundAndMusic,
+    };
 }
 
 function genVideoUid() {
@@ -313,7 +318,8 @@ function normalizePromptConcatOrder(raw) {
     const seen = new Set();
     if (Array.isArray(raw)) {
         for (const value of raw) {
-            const key = String(value || "").trim();
+            const rawKey = String(value || "").trim();
+            const key = rawKey === "ai" ? "detailed_description" : rawKey;
             if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
             seen.add(key);
             out.push(key);
@@ -333,16 +339,16 @@ function normalizePromptIncludes(raw, { useGlobalPrompt, useAiPrompt, migrateLeg
             if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
             seen.add(key);
         }
-        // Old projects wrote prompt_includes without clip/ai, plus separate use_* flags.
+        // Old projects wrote prompt_includes without clip/detailed_description, plus separate use_* flags.
         if (migrateLegacyFlags) {
-            const hasNewKeys = seen.has("clip") || seen.has("ai");
+            const hasNewKeys = seen.has("clip") || seen.has("detailed_description");
             if (!hasNewKeys) {
                 seen.add("clip");
-                if (useAiPrompt !== false) seen.add("ai");
+                if (useAiPrompt !== false) seen.add("detailed_description");
             } else if (useAiPrompt === true) {
-                seen.add("ai");
+                seen.add("detailed_description");
             } else if (useAiPrompt === false) {
-                seen.delete("ai");
+                seen.delete("detailed_description");
             }
             if (useGlobalPrompt === true) seen.add("global");
             if (useGlobalPrompt === false) seen.delete("global");
@@ -353,7 +359,7 @@ function normalizePromptIncludes(raw, { useGlobalPrompt, useAiPrompt, migrateLeg
         const out = [];
         if (useGlobalPrompt !== false) out.push("global");
         out.push("clip");
-        if (useAiPrompt !== false) out.push("ai");
+        if (useAiPrompt !== false) out.push("detailed_description");
         return out;
     }
     return [...DEFAULT_PROMPT_INCLUDES];
@@ -386,7 +392,7 @@ function defaultImageMeta(trackIndex = 0) {
         clipType: "image",
         mediaKind: "clip",
         prompt: "",
-        aiPrompt: "",
+        detailedDescription: "",
         endImage: null,
         promptIncludes,
         disabled: false,
@@ -824,7 +830,10 @@ export class CapTimelineEditorApp {
 
     _w(name) { return this.node.widgets?.find(w => w.name === name); }
     _currentVersion() { return String(this._w("project_version")?.value || "0.0.0"); }
-    _currentSchemaVersion() { return SCHEMA_VERSION; }
+    _currentSchemaVersion() {
+        const value = Number(this._w("schema_version")?.value);
+        return Number.isInteger(value) && value >= 1 ? value : 1;
+    }
     getFps() { return Math.max(1, parseInt(this._w("fps")?.value ?? 24, 10) || 24); }
     getPreviewSize() {
         const w = Math.max(1, Math.round(Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width) || PY_SCALAR_DEFAULTS.width));
@@ -3095,7 +3104,6 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="global_prompt">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("global_prompt_label")}</div>
-                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="global_prompt" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("global_prompt_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input cat-te-global-prompt-input" data-setting-prompt-input="global_prompt" placeholder="${T("global_prompt_placeholder")}"></textarea>
@@ -3104,7 +3112,6 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="style_prompt">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("style_prompt_label")}</div>
-                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="style_prompt" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("style_prompt_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="style_prompt" placeholder="${T("style_prompt_placeholder")}"></textarea>
@@ -3113,7 +3120,6 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="non_diegetic_music">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("non_diegetic_music_label")}</div>
-                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="non_diegetic_music" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("non_diegetic_music_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="non_diegetic_music" placeholder="${T("non_diegetic_music_placeholder")}"></textarea>
@@ -3122,7 +3128,6 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="negative_prompt">
                       <div class="cat-te-prompt-label-row">
                         <div class="cat-te-prompt-label">${T("negative_prompt_label")}</div>
-                        <input class="cat-te-prompt-prefix-line" data-setting-prompt-prefix="negative_prompt" type="text" placeholder="${T("prompt_prefix_line_placeholder")}" aria-label="${T("prompt_prefix_line_aria", { label: T("negative_prompt_label") })}" />
                       </div>
                       <div class="cat-te-prompt-input-wrap">
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="negative_prompt" placeholder="${T("negative_prompt_placeholder")}"></textarea>
@@ -3387,6 +3392,18 @@ export class CapTimelineEditorApp {
                     <span class="cat-te-media-preview-desc-label">${T("desc_prompt_label")}</span>
                     <div class="cat-te-media-preview-desc-wrap">
                       <textarea class="cat-te-media-preview-desc" rows="3" placeholder="${T("asset_desc_placeholder")}"></textarea>
+                    </div>
+                  </div>
+                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
+                    <span class="cat-te-media-preview-desc-label">${T("media_generation_prompt")}</span>
+                    <div class="cat-te-media-preview-desc-wrap">
+                      <textarea class="cat-te-media-generation-prompt" rows="3" placeholder="${T("media_generation_prompt_placeholder")}"></textarea>
+                    </div>
+                  </div>
+                  <div class="cat-te-media-preview-meta-row cat-te-media-preview-desc-row">
+                    <span class="cat-te-media-preview-desc-label">${T("media_asset_description")}</span>
+                    <div class="cat-te-media-preview-desc-wrap">
+                      <textarea class="cat-te-media-setting-description" rows="3" placeholder="${T("media_asset_description_placeholder")}"></textarea>
                     </div>
                   </div>
                   <div class="cat-te-media-preview-meta-grid">
@@ -3725,8 +3742,8 @@ export class CapTimelineEditorApp {
               <div class="cat-te-ai-optimize-body">
                 <div class="cat-te-ai-optimize-left">
                   <div class="cat-te-ai-optimize-tabs">
-                    <button type="button" class="cat-te-ai-src-tab is-clip-scope is-active" data-src="ai">AI</button>
-                    <button type="button" class="cat-te-ai-src-tab is-clip-scope" data-src="clip">Clip</button>
+                    <button type="button" class="cat-te-ai-src-tab is-clip-scope is-active" data-src="detailed_description">${T("ai_prompt_tab")}</button>
+                    <button type="button" class="cat-te-ai-src-tab is-clip-scope" data-src="clip">${T("clip_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="media">${T("media_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="global">${T("global_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="style">${T("style_prompt_tab")}</button>
@@ -3742,7 +3759,7 @@ export class CapTimelineEditorApp {
                       <button type="button" class="cat-te-prompt-include-chip" data-include="global" title="${T("prompt_include_global_title")}">${T("prompt_include_global")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="style" title="${T("prompt_include_style_title")}">${T("prompt_include_style")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="clip" title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="ai" title="${T("prompt_include_ai_title")}">${T("prompt_include_ai")}</button>
+                      <button type="button" class="cat-te-prompt-include-chip" data-include="detailed_description" title="${T("prompt_include_ai_title")}">${T("prompt_include_ai")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="media" title="${T("prompt_include_media_title")}">${T("prompt_include_media")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="non_diegetic_music" title="${T("prompt_include_music_title")}">${T("prompt_include_music")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="negative" title="${T("prompt_include_negative_title")}">${T("prompt_include_negative")}</button>
@@ -3950,11 +3967,7 @@ export class CapTimelineEditorApp {
         this._settingPromptInputs = Object.fromEntries(
             SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-input="${key}"]`)]),
         );
-        this._settingPromptPrefixInputs = Object.fromEntries(
-            SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-prefix="${key}"]`)]),
-        );
         this._settingPromptUndoArmed = Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [key, false]));
-        this._settingPromptPrefixUndoArmed = Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [key, false]));
         this.mediaStarFilterHost = el.querySelector(".cat-te-media-header-actions");
         this.mediaTabs = el.querySelectorAll(".cat-te-media-tab");
         this.mediaGrid = el.querySelector(".cat-te-media-grid");
@@ -4054,6 +4067,10 @@ export class CapTimelineEditorApp {
         this.mediaPreviewHint = el.querySelector(".cat-te-media-preview-hint");
         this.mediaPreviewDesc = el.querySelector(".cat-te-media-preview-desc");
         attachRichPromptHandler(this.mediaPreviewDesc, { mode: "widget" });
+        this.mediaGenerationPrompt = el.querySelector(".cat-te-media-generation-prompt");
+        this.mediaSettingDescription = el.querySelector(".cat-te-media-setting-description");
+        attachRichPromptHandler(this.mediaGenerationPrompt, { mode: "widget" });
+        attachRichPromptHandler(this.mediaSettingDescription, { mode: "widget" });
         this.mediaPreviewType = el.querySelector(".cat-te-media-preview-type");
         this.mediaPreviewTypeCustom = el.querySelector(".cat-te-media-preview-type-custom");
         this.mediaPreviewTypeCustomRow = el.querySelector(".cat-te-media-preview-type-custom-row");
@@ -4278,7 +4295,6 @@ export class CapTimelineEditorApp {
         this.brandProjectBtn?.addEventListener("click", () => this._focusProjectNameFromBrand());
         for (const key of SETTING_PROMPT_KEYS) {
             const input = this._settingPromptInputs?.[key];
-            const prefixInput = this._settingPromptPrefixInputs?.[key];
             input?.addEventListener("focus", () => {
                 if (this._settingPromptUndoArmed) this._settingPromptUndoArmed[key] = true;
             });
@@ -4286,13 +4302,6 @@ export class CapTimelineEditorApp {
                 if (this._settingPromptUndoArmed) this._settingPromptUndoArmed[key] = false;
             });
             input?.addEventListener("input", () => this._onSettingPromptInput(key));
-            prefixInput?.addEventListener("focus", () => {
-                if (this._settingPromptPrefixUndoArmed) this._settingPromptPrefixUndoArmed[key] = true;
-            });
-            prefixInput?.addEventListener("blur", () => {
-                if (this._settingPromptPrefixUndoArmed) this._settingPromptPrefixUndoArmed[key] = false;
-            });
-            prefixInput?.addEventListener("input", () => this._onSettingPromptPrefixInput(key));
         }
         el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
         this.settingsModal.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
@@ -5257,6 +5266,8 @@ export class CapTimelineEditorApp {
                 location: "input",
                 name: file.split(/[\\/]/).pop() || file,
                 prompt: local.prompt || "",
+                generation_prompt: local.generationPrompt || "",
+                setting_description: local.settingDescription || "",
                 media_type: local.mediaType || "",
                 tags: Array.isArray(local.tags) ? [...local.tags] : [],
             };
@@ -5289,6 +5300,8 @@ export class CapTimelineEditorApp {
                 location: "input",
                 name: row.name || String(row.file).split(/[\\/]/).pop(),
                 prompt: String(row.prompt || ""),
+                generation_prompt: String(row.generation_prompt || ""),
+                setting_description: String(row.setting_description || ""),
                 media_type: String(row.media_type || "").trim(),
                 tags: Array.isArray(row.tags) ? row.tags.map((t) => String(t || "").trim()).filter(Boolean) : [],
             };
@@ -5304,15 +5317,69 @@ export class CapTimelineEditorApp {
         const src = project && typeof project === "object" && !Array.isArray(project)
             ? JSON.parse(JSON.stringify(project))
             : {};
+        const schemaVersion = parseSchemaVersion(src);
         if (!Array.isArray(src.tracks)) src.tracks = [];
         if (!src.settings || typeof src.settings !== "object") src.settings = {};
+        for (const key of SETTING_PROMPT_KEYS) delete src.settings[`${key}_prefix_line`];
         src.name = String(src.name || T("untitled_project")).trim() || T("untitled_project");
         this._loadMediaStarsForDir();
-        if (parseSchemaVersion(src) < 2) this._migrateProjectSchema1To2(src);
+        if (schemaVersion < 2) this._migrateProjectSchema1To2(src);
         else this._hydrateMediaCatalog(src);
-        src.schema_version = SCHEMA_VERSION;
+        if (schemaVersion < 3) this._migrateProjectSchema2To3(src);
+        this._normalizeH3PromptFields(src);
+        src.schema_version = this._currentSchemaVersion();
         src.project_version = this._currentVersion();
         return src;
+    }
+
+    _migrateProjectSchema2To3(project) {
+        for (const track of project.tracks || []) {
+            for (const clip of track?.clips || []) {
+                if (!clip || typeof clip !== "object") continue;
+                if (!("detailed_description" in clip) && "ai_prompt" in clip) {
+                    const split = splitH3ProjectPrompt(clip.ai_prompt);
+                    if (split) {
+                        const currentPrompt = String(clip.prompt || "").trim();
+                        clip.prompt = currentPrompt
+                            ? `${split.clipPrompt}\n\n${currentPrompt}`
+                            : split.clipPrompt;
+                        clip.detailed_description = split.detailedDescription;
+                        this._storeH3SoundAndMusic(project, split.soundAndMusic);
+                    } else {
+                        clip.detailed_description = clip.ai_prompt || "";
+                    }
+                }
+                delete clip.ai_prompt;
+                if (Array.isArray(clip.prompt_includes)) {
+                    clip.prompt_includes = clip.prompt_includes.map((key) => (
+                        key === "ai" ? "detailed_description" : key
+                    ));
+                }
+            }
+        }
+    }
+
+    _storeH3SoundAndMusic(project, text) {
+        const sound = String(text || "").trim();
+        if (!sound) return;
+        const settings = project.settings && typeof project.settings === "object" ? project.settings : (project.settings = {});
+        const current = String(settings.non_diegetic_music || "").trim();
+        if (!current) settings.non_diegetic_music = sound;
+    }
+
+    _normalizeH3PromptFields(project) {
+        for (const track of project.tracks || []) {
+            for (const clip of track?.clips || []) {
+                if (!clip || typeof clip !== "object") continue;
+                const split = splitH3ProjectPrompt(clip.detailed_description);
+                if (!split) continue;
+                const currentPrompt = String(clip.prompt || "").trim();
+                if (!currentPrompt) clip.prompt = split.clipPrompt;
+                else if (!currentPrompt.includes(split.clipPrompt)) clip.prompt = `${split.clipPrompt}\n\n${currentPrompt}`;
+                clip.detailed_description = split.detailedDescription;
+                this._storeH3SoundAndMusic(project, split.soundAndMusic);
+            }
+        }
     }
 
     _hydrateMediaCatalog(project) {
@@ -5343,6 +5410,8 @@ export class CapTimelineEditorApp {
                 location: "input",
                 name: row.name || file.split(/[\\/]/).pop() || file,
                 prompt: String(row.prompt || local.prompt || ""),
+                generation_prompt: String(row.generation_prompt || row.generationPrompt || local.generationPrompt || ""),
+                setting_description: String(row.setting_description || row.settingDescription || local.settingDescription || ""),
                 media_type: String(row.media_type || row.mediaType || local.mediaType || "").trim(),
                 tags: tags.map((t) => String(t || "").trim()).filter(Boolean),
             };
@@ -5375,6 +5444,8 @@ export class CapTimelineEditorApp {
                             location: "input",
                             name: row.file.split(/[\\/]/).pop() || row.file,
                             prompt: "",
+                            generation_prompt: "",
+                            setting_description: "",
                             media_type: "",
                             tags: [],
                         };
@@ -5596,6 +5667,10 @@ export class CapTimelineEditorApp {
         const stars = Number(raw.stars);
         if (Number.isFinite(stars) && stars >= 1 && stars <= 5) out.stars = stars;
         if (typeof raw.prompt === "string") out.prompt = raw.prompt;
+        if (typeof raw.generationPrompt === "string") out.generationPrompt = raw.generationPrompt;
+        else if (typeof raw.generation_prompt === "string") out.generationPrompt = raw.generation_prompt;
+        if (typeof raw.settingDescription === "string") out.settingDescription = raw.settingDescription;
+        else if (typeof raw.setting_description === "string") out.settingDescription = raw.setting_description;
         if (typeof raw.mediaType === "string") out.mediaType = raw.mediaType.trim();
         if (typeof raw.mediaTypeCustom === "string") out.mediaTypeCustom = raw.mediaTypeCustom;
         if (Array.isArray(raw.tags)) {
@@ -5610,6 +5685,8 @@ export class CapTimelineEditorApp {
             return {
                 stars: Number.isFinite(Number(row.stars)) ? Number(row.stars) : undefined,
                 prompt: String(row.prompt || ""),
+                generationPrompt: String(row.generation_prompt || ""),
+                settingDescription: String(row.setting_description || ""),
                 mediaType: String(row.media_type || "").trim(),
                 tags: Array.isArray(row.tags) ? [...row.tags] : [],
             };
@@ -5622,13 +5699,15 @@ export class CapTimelineEditorApp {
         const row = this._ensureMedia(kind, file);
         if (row) {
             row.prompt = next.prompt || "";
+            row.generation_prompt = next.generationPrompt || "";
+            row.setting_description = next.settingDescription || "";
             row.media_type = next.mediaType || "";
             row.tags = Array.isArray(next.tags) ? [...next.tags] : [];
             if (next.stars) row.stars = next.stars;
             else delete row.stars;
         }
         const id = this._mediaStarsId(kind, file);
-        if (!next.stars && !next.prompt && !next.mediaType && !(next.tags?.length)) {
+        if (!next.stars && !next.prompt && !next.generationPrompt && !next.settingDescription && !next.mediaType && !(next.tags?.length)) {
             delete this._mediaStarsByDir[id];
         } else {
             this._mediaStarsByDir[id] = next;
@@ -11404,7 +11483,6 @@ export class CapTimelineEditorApp {
         project.settings.height = Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height);
         for (const key of SETTING_PROMPT_KEYS) {
             project.settings[key] = this._readSettingPrompt(key);
-            project.settings[settingPromptPrefixKey(key)] = this._readSettingPromptPrefix(key);
         }
         project.settings.prompt_concat_order = this._getPromptConcatOrder();
         delete project.settings.ignore_occluded;
@@ -11435,7 +11513,7 @@ export class CapTimelineEditorApp {
             if (parsed.error) throw parsed.error;
             project = parsed.project || {
                 project_version: this._currentVersion(),
-                schema_version: SCHEMA_VERSION,
+                schema_version: this._currentSchemaVersion(),
                 media: [],
                 settings: {},
                 tracks: [],
@@ -11463,10 +11541,6 @@ export class CapTimelineEditorApp {
                 key,
                 String(settings[key] ?? this._readSettingPrompt(key) ?? ""),
             ])),
-            ...Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [
-                settingPromptPrefixKey(key),
-                String(settings[settingPromptPrefixKey(key)] ?? SETTING_PROMPT_PREFIX_DEFAULTS[key] ?? ""),
-            ])),
             prompt_concat_order: this._getPromptConcatOrder(),
             use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
         };
@@ -11479,10 +11553,6 @@ export class CapTimelineEditorApp {
                 if (settings[key] != null) {
                     setRichPromptValue(input, String(settings[key]), true);
                     wroteAnySettingPrompt = true;
-                }
-                const prefixInput = this._settingPromptPrefixInputs?.[key];
-                if (prefixInput) {
-                    prefixInput.value = normalizeSettingPromptPrefix(key, settings[settingPromptPrefixKey(key)]);
                 }
             }
         } finally {
@@ -11869,7 +11939,7 @@ export class CapTimelineEditorApp {
                 clipType: isMediaTrackType(track.type) ? "media" : "image",
                 mediaKind: isMediaTrackType(track.type) ? "media" : "clip",
                 prompt: c.prompt ?? "",
-                aiPrompt: c.ai_prompt ?? "",
+                detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
                 promptIncludes,
                 disabled: !!c.disabled,
                 visible: c.visible !== false,
@@ -11951,7 +12021,7 @@ export class CapTimelineEditorApp {
                 agent: c.agent || "MiniMaxH3",
                 agentCustom: c.agent_custom ?? "",
                 prompt: c.prompt ?? "",
-                aiPrompt: c.ai_prompt ?? "",
+                detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
                 endImage: c.end_image ?? null,
                 promptIncludes,
                 disabled: !!c.disabled,
@@ -12010,7 +12080,7 @@ export class CapTimelineEditorApp {
             agent: c.agent || "MiniMaxH3",
             agentCustom: c.agent_custom ?? "",
             prompt: c.prompt ?? "",
-            aiPrompt: c.ai_prompt ?? "",
+            detailedDescription: c.detailed_description ?? c.ai_prompt ?? "",
             endImage: c.end_image ?? null,
             promptIncludes,
             disabled: !!c.disabled,
@@ -12611,6 +12681,16 @@ export class CapTimelineEditorApp {
                 target.textContent = info.metadata_error ? T("load_failed", { msg: info.metadata_error }) : info.raw || T("media_not_recorded");
                 return;
             }
+            const meta = this._getMediaMeta(item.kind, item.file);
+            if ((!meta.generationPrompt && info.prompt) || (!meta.settingDescription && info.description)) {
+                this._writeMediaMeta(item.kind, item.file, {
+                    ...meta,
+                    generationPrompt: meta.generationPrompt || info.prompt || "",
+                    settingDescription: meta.settingDescription || info.description || "",
+                });
+                this._fillMediaPreviewMeta(item.kind, item.file);
+                this._saveToWidgets();
+            }
             target.replaceChildren();
             const date = (value) => value ? new Date(value).toLocaleString() : "";
             const fields = [
@@ -12645,6 +12725,8 @@ export class CapTimelineEditorApp {
         const meta = this._getMediaMeta(kind, file);
         const known = MEDIA_ASSET_TYPES.some((t) => t.id === meta.mediaType);
         if (this.mediaPreviewDesc) setRichPromptValue(this.mediaPreviewDesc, meta.prompt || "", true);
+        if (this.mediaGenerationPrompt) setRichPromptValue(this.mediaGenerationPrompt, meta.generationPrompt || "", true);
+        if (this.mediaSettingDescription) setRichPromptValue(this.mediaSettingDescription, meta.settingDescription || "", true);
         if (this.mediaPreviewType) {
             this.mediaPreviewType.value = !meta.mediaType ? "" : (known ? meta.mediaType : "other");
         }
@@ -12676,6 +12758,8 @@ export class CapTimelineEditorApp {
         this._writeMediaMeta(kind, file, {
             ...prev,
             prompt: String(this.mediaPreviewDesc?.value || ""),
+            generationPrompt: String(this.mediaGenerationPrompt?.value || ""),
+            settingDescription: String(this.mediaSettingDescription?.value || ""),
             mediaType,
             tags: this._parseTagList(this.mediaPreviewTags?.value),
         });
@@ -13022,7 +13106,13 @@ export class CapTimelineEditorApp {
         const response = await fetch(api.apiURL("/audio_keyframe_timeline/import_asset"), { method: "POST", body: form });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-        return { file: result.file, kind: item.kind, location: result.location };
+        return {
+            file: result.file,
+            kind: item.kind,
+            location: result.location,
+            generation_prompt: result.generation_prompt || "",
+            setting_description: result.setting_description || "",
+        };
     }
 
     async _importMaterialItems(items, { insertToTimeline = false, clientY = null, targetClip = null } = {}) {
@@ -13031,7 +13121,7 @@ export class CapTimelineEditorApp {
         for (const item of items) {
             uploaded.push(await this._uploadMaterialItem(item));
         }
-        for (const u of uploaded) this._registerMediaFile(u.file, u.kind, u.location);
+        for (const u of uploaded) this._registerMediaFile(u.file, u.kind, u.location, u);
         this._renderMediaGrid();
         const visual = uploaded.filter((u) => u.kind === "image" || u.kind === "video");
         if (targetClip && visual.length) {
@@ -13070,7 +13160,7 @@ export class CapTimelineEditorApp {
             if (relink) {
                 const uploaded = await this._uploadMaterialItem(items[0]);
                 this._closeAddMaterial();
-                this._replaceMediaReference(relink.file, uploaded.file, uploaded.kind);
+                this._replaceMediaReference(relink.file, uploaded.file, uploaded.kind, true, uploaded);
                 this._saveToWidgets();
                 this._renderMediaGrid();
             } else {
@@ -13086,8 +13176,11 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _registerMediaFile(file, kind, _location) {
-        this._ensureMedia(kind, file);
+    _registerMediaFile(file, kind, _location, metadata = {}) {
+        this._ensureMedia(kind, file, {
+            generation_prompt: String(metadata.generation_prompt || ""),
+            setting_description: String(metadata.setting_description || ""),
+        });
     }
 
     /** Swap `oldFile` → `newFile` in the media library list, keeping position. */
@@ -13123,7 +13216,7 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _replaceMediaReference(oldFile, newFile, kind, recordUndo = true) {
+    _replaceMediaReference(oldFile, newFile, kind, recordUndo = true, metadata = {}) {
         if (!oldFile || !newFile || !kind) return;
         if (recordUndo) this._recordUndo();
         const row = this._findMedia(kind, oldFile);
@@ -13132,6 +13225,8 @@ export class CapTimelineEditorApp {
             row.file = newFile;
             row.name = newFile.split(/[\\/]/).pop() || row.name;
             row.location = "input";
+            row.generation_prompt = String(metadata.generation_prompt || "");
+            row.setting_description = String(metadata.setting_description || "");
             if (dup && dup !== row) {
                 for (const track of this._timeline?.tracks ?? []) {
                     for (const clip of track.clips) {
@@ -13155,7 +13250,10 @@ export class CapTimelineEditorApp {
                 this._projectResources = this._projectResources.filter((resource) => resource !== dup);
             }
         } else {
-            this._ensureMedia(kind, newFile);
+            this._ensureMedia(kind, newFile, {
+                generation_prompt: String(metadata.generation_prompt || ""),
+                setting_description: String(metadata.setting_description || ""),
+            });
         }
         const mediaId = (row || this._findMedia(kind, newFile))?.id;
         for (const track of this._timeline?.tracks ?? []) {
@@ -13205,6 +13303,7 @@ export class CapTimelineEditorApp {
             }
         }
         this._swapMediaListEntry(oldFile, newFile, kind);
+        this._writeMediaMeta(kind, newFile, this._getMediaMeta(kind, newFile));
     }
 
     /** Remove one library media from project/timeline lists. Returns whether disk delete is needed. */
@@ -15818,14 +15917,6 @@ export class CapTimelineEditorApp {
         return this._readSettingPrompt("global_prompt");
     }
 
-    _readSettingPromptPrefix(key) {
-        const input = this._settingPromptPrefixInputs?.[key];
-        if (input && typeof input.value === "string") return input.value;
-        const settings = this._parseProjectWidgetValue()?.project?.settings;
-        const stored = settings?.[settingPromptPrefixKey(key)];
-        return normalizeSettingPromptPrefix(key, stored);
-    }
-
     _writeSettingPrompt(key, text) {
         const next = String(text ?? "");
         this._settingPromptSyncing = true;
@@ -15844,14 +15935,6 @@ export class CapTimelineEditorApp {
         this._writeSettingPrompt("global_prompt", text);
     }
 
-    _writeSettingPromptPrefix(key, text) {
-        const input = this._settingPromptPrefixInputs?.[key];
-        if (input) input.value = String(text ?? "");
-        this._syncScalarsToProjectJson();
-        this.node.setDirtyCanvas?.(true, true);
-        this._refreshFinalPromptDisplay();
-    }
-
     _syncSettingPromptInputs() {
         if (this._settingPromptSyncing) return;
         for (const key of SETTING_PROMPT_KEYS) {
@@ -15864,11 +15947,6 @@ export class CapTimelineEditorApp {
                 continue;
             }
             setRichPromptValue(input, value, true);
-        }
-        for (const key of SETTING_PROMPT_KEYS) {
-            const input = this._settingPromptPrefixInputs?.[key];
-            if (!input || document.activeElement === input) continue;
-            input.value = this._readSettingPromptPrefix(key);
         }
     }
 
@@ -15886,14 +15964,6 @@ export class CapTimelineEditorApp {
 
     _onGlobalPromptInput() {
         this._onSettingPromptInput("global_prompt");
-    }
-
-    _onSettingPromptPrefixInput(key) {
-        if (this._settingPromptPrefixUndoArmed?.[key]) {
-            this._recordUndo();
-            this._settingPromptPrefixUndoArmed[key] = false;
-        }
-        this._writeSettingPromptPrefix(key, this._settingPromptPrefixInputs?.[key]?.value ?? "");
     }
 
     _parseExtendSec(input) {
@@ -15918,7 +15988,7 @@ export class CapTimelineEditorApp {
             global: this._readSettingPrompt("global_prompt"),
             style: this._readSettingPrompt("style_prompt"),
             clip: m.prompt,
-            ai: m.aiPrompt,
+            detailed_description: m.detailedDescription,
             media: this._clipItems(m)
                 .filter((item) => item.enabled !== false)
                 .map((item) => {
@@ -15930,20 +16000,18 @@ export class CapTimelineEditorApp {
             non_diegetic_music: this._readSettingPrompt("non_diegetic_music"),
             negative: this._readSettingPrompt("negative_prompt"),
         };
-        const settingKeys = {
-            global: "global_prompt",
-            style: "style_prompt",
-            non_diegetic_music: "non_diegetic_music",
-            negative: "negative_prompt",
-        };
         const parts = [];
         for (const key of this._getPromptConcatOrder()) {
             if (!includes.includes(key)) continue;
             const text = this._stripPromptComments(values[key]);
             if (!text) continue;
-            const settingKey = settingKeys[key];
-            const prefix = settingKey ? this._readSettingPromptPrefix(settingKey).trim() : "";
-            parts.push(prefix ? `${prefix}\n\n${text}` : text);
+            if (key === "detailed_description" && !text.startsWith("detailed_description:")) {
+                parts.push(`detailed_description:\n\n${text}`);
+            } else if (key === "non_diegetic_music" && /^(?:overall_soundscape|non_diegetic_music)\s*:/i.test(text)) {
+                parts.push(text);
+            } else {
+                parts.push(text);
+            }
         }
         return parts.join("\n\n");
     }
@@ -15964,7 +16032,7 @@ export class CapTimelineEditorApp {
     _promptManagerValue(tab, clip) {
         if (!clip) return "";
         const meta = this._ensureClipMeta(clip);
-        if (tab === "ai") return String(meta.aiPrompt || "");
+        if (tab === "detailed_description") return String(meta.detailedDescription || "");
         if (tab === "clip") return String(meta.prompt || "");
         if (tab === "media") return this._mediaPromptBlock(clip);
         const key = this._promptManagerSettingKey(tab);
@@ -15976,9 +16044,9 @@ export class CapTimelineEditorApp {
         if (!clip || tab === "media") return false;
         if (recordUndo) this._recordUndo();
         const value = String(text ?? "");
-        if (tab === "ai" || tab === "clip") {
+        if (tab === "detailed_description" || tab === "clip") {
             const meta = this._ensureClipMeta(clip);
-            if (tab === "ai") meta.aiPrompt = value;
+            if (tab === "detailed_description") meta.detailedDescription = value;
             else meta.prompt = value;
             this._meta.set(clip.id, meta);
         } else {
@@ -16032,6 +16100,8 @@ export class CapTimelineEditorApp {
                 file: item.file,
                 location: status?.location || media?.location || "input",
                 prompt: String(media?.prompt || ""),
+                generation_prompt: String(media?.generation_prompt || ""),
+                setting_description: String(media?.setting_description || ""),
                 media_type: String(media?.media_type || ""),
                 tags: Array.isArray(media?.tags) ? media.tags : [],
             };
@@ -16039,8 +16109,8 @@ export class CapTimelineEditorApp {
     }
 
     _setAiOptimizeSrcTab(tab) {
-        const allowed = new Set(["ai", "clip", "media", "global", "style", "non_diegetic_music", "negative"]);
-        const next = allowed.has(tab) ? tab : "ai";
+        const allowed = new Set(["detailed_description", "clip", "media", "global", "style", "non_diegetic_music", "negative"]);
+        const next = allowed.has(tab) ? tab : "detailed_description";
         this._aiOptimizeSrc = next;
         this.aiSrcTabs?.forEach((btn) => {
             btn.classList.toggle("is-active", btn.dataset.src === next);
@@ -16063,7 +16133,7 @@ export class CapTimelineEditorApp {
             setRichPromptValue(this.aiSrcText, "", true);
             return;
         }
-        const tab = this._aiOptimizeSrc || "ai";
+        const tab = this._aiOptimizeSrc || "detailed_description";
         setRichPromptValue(this.aiSrcText, this._promptManagerValue(tab, clip), true);
         this.aiSrcText.placeholder = tab === "media" ? T("material_prompt_readonly_hint") : "";
     }
@@ -16082,7 +16152,7 @@ export class CapTimelineEditorApp {
     async _openAiOptimizeModal(clip = this._selClip) {
         if (!clip || !isDirectorTrackType(clip.track?.type) || !this.aiOptimizeModal) return;
         this.aiOptimizeModal.hidden = false;
-        this._aiOptimizeSrc = "ai";
+        this._aiOptimizeSrc = "detailed_description";
         if (this.aiResultInput) this.aiResultInput.value = "";
         await this._bindAiOptimizeToClip(clip, { reloadModels: true });
     }
@@ -16125,7 +16195,7 @@ export class CapTimelineEditorApp {
             this.aiSkillInput.value = localStorage.getItem(STORAGE_AI_PROMPT_SKILL) || "";
         }
         this._restoreAiOutputLanguage();
-        this._setAiOptimizeSrcTab(this._aiOptimizeSrc || "ai");
+        this._setAiOptimizeSrcTab(this._aiOptimizeSrc || "detailed_description");
         this._syncPromptIncludesUi(meta);
         if (reloadModels) await this._loadAiOptimizeModels();
         await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
@@ -16247,7 +16317,7 @@ export class CapTimelineEditorApp {
 
     async _runAiOptimize() {
         const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
-        const targetTab = this._aiOptimizeSrc || "ai";
+        const targetTab = this._aiOptimizeSrc || "detailed_description";
         if (!clip || clip.track?.type === "audio" || this._aiOptimizeBusy || targetTab === "media") return;
         const meta = this._ensureClipMeta(clip);
         const modelChoice = String(this.aiModelSelect?.value || "").trim();
@@ -16299,9 +16369,25 @@ export class CapTimelineEditorApp {
             const text = String(data.prompt || "").trim();
             if (!text) throw new Error(T("model_no_prompt_returned"));
             const preview = text.length > 800 ? `${text.slice(0, 800)}…` : text;
-            const target = this._promptManagerTabLabel(targetTab);
+            const h3Sections = meta.agent === "MiniMaxH3" ? splitH3ProjectPrompt(text) : null;
+            const target = h3Sections
+                ? `${this._promptManagerTabLabel("clip")} + ${this._promptManagerTabLabel("detailed_description")}`
+                : this._promptManagerTabLabel(targetTab);
             if (!confirm(T("confirm_apply_generated_prompt", { target, preview }))) return;
-            this._writePromptManagerValue(targetTab, text, { recordUndo: true });
+            if (h3Sections) {
+                this._recordUndo();
+                meta.prompt = h3Sections.clipPrompt;
+                meta.detailedDescription = h3Sections.detailedDescription;
+                if (h3Sections.soundAndMusic) {
+                    const input = this._settingPromptInputs?.non_diegetic_music;
+                    if (input) setRichPromptValue(input, h3Sections.soundAndMusic, true);
+                }
+                this._meta.set(clip.id, meta);
+                this._refreshFinalPromptDisplay();
+                this._saveToWidgets();
+            } else {
+                this._writePromptManagerValue(targetTab, text, { recordUndo: true });
+            }
             this._fillAiOptimizeSrc();
         } catch (error) {
             if (ac.signal.aborted || error?.name === "AbortError") return;
@@ -16440,7 +16526,7 @@ export class CapTimelineEditorApp {
 
     _promptManagerTabLabel(key) {
         switch (key) {
-            case "ai": return T("ai_prompt_tab");
+            case "detailed_description": return T("ai_prompt_tab");
             case "clip": return T("clip_prompt_tab");
             case "media": return T("media_prompt_tab");
             case "global": return T("global_prompt_tab");
@@ -16456,7 +16542,7 @@ export class CapTimelineEditorApp {
             case "global": return T("prompt_include_global");
             case "style": return T("prompt_include_style");
             case "clip": return T("prompt_include_clip");
-            case "ai": return T("prompt_include_ai");
+            case "detailed_description": return T("prompt_include_ai");
             case "media": return T("prompt_include_media");
             case "non_diegetic_music": return T("prompt_include_music");
             case "negative": return T("prompt_include_negative");
@@ -16753,7 +16839,7 @@ export class CapTimelineEditorApp {
                 } else {
                     row.name = clip.name || DEFAULT_CLIP_NAME;
                     row.prompt = m.prompt ?? "";
-                    row.ai_prompt = m.aiPrompt ?? "";
+                    row.detailed_description = m.detailedDescription ?? "";
                     row.prompt_includes = normalizePromptIncludes(m.promptIncludes);
                     row.media_enabled = items.map((item) => item.enabled !== false);
                     row.head_extend_sec = Math.max(0, Math.round(Number(m.headExtendSec) || 0));
@@ -16858,7 +16944,7 @@ export class CapTimelineEditorApp {
         });
         return {
             project_version: this._currentVersion(),
-            schema_version: SCHEMA_VERSION,
+            schema_version: this._currentSchemaVersion(),
             name: String(this.projectNameInput?.value || T("untitled_project")).trim() || T("untitled_project"),
             media: this._serializeMediaCatalog(),
             settings: {
@@ -16868,10 +16954,6 @@ export class CapTimelineEditorApp {
                 ...Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [
                     key,
                     this._readSettingPrompt(key),
-                ])),
-                ...Object.fromEntries(SETTING_PROMPT_KEYS.map((key) => [
-                    settingPromptPrefixKey(key),
-                    this._readSettingPromptPrefix(key),
                 ])),
                 prompt_concat_order: this._getPromptConcatOrder(),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
@@ -17083,10 +17165,6 @@ export class CapTimelineEditorApp {
                     if (snapSettings[key] != null) {
                         setRichPromptValue(input, String(snapSettings[key]), true);
                         wroteAnySettingPrompt = true;
-                    }
-                    const prefixInput = this._settingPromptPrefixInputs?.[key];
-                    if (prefixInput) {
-                        prefixInput.value = normalizeSettingPromptPrefix(key, snapSettings[settingPromptPrefixKey(key)]);
                     }
                 }
             } finally {

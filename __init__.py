@@ -10,6 +10,7 @@ from .cap_i18n import resolve_lang, t
 from .cap_load_image_metadata import (
     NODE_CLASS_MAPPINGS as _CLM_CLASS,
     NODE_DISPLAY_NAME_MAPPINGS as _CLM_NAMES,
+    read_asset_metadata,
     register_metadata_routes,
 )
 from .prompt_input_rich import CAP_RichPromptInput
@@ -367,7 +368,14 @@ def _register_routes():
             with open(destination, "wb") as stream:
                 while chunk := await upload.read_chunk(65536):
                     stream.write(chunk)
-            return web.json_response({"file": result_name, "kind": kind, "location": location})
+            metadata = read_asset_metadata(destination, kind) if kind == "image" else {}
+            return web.json_response({
+                "file": result_name,
+                "kind": kind,
+                "location": location,
+                "generation_prompt": metadata.get("prompt", ""),
+                "setting_description": metadata.get("description", ""),
+            })
         except Exception as exc:
             logging.exception("[CapricorncdTools] import_asset error")
             return web.json_response({"error": str(exc)}, status=500)

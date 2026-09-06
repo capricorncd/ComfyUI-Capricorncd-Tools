@@ -31,10 +31,7 @@ Accepts either:
 
 ## Prompt
 
-| Priority | Source |
-|----------|--------|
-| 1 | Clip AI prompt when the clip uses AI prompt |
-| 2 | Otherwise: enabled media prompt lines (`<Picture n>` / `<Video n>` / `<Audio n>`), then global prompt (if Use Global), then clip keyframe prompt |
+The prompt is assembled in `settings.prompt_concat_order` order from the parts enabled by the clip's `prompt_includes`. For MiniMax H3 projects, `clip.prompt` contains `subject_definitions`, `summary`, and `retention_analysis`; `clip.detailed_description` contains the shot description. The composer adds the `detailed_description:` heading when the stored value is only the body.
 
 ---
 

@@ -199,8 +199,8 @@
       "agent": {
         "name": "Agent"
       },
-      "ai_prompt": {
-        "name": "AI提示词"
+      "detailed_description": {
+        "name": "详细描述"
       },
       "clip_json": {
         "name": "片段JSON"

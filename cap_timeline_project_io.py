@@ -16,8 +16,23 @@ PACKAGE_PROJECT_NAME = "project.json"
 PACKAGE_MEDIA_ROOT = "media"
 PACKAGE_GENERATED_SUBDIR = "generated"
 KIND_SUBDIR = {"image": "images", "video": "videos", "audio": "audios"}
+
+
+def _read_schema_version() -> int:
+    path = os.path.join(os.path.dirname(__file__), "pyproject.toml")
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            text = stream.read()
+    except OSError as exc:
+        raise RuntimeError(f"Unable to read timeline schema version from {path}") from exc
+    match = re.search(r"(?ms)^\[tool\.capricorncd\]\s*$.*?^schema_version\s*=\s*(\d+)\s*$", text)
+    if not match or int(match.group(1)) < 1:
+        raise RuntimeError("pyproject.toml must define [tool.capricorncd] schema_version >= 1")
+    return int(match.group(1))
+
+
 # Integer document shape. Independent of the Python package version.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = _read_schema_version()
 
 
 def parse_schema_version(project) -> int:
@@ -151,10 +166,93 @@ def migrate_project(project: dict) -> dict:
     out = json.loads(json.dumps(project, ensure_ascii=False))
     if parse_schema_version(out) < 2:
         _migrate_schema_1_to_2(out)
+    if parse_schema_version(out) < 3:
+        _migrate_schema_2_to_3(out)
+    _normalize_h3_prompt_fields(out)
+    settings = out.get("settings")
+    if isinstance(settings, dict):
+        for key in ("global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt"):
+            settings.pop(f"{key}_prefix_line", None)
     _normalize_media_catalog(out)
     _ensure_clip_media_ids(out)
     out["schema_version"] = SCHEMA_VERSION
     return out
+
+
+def _split_h3_prompt(value: str) -> tuple[str, str, str] | None:
+    text = str(value or "").strip()
+    matches = list(re.finditer(
+        r"^(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:\s*",
+        text,
+        re.IGNORECASE | re.MULTILINE,
+    ))
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections[match.group(1).lower()] = text[match.end():end].strip()
+    clip_keys = ("subject_definitions", "summary", "retention_analysis")
+    if not all(sections.get(key) for key in clip_keys) or not sections.get("detailed_description"):
+        return None
+    prompt = "\n\n".join(f"{key}:\n{sections[key]}" for key in clip_keys)
+    sound = "\n\n".join(
+        f"{key}:\n{sections[key]}"
+        for key in ("overall_soundscape", "non_diegetic_music")
+        if sections.get(key)
+    )
+    return prompt, sections["detailed_description"], sound
+
+
+def _normalize_h3_prompt_fields(project: dict) -> None:
+    settings = project.setdefault("settings", {})
+    for track in project.get("tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        for clip in track.get("clips") or []:
+            if not isinstance(clip, dict):
+                continue
+            split = _split_h3_prompt(clip.get("detailed_description") or "")
+            if not split:
+                continue
+            h3_prompt, detailed_description, sound = split
+            current_prompt = str(clip.get("prompt") or "").strip()
+            if not current_prompt:
+                clip["prompt"] = h3_prompt
+            elif h3_prompt not in current_prompt:
+                clip["prompt"] = f"{h3_prompt}\n\n{current_prompt}"
+            clip["detailed_description"] = detailed_description
+            current_sound = str(settings.get("non_diegetic_music") or "").strip()
+            if sound and not current_sound:
+                settings["non_diegetic_music"] = sound
+
+
+def _migrate_schema_2_to_3(project: dict) -> None:
+    for track in project.get("tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        for clip in track.get("clips") or []:
+            if not isinstance(clip, dict):
+                continue
+            if "detailed_description" not in clip and "ai_prompt" in clip:
+                legacy_prompt = clip.get("ai_prompt") or ""
+                split = _split_h3_prompt(legacy_prompt)
+                if split:
+                    h3_prompt, detailed_description, sound = split
+                    current_prompt = str(clip.get("prompt") or "").strip()
+                    clip["prompt"] = h3_prompt if not current_prompt else f"{h3_prompt}\n\n{current_prompt}"
+                    clip["detailed_description"] = detailed_description
+                    settings = project.setdefault("settings", {})
+                    current_sound = str(settings.get("non_diegetic_music") or "").strip()
+                    if sound and not current_sound:
+                        settings["non_diegetic_music"] = sound
+                else:
+                    clip["detailed_description"] = legacy_prompt
+            clip.pop("ai_prompt", None)
+            includes = clip.get("prompt_includes")
+            if isinstance(includes, list):
+                clip["prompt_includes"] = [
+                    "detailed_description" if str(value) == "ai" else value
+                    for value in includes
+                ]
 
 
 def _migrate_schema_1_to_2(project: dict) -> None:
@@ -176,6 +274,8 @@ def _migrate_schema_1_to_2(project: dict) -> None:
             "location": "input",
             "name": os.path.basename(file),
             "prompt": "",
+            "generation_prompt": "",
+            "setting_description": "",
             "media_type": "",
             "tags": [],
         }
@@ -190,6 +290,8 @@ def _migrate_schema_1_to_2(project: dict) -> None:
         if isinstance(resource, dict):
             add(resource.get("kind"), resource.get("file"), resource.get("location"))
             prompt = resource.get("prompt")
+            generation_prompt = resource.get("generation_prompt") or resource.get("generationPrompt")
+            setting_description = resource.get("setting_description") or resource.get("settingDescription")
             media_type = resource.get("media_type") or resource.get("mediaType")
             tags = resource.get("tags")
             stars = resource.get("stars")
@@ -197,6 +299,10 @@ def _migrate_schema_1_to_2(project: dict) -> None:
             if row:
                 if isinstance(prompt, str):
                     row["prompt"] = prompt
+                if isinstance(generation_prompt, str):
+                    row["generation_prompt"] = generation_prompt
+                if isinstance(setting_description, str):
+                    row["setting_description"] = setting_description
                 if isinstance(media_type, str):
                     row["media_type"] = media_type.strip()
                 if isinstance(tags, list):
@@ -274,6 +380,8 @@ def _normalize_media_catalog(project: dict) -> None:
             "location": "input",
             "name": str(row.get("name") or os.path.basename(file)),
             "prompt": str(row.get("prompt") or ""),
+            "generation_prompt": str(row.get("generation_prompt") or row.get("generationPrompt") or ""),
+            "setting_description": str(row.get("setting_description") or row.get("settingDescription") or ""),
             "media_type": str(row.get("media_type") or row.get("mediaType") or "").strip(),
             "tags": [str(t).strip() for t in tags if str(t).strip()],
         }
@@ -335,6 +443,8 @@ def _ensure_clip_media_ids(project: dict) -> None:
             "location": "input",
             "name": os.path.basename(file),
             "prompt": "",
+            "generation_prompt": "",
+            "setting_description": "",
             "media_type": "",
             "tags": [],
         }

@@ -199,8 +199,8 @@
       "agent": {
         "name": "エージェント"
       },
-      "ai_prompt": {
-        "name": "AI プロンプト"
+      "detailed_description": {
+        "name": "詳細説明"
       },
       "clip_json": {
         "name": "クリップ JSON"

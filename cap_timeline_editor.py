@@ -21,26 +21,8 @@ from .cap_timeline_project_io import SCHEMA_VERSION, _media_id_for, migrate_proj
 from .timecode import resolve_media_path
 
 
-_SETTING_PROMPT_PREFIX_DEFAULTS = {
-    "global_prompt": "",
-    "style_prompt": "Style opening:",
-    "non_diegetic_music": "non_diegetic_music:",
-    "negative_prompt": "Negative:",
-}
-_LEGACY_STYLE_PROMPT_PREFIXES = {
-    "(填写MiniMax H3规范里的风格提示词英文：)",
-    "MiniMax H3规范里的风格提示词英文标题",
-}
-
-
 def _setting_prompt(settings: dict, key: str) -> str:
-    text = _strip_comment_lines(settings.get(key) or "").strip()
-    if not text:
-        return ""
-    prefix = str(settings.get(f"{key}_prefix_line", _SETTING_PROMPT_PREFIX_DEFAULTS.get(key, "")) or "").strip()
-    if key == "style_prompt" and prefix in _LEGACY_STYLE_PROMPT_PREFIXES:
-        prefix = _SETTING_PROMPT_PREFIX_DEFAULTS[key]
-    return f"{prefix}\n\n{text}" if prefix else text
+    return _strip_comment_lines(settings.get(key) or "").strip()
 
 
 def _safe_filename_part(value, fallback: str = "Untitled") -> str:
@@ -147,6 +129,8 @@ def _material_row(row: dict, resolve_media) -> dict | None:
         "file": resolve_media(file),
         "name": str(row.get("name") or file.replace("\\", "/").rsplit("/", 1)[-1]),
         "prompt": _strip_comment_lines(row.get("prompt") or ""),
+        "generation_prompt": str(row.get("generation_prompt") or ""),
+        "setting_description": str(row.get("setting_description") or ""),
         "media_type": str(row.get("media_type") or "").strip(),
         "tags": [str(tag).strip() for tag in tags if str(tag).strip()],
         "location": str(row.get("location") or "input"),
@@ -246,17 +230,19 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                             ensure_ascii=False,
                         ),
                         "multiline": True,
-                        "tooltip": "Track-nested editable timeline project (schema version 2: media catalog + clip media_ids).",
+                        "tooltip": "Track-nested editable timeline project.",
                     },
                 ),
                 "trim_offset": ("INT", {"default": 1, "min": 0, "max": 60, "step": 1}),
+                "schema_version": ("INT", {"default": SCHEMA_VERSION}),
             },
         }
 
     @classmethod
     def IS_CHANGED(cls, fps, width, height,
-                   project_version, project_json, trim_offset, swap_wh=False, **_):
-        return fps, width, height, project_version, project_json, trim_offset, bool(swap_wh)
+                   project_version, project_json, trim_offset, swap_wh=False,
+                   schema_version=SCHEMA_VERSION, **_):
+        return fps, width, height, project_version, project_json, trim_offset, bool(swap_wh), schema_version
 
     @classmethod
     def VALIDATE_INPUTS(cls, **_):
@@ -712,7 +698,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             entries = _clip_visual_entries(project, clip)
             has_media = any(e.get("enabled") and e.get("id") for e in entries)
             has_prompt = bool(
-                _strip_comment_lines(clip.get("ai_prompt") or "").strip()
+                _strip_comment_lines(clip.get("detailed_description") or clip.get("ai_prompt") or "").strip()
                 or _strip_comment_lines(clip.get("prompt") or "").strip()
             )
             # Empty package clips are timeline placeholders (preview only).
@@ -762,7 +748,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "save_latent": bool(clip.get("save_latent", False)),
                 "images": _clip_image_refs(entries),
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
-                "ai_prompt": _strip_comment_lines(clip.get("ai_prompt") or "").strip(),
+                "detailed_description": _strip_comment_lines(
+                    clip.get("detailed_description") or clip.get("ai_prompt") or ""
+                ).strip(),
                 "prompt_includes": prompt_includes,
                 "z_index": z_index,
                 "audios": self._audio_slices(
@@ -789,7 +777,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         run_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         data_json = json.dumps({
             "project_version": PROJECT_VERSION,
-            "schema_version": PROJECT_VERSION,
+            "schema_version": SCHEMA_VERSION,
             "fps": fps,
             "width": width,
             "height": height,

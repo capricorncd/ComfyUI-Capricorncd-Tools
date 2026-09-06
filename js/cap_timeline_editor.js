@@ -326,8 +326,8 @@ function markNoSerialize(node) {
             if (w.element) w.element.style.display = "none";
             w.computeSize = () => [0, -4];
         }
-        if (w.name === "project_json" || w.name === "project_version") {
-            if (w.name === "project_version") w.serialize = false;
+        if (w.name === "project_json" || w.name === "project_version" || w.name === "schema_version") {
+            if (w.name === "project_version" || w.name === "schema_version") w.serialize = false;
             if (w.element) w.element.style.display = "none";
             w.computeSize = () => [0, -4];
         }

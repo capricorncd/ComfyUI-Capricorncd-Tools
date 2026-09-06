@@ -114,7 +114,7 @@
 | `images` | IMAGE | 片段全部静帧组成的 IMAGE 批次 |
 | `clip_role` | STRING | 片段类型（供 Agent） |
 | `agent` | STRING | Agent id |
-| `ai_prompt` | STRING | 片段 AI 提示词 |
+| `detailed_description` | STRING | MiniMax H3 的 `detailed_description` 文本 |
 | `clip_json` | STRING | 自包含片段 JSON：含 `fps`、`global_prompt`，以及 `images` / `videos` 绝对 `file` 路径、已解析的 `audios`、内嵌 `materials` |
 
 `clip_json` 供 [MiniMaxH3](minimax-h3.md) 等节点直接使用，无需再接完整 `data_json` + `index`。

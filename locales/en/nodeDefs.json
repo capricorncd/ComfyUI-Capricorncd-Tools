@@ -199,8 +199,8 @@
       "agent": {
         "name": "Agent"
       },
-      "ai_prompt": {
-        "name": "AI Prompt"
+      "detailed_description": {
+        "name": "Detailed description"
       },
       "clip_json": {
         "name": "Clip JSON"

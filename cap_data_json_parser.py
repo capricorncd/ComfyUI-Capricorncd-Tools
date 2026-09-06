@@ -47,7 +47,7 @@ class CAP_DataJsonClipParser:
         "images",
         "clip_role",
         "agent",
-        "ai_prompt",
+        "detailed_description",
         "clip_json",
         "second_sample",
         "output_video",
@@ -62,7 +62,7 @@ class CAP_DataJsonClipParser:
         "run_timestamp, generate_preview_video, FROM_ tags, seq_filename_prefix "
         "(run_timestamp/from_start or run_timestamp/index) for Seq To Video, "
         "images (all clip images in editor order as one IMAGE batch), "
-        "clip_role, agent, ai_prompt, clip_json (self-contained clip with resolved "
+        "clip_role, agent, detailed_description, clip_json (self-contained clip with resolved "
         "image/video file paths and embedded materials), second_sample, output_video "
         "(CapTimelineEditor-specified save path when enabled), save_latent "
         "(whether to run H3 Motion Context Save Latent for this clip), and "
@@ -161,9 +161,6 @@ class CAP_DataJsonClipParser:
     def _clip_use_global_prompt(self, clip: dict) -> bool:
         return "global" in self._clip_prompt_includes(clip)
 
-    def _clip_use_ai_prompt(self, clip: dict) -> bool:
-        return "ai" in self._clip_prompt_includes(clip)
-
     def _strip_comment_lines(self, text: str) -> str:
         return "\n".join(
             line for line in str(text or "").split("\n")
@@ -192,7 +189,9 @@ class CAP_DataJsonClipParser:
             "global": self._strip_comment_lines(global_prompt).strip(),
             "style": self._strip_comment_lines(style_prompt).strip(),
             "clip": self._strip_comment_lines(clip.get("prompt") or "").strip(),
-            "ai": self._strip_comment_lines(clip.get("ai_prompt") or "").strip(),
+            "detailed_description": self._strip_comment_lines(
+                clip.get("detailed_description") or clip.get("ai_prompt") or ""
+            ).strip(),
             "media": "\n\n".join(media_parts),
             "non_diegetic_music": self._strip_comment_lines(non_diegetic_music).strip(),
             "negative": self._strip_comment_lines(negative_prompt).strip(),
@@ -203,6 +202,8 @@ class CAP_DataJsonClipParser:
                 continue
             text = texts.get(key) or ""
             if text:
+                if key == "detailed_description" and not text.lstrip().startswith("detailed_description:"):
+                    text = f"detailed_description:\n\n{text}"
                 parts.append(text)
         return "\n\n".join(part for part in parts if part)
 
@@ -601,7 +602,9 @@ class CAP_DataJsonClipParser:
         images = self._load_images_batch(refs, materials, blank)
         clip_role = str(clip.get("clip_role") or "multi_ref").strip() or "multi_ref"
         agent = str(clip.get("agent") or "MiniMaxH3").strip() or "MiniMaxH3"
-        ai_prompt = self._strip_comment_lines(clip.get("ai_prompt") or "").strip()
+        detailed_description = self._strip_comment_lines(
+            clip.get("detailed_description") or clip.get("ai_prompt") or ""
+        ).strip()
         clip_json = self._build_clip_json(
             clip,
             materials,
@@ -628,7 +631,7 @@ class CAP_DataJsonClipParser:
             images,
             clip_role,
             agent,
-            ai_prompt,
+            detailed_description,
             clip_json,
             second_sample,
             output_video,

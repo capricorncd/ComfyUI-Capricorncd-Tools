@@ -868,7 +868,7 @@ def _file_label(index: int, kind: str, row: dict) -> str:
     tags = (row or {}).get("tags") if isinstance((row or {}).get("tags"), list) else []
     tags = [str(tag).strip() for tag in tags if str(tag).strip()]
     meta = ", ".join(part for part in [media_type, *tags] if part)
-    prompt = str((row or {}).get("prompt") or "").strip()
+    prompt = str((row or {}).get("setting_description") or (row or {}).get("prompt") or "").strip()
     bits = [tag]
     if name:
         bits.append(name)

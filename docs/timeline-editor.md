@@ -147,7 +147,7 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 
 ## `project_json` (editable)
 
-Full project document stored on the node widget. Current shape is **`schema_version: 2`** (integer; independent of the Python package `project_version`). Older documents (schema 1 or top-level `resources`) are migrated to schema 2 on load.
+Full project document stored on the node widget. Current shape is **`schema_version: 3`** (integer; independent of the Python package `project_version`), sourced from `[tool.capricorncd].schema_version` in `pyproject.toml`. Older documents are migrated on load. A structured MiniMax H3 value in schema 2 `ai_prompt` is split between `prompt` and `detailed_description`; unstructured values become `detailed_description`.
 
 Normally owned by the fullscreen editor — you do not edit it by hand. The tables and example below match what the editor writes via `_buildProject()`.
 
@@ -156,9 +156,9 @@ Normally owned by the fullscreen editor — you do not edit it by hand. The tabl
 | Field | Type | Description |
 |-------|------|-------------|
 | `project_version` | string | Package version string (e.g. `"0.x.y"`), refreshed on save |
-| `schema_version` | int | Document shape version; currently `2` |
+| `schema_version` | int | Document shape version; currently `3` |
 | `name` | string | Project name |
-| `media` | array | Media catalog (schema 2); clips reference entries by `media_ids` |
+| `media` | array | Media catalog; clips reference entries by `media_ids` |
 | `settings` | object | Project settings (global prompt, watermark, timeline view state, …) |
 | `tracks` | array | Tracks in `order` |
 
@@ -174,9 +174,13 @@ Legacy `resources` is migration input only and is not written back.
 | `location` | string | Usually `"input"` |
 | `name` | string | Display name |
 | `prompt` | string | Per-media prompt |
+| `generation_prompt` | string | Complete prompt originally used to generate the image; empty when unavailable |
+| `setting_description` | string | Character, object, or scene reference-sheet description; empty when unavailable |
 | `media_type` | string | Asset-type tag (character / scene / prop / other, or empty) |
 | `tags` | string[] | Tags |
 | `stars` | int? | 1–5; omitted when unrated |
+
+When an imported image contains supported `ImageAssetMetadata`, the editor copies its generation prompt and setting description into these fields. Missing metadata remains empty and is not reconstructed.
 
 ### `settings`
 
@@ -184,6 +188,7 @@ Legacy `resources` is migration input only and is not written back.
 |-------|------|-------------|
 | `fps` / `width` / `height` | number | Cached copies of node scalars |
 | `global_prompt` | string | Global prompt |
+| `non_diegetic_music` | string | Combined MiniMax H3 `overall_soundscape` and `non_diegetic_music` sections, including both headings; no outer default prefix |
 | `timeline_zoom` | number | Timeline zoom |
 | `current_time` | number | Playhead time (seconds) |
 | `timeline_scroll_left` / `timeline_scroll_top` | number | Timeline scroll |
@@ -241,8 +246,9 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 | `media_ids` | Ordered refs into `media[].id` |
 | `source` | Optional; video trim: `in_ms` / `out_ms` / `duration_ms` |
 | `name` | Title |
-| `prompt` / `ai_prompt` | Keyframe prompt / AI result |
-| `use_global_prompt` / `use_ai_prompt` | Use global prompt / AI result |
+| `prompt` | Clip prompt. MiniMax H3 projects store `subject_definitions`, `summary`, and `retention_analysis` here |
+| `detailed_description` | MiniMax H3 `detailed_description` body |
+| `prompt_includes` | Ordered prompt parts, such as `global`, `clip`, `detailed_description`, and `media` |
 | `use_media_prompts` | bool[] aligned with `media_ids` |
 | `media_enabled` | bool[] aligned with `media_ids` |
 | `head_extend_sec` / `tail_extend_sec` | Head / tail extend (seconds) |
@@ -281,12 +287,22 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 | `v_align` | `top` / `middle` / `bottom` |
 | `offset_x` / `offset_y` | Percent offsets vs canvas |
 
-### Example (schema 2, illustrative)
+### MiniMax H3 project-generation contract
+
+MV and motion-comic project generators must split each MiniMax H3 result as follows:
+
+- All project-level prompts are complete values written directly to their canonical `settings` fields. Project generators must not emit separate `*_prefix_line` fields; any required heading belongs inside the prompt value.
+- `prompt`: the complete `subject_definitions`, `summary`, and `retention_analysis` sections, including their headings.
+- `detailed_description`: the body only, without another `detailed_description:` heading or any other structured section. The runtime prompt composer adds the heading when needed.
+- `settings.non_diegetic_music`: store both complete sound sections in one string: `overall_soundscape: ...`, then `non_diegetic_music: ...`. Do not add another outer prefix.
+- `prompt_includes`: include both `clip` and `detailed_description` when both should be sent to the model.
+
+### Example (schema 3, illustrative)
 
 ```json
 {
   "project_version": "0.x.y",
-  "schema_version": 2,
+  "schema_version": 3,
   "name": "Untitled",
   "media": [
     {
@@ -296,6 +312,8 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
       "location": "input",
       "name": "shot01.png",
       "prompt": "",
+      "generation_prompt": "full prompt originally used to generate shot01.png",
+      "setting_description": "Character reference description and consistency constraints",
       "media_type": "character",
       "tags": [],
       "stars": 3
@@ -306,6 +324,7 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
     "width": 1344,
     "height": 768,
     "global_prompt": "cinematic lighting",
+    "non_diegetic_music": "overall_soundscape:\nWind and cloth movement.\n\nnon_diegetic_music:\nN/A",
     "timeline_zoom": 1.2,
     "current_time": 0,
     "timeline_scroll_left": 0,
@@ -349,10 +368,9 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
           "duration_ms": 5000,
           "media_ids": ["md_abc123"],
           "name": "Clip",
-          "prompt": "close up",
-          "ai_prompt": "",
-          "use_global_prompt": true,
-          "use_ai_prompt": true,
+          "prompt": "subject_definitions:\n<Picture 1>: the character reference\n\nsummary: [reference generation] The character performs on stage.\n\nretention_analysis:\n<Picture 1>: fully_preserved",
+          "detailed_description": "[Shot 1] The camera slowly pushes toward the performer as she plays in time with the music.",
+          "prompt_includes": ["global", "clip", "detailed_description", "media"],
           "use_media_prompts": [true],
           "media_enabled": [true],
           "head_extend_sec": 0,
@@ -430,7 +448,7 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 ```json
 {
   "project_version": "x.y.z",
-  "schema_version": "x.y.z",
+  "schema_version": 3,
   "fps": 24.0,
   "width": 1344,
   "height": 768,

@@ -145,7 +145,7 @@
 
 ## `project_json`（可编辑）
 
-编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 2`**（整数，与 Python 包版本 `project_version` 无关）。加载时若遇到旧版（schema 1 或顶层 `resources`），会自动迁移到 schema 2。
+编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 3`**（整数，与 Python 包版本 `project_version` 无关），唯一版本值来自 `pyproject.toml` 的 `[tool.capricorncd].schema_version`。加载旧工程时会自动迁移：schema 2 中结构完整的 MiniMax H3 `ai_prompt` 会拆分写入 `prompt` 和 `detailed_description`，非结构化内容则写入 `detailed_description`。
 
 通常由全屏编辑器读写，一般无需手改；下表与示例对应编辑器 `_buildProject()` 的写出格式。
 
@@ -154,9 +154,9 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `project_version` | string | 包版本字符串（如 `"0.x.y"`），写入时刷新 |
-| `schema_version` | int | 文档形状版本，现为 `2` |
+| `schema_version` | int | 文档形状版本，现为 `3` |
 | `name` | string | 项目名称 |
-| `media` | array | 素材目录（schema 2）；clip 用 `media_ids` 引用其中的 `id` |
+| `media` | array | 素材目录；clip 用 `media_ids` 引用其中的 `id` |
 | `settings` | object | 工程设置（含全局提示词、水印、时间轴视图状态等） |
 | `tracks` | array | 轨道列表（按 `order` 排列） |
 
@@ -172,9 +172,13 @@
 | `location` | string | 通常为 `"input"` |
 | `name` | string | 显示名 |
 | `prompt` | string | 素材级提示词 |
+| `generation_prompt` | string | 生成该图片时实际使用的完整提示词；无法读取时为空 |
+| `setting_description` | string | 人物、物品或场景设定图描述与一致性约束；无法读取时为空 |
 | `media_type` | string | 资产类型标签（如 character / scene / prop / other，可空） |
 | `tags` | string[] | 标签 |
 | `stars` | int? | 1–5；未评分时省略 |
+
+导入图片包含受支持的 `ImageAssetMetadata` 时，编辑器会把其中的生成提示词和设定描述写入上述字段；元数据缺失时保持为空，不会猜测或重建原始提示词。
 
 ### `settings`
 
@@ -182,6 +186,7 @@
 |------|------|------|
 | `fps` / `width` / `height` | number | 与节点标量同步的缓存副本 |
 | `global_prompt` | string | 全局提示词 |
+| `non_diegetic_music` | string | 合并保存 MiniMax H3 的 `overall_soundscape` 与 `non_diegetic_music` 两段，保留两个标题，不添加外层默认前缀 |
 | `timeline_zoom` | number | 时间轴缩放 |
 | `current_time` | number | 播放头时间（秒） |
 | `timeline_scroll_left` / `timeline_scroll_top` | number | 时间轴滚动位置 |
@@ -239,8 +244,9 @@
 | `media_ids` | 有序引用 `media[].id`（多参考图 / 首尾帧 / 视频等） |
 | `source` | 可选；视频等含 `in_ms` / `out_ms` / `duration_ms`（源内裁剪） |
 | `name` | 标题 |
-| `prompt` / `ai_prompt` | 关键帧提示词 / AI 优化结果 |
-| `use_global_prompt` / `use_ai_prompt` | 是否拼全局提示词 / 是否用 AI 结果 |
+| `prompt` | Clip 提示词；MiniMax H3 工程在这里保存 `subject_definitions`、`summary`、`retention_analysis` |
+| `detailed_description` | MiniMax H3 的 `detailed_description` 正文 |
+| `prompt_includes` | 提示词拼接顺序，例如 `global`、`clip`、`detailed_description`、`media` |
 | `use_media_prompts` | 与 `media_ids` 等长的 bool[]：是否用对应素材 prompt |
 | `media_enabled` | 与 `media_ids` 等长的 bool[]：该槽位是否启用 |
 | `head_extend_sec` / `tail_extend_sec` | 首 / 尾扩展秒数 |
@@ -279,12 +285,22 @@
 | `v_align` | `top` / `middle` / `bottom` |
 | `offset_x` / `offset_y` | 相对画布的百分比偏移 |
 
-### 示例（schema 2，字段示意）
+### MiniMax H3 项目生成规范
+
+MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
+
+- 所有工程级提示词都必须作为完整内容直接写入对应的 `settings` 字段。工程生成器不得写出独立的 `*_prefix_line` 字段；模型需要的标题或前缀应包含在提示词正文中。
+- `prompt`：完整写入 `subject_definitions`、`summary`、`retention_analysis` 三段，并保留段落标题。
+- `detailed_description`：只写正文，不得再次包含 `detailed_description:` 标题或其他结构段；运行时拼接器会在需要时补上标题。
+- `settings.non_diegetic_music`：在一个字符串内完整保存两个声音段落，先写 `overall_soundscape: ...`，再写 `non_diegetic_music: ...`，不再添加外层前缀。
+- `prompt_includes`：需要同时送入模型时，必须包含 `clip` 与 `detailed_description`。
+
+### 示例（schema 3，字段示意）
 
 ```json
 {
   "project_version": "0.x.y",
-  "schema_version": 2,
+  "schema_version": 3,
   "name": "未命名项目",
   "media": [
     {
@@ -294,6 +310,8 @@
       "location": "input",
       "name": "shot01.png",
       "prompt": "",
+      "generation_prompt": "生成 shot01.png 时实际使用的完整提示词",
+      "setting_description": "人物设定描述与一致性约束",
       "media_type": "character",
       "tags": [],
       "stars": 3
@@ -304,6 +322,7 @@
     "width": 1344,
     "height": 768,
     "global_prompt": "cinematic lighting",
+    "non_diegetic_music": "overall_soundscape:\n风声与衣料摩擦声。\n\nnon_diegetic_music:\nN/A",
     "timeline_zoom": 1.2,
     "current_time": 0,
     "timeline_scroll_left": 0,
@@ -347,10 +366,9 @@
           "duration_ms": 5000,
           "media_ids": ["md_abc123"],
           "name": "Clip",
-          "prompt": "close up",
-          "ai_prompt": "",
-          "use_global_prompt": true,
-          "use_ai_prompt": true,
+          "prompt": "subject_definitions:\n<Picture 1>: 角色参考图\n\nsummary: [reference generation] 角色在舞台上演奏。\n\nretention_analysis:\n<Picture 1>: fully_preserved",
+          "detailed_description": "[Shot 1] 镜头缓慢推近，角色按照音乐节奏演奏。",
+          "prompt_includes": ["global", "clip", "detailed_description", "media"],
           "use_media_prompts": [true],
           "media_enabled": [true],
           "head_extend_sec": 0,
@@ -428,7 +446,7 @@
 ```json
 {
   "project_version": "x.y.z",
-  "schema_version": "x.y.z",
+  "schema_version": 3,
   "fps": 24.0,
   "width": 1344,
   "height": 768,

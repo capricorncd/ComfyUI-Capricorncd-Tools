@@ -31,10 +31,7 @@
 
 ## 提示词
 
-| 优先级 | 来源 |
-|--------|------|
-| 1 | 片段启用 AI 提示词时使用 AI 提示词 |
-| 2 | 否则：启用的媒体提示词行（`<Picture n>` / `<Video n>` / `<Audio n>`），再接全局提示词（若 Use Global），再接片段关键帧提示词 |
+提示词按 `settings.prompt_concat_order` 的顺序，从 clip 的 `prompt_includes` 所启用部分进行拼接。MiniMax H3 工程中，`clip.prompt` 保存 `subject_definitions`、`summary`、`retention_analysis`，`clip.detailed_description` 保存镜头描述；如果后者只保存正文，拼接器会自动补上 `detailed_description:` 标题。
 
 ---
 

@@ -12,10 +12,10 @@ def _strip_comment_lines(text: str) -> str:
     )
 
 
-_PROMPT_PART_KEYS = ("global", "style", "clip", "ai", "media", "non_diegetic_music", "negative")
+_PROMPT_PART_KEYS = ("global", "style", "clip", "detailed_description", "media", "non_diegetic_music", "negative")
 _PROMPT_PART_KEY_SET = set(_PROMPT_PART_KEYS)
 _DEFAULT_PROMPT_CONCAT_ORDER = list(_PROMPT_PART_KEYS)
-_DEFAULT_PROMPT_INCLUDES = ["global", "clip", "ai"]
+_DEFAULT_PROMPT_INCLUDES = ["global", "clip", "detailed_description"]
 # Back-compat alias
 _PROMPT_INCLUDE_KEYS = _PROMPT_PART_KEYS
 _PROMPT_INCLUDE_KEY_SET = _PROMPT_PART_KEY_SET
@@ -47,21 +47,23 @@ def _clip_prompt_includes(clip: dict) -> list[str]:
         seen: set[str] = set()
         for value in raw:
             key = str(value or "").strip()
+            if key == "ai":
+                key = "detailed_description"
             if key not in _PROMPT_PART_KEY_SET or key in seen:
                 continue
             seen.add(key)
         if migrate:
-            has_new = ("clip" in seen) or ("ai" in seen)
+            has_new = ("clip" in seen) or ("detailed_description" in seen)
             if not has_new:
                 seen.add("clip")
                 if clip.get("use_ai_prompt", True) is not False:
-                    seen.add("ai")
+                    seen.add("detailed_description")
             else:
                 if "use_ai_prompt" in clip:
                     if clip.get("use_ai_prompt") is False:
-                        seen.discard("ai")
+                        seen.discard("detailed_description")
                     else:
-                        seen.add("ai")
+                        seen.add("detailed_description")
             if "use_global_prompt" in clip:
                 if clip.get("use_global_prompt"):
                     seen.add("global")
@@ -73,7 +75,7 @@ def _clip_prompt_includes(clip: dict) -> list[str]:
         out.append("global")
     out.append("clip")
     if clip.get("use_ai_prompt", True) is not False:
-        out.append("ai")
+        out.append("detailed_description")
     return out
 
 
