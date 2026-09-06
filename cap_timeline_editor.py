@@ -25,6 +25,19 @@ def _setting_prompt(settings: dict, key: str) -> str:
     return _strip_comment_lines(settings.get(key) or "").strip()
 
 
+_TIMELINE_PROMPT_PART_KEYS = ("clip", "detailed_description", "media")
+
+
+def _timeline_prompt_includes(clip: dict) -> list[str]:
+    includes = set(_clip_prompt_includes(clip))
+    return [key for key in _TIMELINE_PROMPT_PART_KEYS if key in includes]
+
+
+def _timeline_prompt_concat_order(raw) -> list[str]:
+    order = _normalize_prompt_concat_order(raw)
+    return [key for key in order if key in _TIMELINE_PROMPT_PART_KEYS]
+
+
 def _safe_filename_part(value, fallback: str = "Untitled") -> str:
     text = str(value or "").strip()
     out = []
@@ -198,7 +211,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
 
     RETURN_TYPES = ("FLOAT", "INT", "INT", "STRING", "STRING", "INT", "INT", "AUDIO", "STRING")
     RETURN_NAMES = (
-        "fps", "width", "height", "global_prompt", "data_json",
+        "fps", "width", "height", "prepend_prompt", "data_json",
         "clips_length", "total_frame_count", "clips_audio", "frame_seq_dir",
     )
     FUNCTION = "execute"
@@ -627,11 +640,9 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         fps = max(1.0, float(fps))
         width = max(1, int(width))
         height = max(1, int(height))
-        global_prompt = _setting_prompt(settings, "global_prompt")
-        style_prompt = _setting_prompt(settings, "style_prompt")
-        non_diegetic_music = _setting_prompt(settings, "non_diegetic_music")
-        negative_prompt = _setting_prompt(settings, "negative_prompt")
-        prompt_concat_order = _normalize_prompt_concat_order(settings.get("prompt_concat_order"))
+        prepend_prompt = _setting_prompt(settings, "prepend_prompt")
+        append_prompt = _setting_prompt(settings, "append_prompt")
+        prompt_concat_order = _timeline_prompt_concat_order(settings.get("prompt_concat_order"))
         use_clip_video_name = settings.get("use_clip_specified_video_filename", True) is not False
         gen_video_stamp = str(settings.get("gen_video_stamp") or "").strip()
         if not gen_video_stamp:
@@ -734,7 +745,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             clip_role, clip_role_custom = _clip_role_fields(clip)
             agent, agent_custom = _clip_agent_fields(clip)
             source_clip_id = str(clip.get("id", ""))
-            prompt_includes = _clip_prompt_includes(clip)
+            prompt_includes = _timeline_prompt_includes(clip)
             runtime_row = {
                 "id": f"runtime_{len(runtime_clips) + 1:04d}",
                 "source_clip_id": source_clip_id,
@@ -789,10 +800,8 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "fps": fps,
             "width": width,
             "height": height,
-            "global_prompt": global_prompt,
-            "style_prompt": style_prompt,
-            "non_diegetic_music": non_diegetic_music,
-            "negative_prompt": negative_prompt,
+            "prepend_prompt": prepend_prompt,
+            "append_prompt": append_prompt,
             "prompt_concat_order": prompt_concat_order,
             "total_frame_count": total_frame_count,
             "run_timestamp": run_timestamp,
@@ -801,7 +810,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         }, ensure_ascii=False)
 
         return (
-            fps, width, height, global_prompt, data_json, len(runtime_clips),
+            fps, width, height, prepend_prompt, data_json, len(runtime_clips),
             total_frame_count, clips_audio_out, frame_seq_dir,
         )
 

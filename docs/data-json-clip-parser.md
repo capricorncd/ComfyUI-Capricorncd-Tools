@@ -13,7 +13,7 @@ Parses the `data_json` output from **Audio Timeline** or **Timeline Editor** and
 - The corresponding audio for this clip
 - The frame count at the timeline FPS
 - The start and end keyframe images
-- The effective prompt (per-clip if set, otherwise the global prompt)
+- The effective prompt assembled according to the source format
 
 The node auto-detects which upstream format produced the JSON:
 
@@ -22,7 +22,7 @@ The node auto-detects which upstream format produced the JSON:
 | **Audio Timeline** | Trims from the single `audio_path` using `trim_start_ms` + clip offsets |
 | **Timeline Editor** | Loads and mixes each entry in the clip's `audios[]` slice list |
 
-Both formats share the same clip fields used for images, timing, and prompts (`start_ms`, `end_ms`, `start_image`, `end_image`, `prompt`, `use_global_prompt`).
+Both formats share the main image and timing fields. Audio Timeline retains its legacy `global_prompt` / `use_global_prompt` behavior; Timeline Editor uses fixed `prepend_prompt` and `append_prompt` fields around the enabled Clip prompt parts.
 
 ---
 
@@ -41,7 +41,8 @@ Top-level fields include `project_version`, `schema_version`, and no `audio_path
   "fps": 24.0,
   "width": 1344,
   "height": 768,
-  "global_prompt": "cinematic",
+  "prepend_prompt": "cinematic",
+  "append_prompt": "Negative: subtitles, logos, watermarks",
   "clips": [
     {
       "id": "runtime_0001",
@@ -50,7 +51,7 @@ Top-level fields include `project_version`, `schema_version`, and no `audio_path
       "start_image": "/absolute/path/to/start.jpg",
       "end_image": "/absolute/path/to/end.jpg",
       "prompt": "close up",
-      "use_global_prompt": true,
+      "prompt_includes": ["clip", "detailed_description", "media"],
       "audios": [
         {
           "file": "/absolute/path/to/voice.wav",

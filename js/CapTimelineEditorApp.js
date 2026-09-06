@@ -50,25 +50,20 @@ const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
 /** Must match CAP_TimelineEditor INPUT_TYPES defaults. */
-const PY_SCALAR_DEFAULTS = { fps: 24, width: 1344, height: 768, global_prompt: "" };
+const PY_SCALAR_DEFAULTS = { fps: 24, width: 1344, height: 768 };
 /** Project-level prompt text fields stored under settings. */
 const SETTING_PROMPT_KEYS = [
-    "global_prompt",
-    "style_prompt",
-    "non_diegetic_music",
-    "negative_prompt",
+    "prepend_prompt",
+    "append_prompt",
 ];
 /**
  * Prompt parts for clip.prompt_includes and settings.prompt_concat_order.
  * Order of this constant is the default concatenation order.
  */
-const PROMPT_PART_KEYS = ["global", "style", "clip", "detailed_description", "media", "non_diegetic_music", "negative"];
+const PROMPT_PART_KEYS = ["clip", "detailed_description", "media"];
 const PROMPT_PART_KEY_SET = new Set(PROMPT_PART_KEYS);
 const DEFAULT_PROMPT_CONCAT_ORDER = [...PROMPT_PART_KEYS];
-const DEFAULT_PROMPT_INCLUDES = ["global", "clip", "detailed_description"];
-/** @deprecated alias — prefer PROMPT_PART_KEYS */
-const PROMPT_INCLUDE_KEYS = PROMPT_PART_KEYS;
-const PROMPT_INCLUDE_KEY_SET = PROMPT_PART_KEY_SET;
+const DEFAULT_PROMPT_INCLUDES = ["clip", "detailed_description"];
 const WATERMARK_FIXED_POSITIONS = [
     "top-left", "top-center", "top-right",
     "bottom-left", "bottom-center", "bottom-right",
@@ -148,6 +143,49 @@ function splitH3ProjectPrompt(value) {
         detailedDescription: sections.detailed_description,
         soundAndMusic,
     };
+}
+
+function joinPromptParts(...values) {
+    const parts = [];
+    for (const value of values) {
+        const text = String(value || "").trim();
+        if (text && !parts.includes(text)) parts.push(text);
+    }
+    return parts.join("\n\n");
+}
+
+function legacySettingPrompt(settings, key) {
+    const text = String(settings[key] || "").trim();
+    let prefix = String(settings[`${key}_prefix_line`] || "").trim();
+    if (key === "non_diegetic_music" && prefix === "non_diegetic_music:") prefix = "";
+    if (key === "style_prompt" && [
+        "(填写MiniMax H3规范里的风格提示词英文：)",
+        "MiniMax H3规范里的风格提示词英文标题",
+    ].includes(prefix)) prefix = "Style opening:";
+    if (!text || !prefix || text.startsWith(prefix)) return text;
+    return `${prefix}\n\n${text}`;
+}
+
+function migrateProjectSettingPrompts(settings) {
+    settings.prepend_prompt = joinPromptParts(
+        settings.prepend_prompt,
+        settings.prefix_prompt,
+        settings.prompt_prefix,
+        legacySettingPrompt(settings, "global_prompt"),
+        legacySettingPrompt(settings, "style_prompt"),
+    );
+    settings.append_prompt = joinPromptParts(
+        settings.append_prompt,
+        settings.suffix_prompt,
+        settings.prompt_suffix,
+        legacySettingPrompt(settings, "non_diegetic_music"),
+        legacySettingPrompt(settings, "negative_prompt"),
+    );
+    for (const key of ["global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt"]) {
+        delete settings[key];
+        delete settings[`${key}_prefix_line`];
+    }
+    for (const key of ["prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix"]) delete settings[key];
 }
 
 function genVideoUid() {
@@ -334,7 +372,7 @@ function normalizePromptConcatOrder(raw) {
     return out;
 }
 
-function normalizePromptIncludes(raw, { useGlobalPrompt, useAiPrompt, migrateLegacyFlags = false } = {}) {
+function normalizePromptIncludes(raw, { useAiPrompt, migrateLegacyFlags = false } = {}) {
     if (Array.isArray(raw)) {
         const seen = new Set();
         for (const value of raw) {
@@ -353,14 +391,11 @@ function normalizePromptIncludes(raw, { useGlobalPrompt, useAiPrompt, migrateLeg
             } else if (useAiPrompt === false) {
                 seen.delete("detailed_description");
             }
-            if (useGlobalPrompt === true) seen.add("global");
-            if (useGlobalPrompt === false) seen.delete("global");
         }
         return PROMPT_PART_KEYS.filter((k) => seen.has(k));
     }
-    if (migrateLegacyFlags || useGlobalPrompt !== undefined || useAiPrompt !== undefined) {
+    if (migrateLegacyFlags || useAiPrompt !== undefined) {
         const out = [];
-        if (useGlobalPrompt !== false) out.push("global");
         out.push("clip");
         if (useAiPrompt !== false) out.push("detailed_description");
         return out;
@@ -373,20 +408,14 @@ function promptIncludesFromClipJson(c) {
     const migrateLegacyFlags = ("use_ai_prompt" in c) || ("use_global_prompt" in c);
     if (Array.isArray(c.prompt_includes)) {
         return normalizePromptIncludes(c.prompt_includes, {
-            useGlobalPrompt: c.use_global_prompt,
             useAiPrompt: c.use_ai_prompt,
             migrateLegacyFlags,
         });
     }
     return normalizePromptIncludes(null, {
-        useGlobalPrompt: c.use_global_prompt,
         useAiPrompt: c.use_ai_prompt,
         migrateLegacyFlags: true,
     });
-}
-
-function syncUseGlobalFromIncludes(includes) {
-    return Array.isArray(includes) && includes.includes("global");
 }
 
 function defaultImageMeta(trackIndex = 0) {
@@ -3150,36 +3179,20 @@ export class CapTimelineEditorApp {
                   </label>
                   <div class="cat-te-project-scalars" aria-label="${T("scalars_aria")}"></div>
                   <div class="cat-te-settings-prompts">
-                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="global_prompt">
+                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="prepend_prompt">
                       <div class="cat-te-prompt-label-row">
-                        <div class="cat-te-prompt-label">${T("global_prompt_label")}</div>
+                        <div class="cat-te-prompt-label">${T("prepend_prompt_label")}</div>
                       </div>
                       <div class="cat-te-prompt-input-wrap">
-                        <textarea class="cat-te-settings-prompt-input cat-te-global-prompt-input" data-setting-prompt-input="global_prompt" placeholder="${T("global_prompt_placeholder")}"></textarea>
+                        <textarea class="cat-te-settings-prompt-input cat-te-prepend-prompt-input" data-setting-prompt-input="prepend_prompt" placeholder="${T("prepend_prompt_placeholder")}"></textarea>
                       </div>
                     </div>
-                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="style_prompt">
+                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="append_prompt">
                       <div class="cat-te-prompt-label-row">
-                        <div class="cat-te-prompt-label">${T("style_prompt_label")}</div>
+                        <div class="cat-te-prompt-label">${T("append_prompt_label")}</div>
                       </div>
                       <div class="cat-te-prompt-input-wrap">
-                        <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="style_prompt" placeholder="${T("style_prompt_placeholder")}"></textarea>
-                      </div>
-                    </div>
-                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="non_diegetic_music">
-                      <div class="cat-te-prompt-label-row">
-                        <div class="cat-te-prompt-label">${T("non_diegetic_music_label")}</div>
-                      </div>
-                      <div class="cat-te-prompt-input-wrap">
-                        <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="non_diegetic_music" placeholder="${T("non_diegetic_music_placeholder")}"></textarea>
-                      </div>
-                    </div>
-                    <div class="cat-te-prompt-wrap cat-te-settings-prompt-wrap" data-setting-prompt="negative_prompt">
-                      <div class="cat-te-prompt-label-row">
-                        <div class="cat-te-prompt-label">${T("negative_prompt_label")}</div>
-                      </div>
-                      <div class="cat-te-prompt-input-wrap">
-                        <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="negative_prompt" placeholder="${T("negative_prompt_placeholder")}"></textarea>
+                        <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="append_prompt" placeholder="${T("append_prompt_placeholder")}"></textarea>
                       </div>
                     </div>
                     <div class="cat-te-prompt-order" aria-label="${T("prompt_concat_order_label")}">
@@ -3808,10 +3821,8 @@ export class CapTimelineEditorApp {
                     <button type="button" class="cat-te-ai-src-tab is-clip-scope is-active" data-src="detailed_description">${T("ai_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-clip-scope" data-src="clip">${T("clip_prompt_tab")}</button>
                     <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="media">${T("media_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="global">${T("global_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="style">${T("style_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="non_diegetic_music">${T("background_music_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="negative">${T("negative_prompt_tab")}</button>
+                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="prepend">${T("prepend_prompt_tab")}</button>
+                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="append">${T("append_prompt_tab")}</button>
                   </div>
                   <textarea class="cat-te-ai-src-text"></textarea>
                 </div>
@@ -3819,13 +3830,9 @@ export class CapTimelineEditorApp {
                   <div class="cat-te-prompt-includes" aria-label="${T("prompt_includes_label")}">
                     <div class="cat-te-prompt-includes-label">${T("prompt_includes_label")}</div>
                     <div class="cat-te-prompt-includes-chips" role="group">
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="global" title="${T("prompt_include_global_title")}">${T("prompt_include_global")}</button>
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="style" title="${T("prompt_include_style_title")}">${T("prompt_include_style")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="clip" title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="detailed_description" title="${T("prompt_include_ai_title")}">${T("prompt_include_ai")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="media" title="${T("prompt_include_media_title")}">${T("prompt_include_media")}</button>
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="non_diegetic_music" title="${T("prompt_include_music_title")}">${T("prompt_include_music")}</button>
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="negative" title="${T("prompt_include_negative_title")}">${T("prompt_include_negative")}</button>
                     </div>
                   </div>
                   <div class="cat-te-ai-field-row">
@@ -4054,7 +4061,6 @@ export class CapTimelineEditorApp {
         this.voAudiosList = el.querySelector(".cat-te-vo-audios-list");
         this.voAudioAddBtn = el.querySelector(".cat-te-vo-audio-add");
         this.voAudioEditBtn = el.querySelector(".cat-te-vo-audio-edit");
-        this.globalPromptInput = el.querySelector('[data-setting-prompt-input="global_prompt"]');
         this._settingPromptInputs = Object.fromEntries(
             SETTING_PROMPT_KEYS.map((key) => [key, el.querySelector(`[data-setting-prompt-input="${key}"]`)]),
         );
@@ -5434,13 +5440,22 @@ export class CapTimelineEditorApp {
         const schemaVersion = parseSchemaVersion(src);
         if (!Array.isArray(src.tracks)) src.tracks = [];
         if (!src.settings || typeof src.settings !== "object") src.settings = {};
-        for (const key of SETTING_PROMPT_KEYS) delete src.settings[`${key}_prefix_line`];
+        migrateProjectSettingPrompts(src.settings);
         src.name = String(src.name || T("untitled_project")).trim() || T("untitled_project");
         this._loadMediaStarsForDir();
         if (schemaVersion < 2) this._migrateProjectSchema1To2(src);
         else this._hydrateMediaCatalog(src);
         if (schemaVersion < 3) this._migrateProjectSchema2To3(src);
         this._normalizeH3PromptFields(src);
+        src.settings.prompt_concat_order = normalizePromptConcatOrder(src.settings.prompt_concat_order);
+        for (const track of src.tracks) {
+            for (const clip of track?.clips || []) {
+                if (!clip || typeof clip !== "object") continue;
+                clip.prompt_includes = promptIncludesFromClipJson(clip);
+                delete clip.use_global_prompt;
+                delete clip.use_ai_prompt;
+            }
+        }
         src.schema_version = this._currentSchemaVersion();
         src.project_version = this._currentVersion();
         return src;
@@ -5477,8 +5492,9 @@ export class CapTimelineEditorApp {
         const sound = String(text || "").trim();
         if (!sound) return;
         const settings = project.settings && typeof project.settings === "object" ? project.settings : (project.settings = {});
-        const current = String(settings.non_diegetic_music || "").trim();
-        if (!current) settings.non_diegetic_music = sound;
+        const current = String(settings.append_prompt || "").trim();
+        if (!current) settings.append_prompt = sound;
+        else if (!current.includes(sound)) settings.append_prompt = `${sound}\n\n${current}`;
     }
 
     _normalizeH3PromptFields(project) {
@@ -5491,6 +5507,11 @@ export class CapTimelineEditorApp {
                 if (!currentPrompt) clip.prompt = split.clipPrompt;
                 else if (!currentPrompt.includes(split.clipPrompt)) clip.prompt = `${split.clipPrompt}\n\n${currentPrompt}`;
                 clip.detailed_description = split.detailedDescription;
+                const includes = Array.isArray(clip.prompt_includes) ? clip.prompt_includes : [];
+                for (const key of ["clip", "detailed_description"]) {
+                    if (!includes.includes(key)) includes.push(key);
+                }
+                clip.prompt_includes = includes;
                 this._storeH3SoundAndMusic(project, split.soundAndMusic);
             }
         }
@@ -11804,6 +11825,7 @@ export class CapTimelineEditorApp {
         if (parsed.error || !parsed.project) return;
         const project = parsed.project;
         if (!project.settings || typeof project.settings !== "object") project.settings = {};
+        migrateProjectSettingPrompts(project.settings);
         project.settings.fps = Number(this._w("fps")?.value ?? PY_SCALAR_DEFAULTS.fps);
         project.settings.width = Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width);
         project.settings.height = Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height);
@@ -16203,7 +16225,7 @@ export class CapTimelineEditorApp {
         if (hasClip) {
             if (document.activeElement === this.projectNameInput) this.projectNameInput.blur();
         } else {
-            this._syncGlobalPromptInput();
+            this._syncSettingPromptInputs();
             this._syncProjectScalarDisplay();
         }
     }
@@ -16248,10 +16270,6 @@ export class CapTimelineEditorApp {
         return "";
     }
 
-    _readGlobalPrompt() {
-        return this._readSettingPrompt("global_prompt");
-    }
-
     _writeSettingPrompt(key, text) {
         const next = String(text ?? "");
         this._settingPromptSyncing = true;
@@ -16264,10 +16282,6 @@ export class CapTimelineEditorApp {
         } finally {
             this._settingPromptSyncing = false;
         }
-    }
-
-    _writeGlobalPrompt(text) {
-        this._writeSettingPrompt("global_prompt", text);
     }
 
     _syncSettingPromptInputs() {
@@ -16285,20 +16299,12 @@ export class CapTimelineEditorApp {
         }
     }
 
-    _syncGlobalPromptInput() {
-        this._syncSettingPromptInputs();
-    }
-
     _onSettingPromptInput(key) {
         if (this._settingPromptUndoArmed?.[key]) {
             this._recordUndo();
             this._settingPromptUndoArmed[key] = false;
         }
         this._writeSettingPrompt(key, this._settingPromptInputs?.[key]?.value ?? "");
-    }
-
-    _onGlobalPromptInput() {
-        this._onSettingPromptInput("global_prompt");
     }
 
     _parseExtendSec(input) {
@@ -16320,8 +16326,6 @@ export class CapTimelineEditorApp {
         const m = meta || this._ensureClipMeta(clip);
         const includes = normalizePromptIncludes(m.promptIncludes);
         const values = {
-            global: this._readSettingPrompt("global_prompt"),
-            style: this._readSettingPrompt("style_prompt"),
             clip: m.prompt,
             detailed_description: m.detailedDescription,
             media: this._clipItems(m)
@@ -16332,22 +16336,22 @@ export class CapTimelineEditorApp {
                 })
                 .filter(Boolean)
                 .join("\n\n"),
-            non_diegetic_music: this._readSettingPrompt("non_diegetic_music"),
-            negative: this._readSettingPrompt("negative_prompt"),
         };
         const parts = [];
+        const prepend = this._stripPromptComments(this._readSettingPrompt("prepend_prompt"));
+        if (prepend) parts.push(prepend);
         for (const key of this._getPromptConcatOrder()) {
             if (!includes.includes(key)) continue;
             const text = this._stripPromptComments(values[key]);
             if (!text) continue;
             if (key === "detailed_description" && !text.startsWith("detailed_description:")) {
                 parts.push(`detailed_description:\n\n${text}`);
-            } else if (key === "non_diegetic_music" && /^(?:overall_soundscape|non_diegetic_music)\s*:/i.test(text)) {
-                parts.push(text);
             } else {
                 parts.push(text);
             }
         }
+        const append = this._stripPromptComments(this._readSettingPrompt("append_prompt"));
+        if (append) parts.push(append);
         return parts.join("\n\n");
     }
 
@@ -16357,10 +16361,8 @@ export class CapTimelineEditorApp {
     }
 
     _promptManagerSettingKey(tab) {
-        if (tab === "global") return "global_prompt";
-        if (tab === "style") return "style_prompt";
-        if (tab === "non_diegetic_music") return "non_diegetic_music";
-        if (tab === "negative") return "negative_prompt";
+        if (tab === "prepend") return "prepend_prompt";
+        if (tab === "append") return "append_prompt";
         return null;
     }
 
@@ -16444,7 +16446,7 @@ export class CapTimelineEditorApp {
     }
 
     _setAiOptimizeSrcTab(tab) {
-        const allowed = new Set(["detailed_description", "clip", "media", "global", "style", "non_diegetic_music", "negative"]);
+        const allowed = new Set(["detailed_description", "clip", "media", "prepend", "append"]);
         const next = allowed.has(tab) ? tab : "detailed_description";
         this._aiOptimizeSrc = next;
         this.aiSrcTabs?.forEach((btn) => {
@@ -16695,9 +16697,7 @@ export class CapTimelineEditorApp {
                 lyrics: "",
                 duration_sec: Number(clip.duration) || 0,
                 clip_prompt: this._promptManagerValue(targetTab, clip),
-                global_prompt: normalizePromptIncludes(meta.promptIncludes).includes("global")
-                    ? this._readGlobalPrompt()
-                    : "",
+                global_prompt: this._readSettingPrompt("prepend_prompt"),
                 user_prompt: String(this.aiResultInput?.value || "").trim(),
                 files: this._clipAiOptimizeFiles(clip),
                 keep_loaded: false,
@@ -16724,8 +16724,10 @@ export class CapTimelineEditorApp {
                 meta.prompt = h3Sections.clipPrompt;
                 meta.detailedDescription = h3Sections.detailedDescription;
                 if (h3Sections.soundAndMusic) {
-                    const input = this._settingPromptInputs?.non_diegetic_music;
-                    if (input) setRichPromptValue(input, h3Sections.soundAndMusic, true);
+                    const input = this._settingPromptInputs?.append_prompt;
+                    if (input) {
+                        setRichPromptValue(input, joinPromptParts(h3Sections.soundAndMusic, input.value), true);
+                    }
                 }
                 this._meta.set(clip.id, meta);
                 this._refreshFinalPromptDisplay();
@@ -16874,23 +16876,17 @@ export class CapTimelineEditorApp {
             case "detailed_description": return T("ai_prompt_tab");
             case "clip": return T("clip_prompt_tab");
             case "media": return T("media_prompt_tab");
-            case "global": return T("global_prompt_tab");
-            case "style": return T("style_prompt_tab");
-            case "non_diegetic_music": return T("background_music_prompt_tab");
-            case "negative": return T("negative_prompt_tab");
+            case "prepend": return T("prepend_prompt_tab");
+            case "append": return T("append_prompt_tab");
             default: return key;
         }
     }
 
     _promptPartLabel(key) {
         switch (key) {
-            case "global": return T("prompt_include_global");
-            case "style": return T("prompt_include_style");
             case "clip": return T("prompt_include_clip");
             case "detailed_description": return T("prompt_include_ai");
             case "media": return T("prompt_include_media");
-            case "non_diegetic_music": return T("prompt_include_music");
-            case "negative": return T("prompt_include_negative");
             default: return key;
         }
     }
@@ -17530,7 +17526,7 @@ export class CapTimelineEditorApp {
             this._applyMediaCatalogFromProject(project);
             this.projectNameInput.value = String(project.name || T("untitled_project")).trim() || T("untitled_project");
             this._syncBrandProjectName();
-            const snapSettings = snapshot.project?.settings ?? {};
+            const snapSettings = project.settings ?? {};
             let wroteAnySettingPrompt = false;
             this._settingPromptSyncing = true;
             try {

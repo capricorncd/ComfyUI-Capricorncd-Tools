@@ -49,7 +49,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
 ### Inspector (right)
 
 - Selected clip thumbnails (start / end frame where applicable)
-- Per-clip **Keyframe Prompt** and **Use Global** checkbox
+- Per-clip prompt-part selection for Summary, Detailed description, and Asset prompts
 - **Generated videos** list (when the clip has any): enable checkbox, mute (same icons as track mute), open preview, delete with confirm
 - Shortcut reminders
 
@@ -60,7 +60,7 @@ Downstream [Data Json Clip Parser](data-json-clip-parser.md) accepts both format
   - Directory package or ZIP (all media + linked generated videos under `media/generated/` + `project.json`)
   - **Compose Video**: modal with `filename_prefix` (default `cap_timeline_compose/`), leaf name `projectName_yyyyMMdd_hhmmss.mp4`, and **Ignore audio tracks** (default off). When on, audio-track clips are skipped; unmuted generated-video audio is still mixed. ffmpeg writes under ComfyUI `output/`. Requires **ffmpeg** on `PATH`.
 - Header shows `时间轴编辑器 | 项目名称`; click the project name to focus the right-panel name field (clears clip selection). Node width × height and fps are shown on the right (header + project panel).
-- Global prompt lives only in the editor (right panel), not as a node widget.
+- Project-level Prepend and Append prompts live in the editor's right panel.
 - Close returns to the ComfyUI graph
 
 ### Clip context menu (visual)
@@ -136,7 +136,7 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 | `fps` | FLOAT | Frames per second |
 | `width` | INT | Video width |
 | `height` | INT | Video height |
-| `global_prompt` | STRING | Effective global prompt from the editor (`project_json.settings.global_prompt`) |
+| `prepend_prompt` | STRING | Prompt prepended to every enabled Clip prompt (`project_json.settings.prepend_prompt`) |
 | `data_json` | STRING | Runtime JSON for enabled visible segments only (see below) |
 | `clips_length` | INT | Number of runtime clips |
 | `total_frame_count` | INT | Sum of runtime clip frame counts at `fps` |
@@ -147,7 +147,7 @@ Disabled / hidden / muted clips are omitted from runtime `data_json`. Tracks tha
 
 ## `project_json` (editable)
 
-Full project document stored on the node widget. Current shape is **`schema_version: 3`** (integer; independent of the Python package `project_version`), sourced from `[tool.capricorncd].schema_version` in `pyproject.toml`. Older documents are migrated on load. A structured MiniMax H3 value in schema 2 `ai_prompt` is split between `prompt` and `detailed_description`; unstructured values become `detailed_description`.
+Full project document stored on the node widget. Current shape is **`schema_version: 3`** (integer; independent of the Python package `project_version`), sourced from `[tool.capricorncd].schema_version` in `pyproject.toml`. Older documents are migrated on load. Legacy `global_prompt` + `style_prompt` values migrate into `prepend_prompt`; `non_diegetic_music` + `negative_prompt` migrate into `append_prompt`. The aliases `prefix_prompt`, `prompt_prefix`, `suffix_prompt`, and `prompt_suffix` are accepted as migration input but are never written back. A structured MiniMax H3 value in schema 2 `ai_prompt` is split between `prompt` and `detailed_description`; unstructured values become `detailed_description`.
 
 Normally owned by the fullscreen editor — you do not edit it by hand. The tables and example below match what the editor writes via `_buildProject()`.
 
@@ -159,7 +159,7 @@ Normally owned by the fullscreen editor — you do not edit it by hand. The tabl
 | `schema_version` | int | Document shape version; currently `3` |
 | `name` | string | Project name |
 | `media` | array | Media catalog; clips reference entries by `media_ids` |
-| `settings` | object | Project settings (global prompt, watermark, timeline view state, …) |
+| `settings` | object | Project settings (prepend/append prompts, watermark, timeline view state, …) |
 | `tracks` | array | Tracks in `order` |
 
 Legacy `resources` is migration input only and is not written back.
@@ -187,8 +187,8 @@ When an imported image contains supported `ImageAssetMetadata`, the editor copie
 | Field | Type | Description |
 |-------|------|-------------|
 | `fps` / `width` / `height` | number | Cached copies of node scalars |
-| `global_prompt` | string | Global prompt |
-| `non_diegetic_music` | string | Combined MiniMax H3 `overall_soundscape` and `non_diegetic_music` sections, including both headings; no outer default prefix |
+| `prepend_prompt` | string | Complete prompt placed before the enabled Clip prompt parts; includes global and style requirements |
+| `append_prompt` | string | Complete prompt placed after the enabled Clip prompt parts; includes soundscape, BGM, and negative constraints |
 | `timeline_zoom` | number | Timeline zoom |
 | `current_time` | number | Playhead time (seconds) |
 | `timeline_scroll_left` / `timeline_scroll_top` | number | Timeline scroll |
@@ -248,7 +248,7 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 | `name` | Title |
 | `prompt` | Clip prompt. MiniMax H3 projects store `subject_definitions`, `summary`, and `retention_analysis` here |
 | `detailed_description` | MiniMax H3 `detailed_description` body |
-| `prompt_includes` | Ordered prompt parts, such as `global`, `clip`, `detailed_description`, and `media` |
+| `prompt_includes` | Ordered enabled Clip parts: `clip`, `detailed_description`, and/or `media` |
 | `use_media_prompts` | bool[] aligned with `media_ids` |
 | `media_enabled` | bool[] aligned with `media_ids` |
 | `head_extend_sec` / `tail_extend_sec` | Head / tail extend (seconds) |
@@ -291,10 +291,10 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 
 MV and motion-comic project generators must split each MiniMax H3 result as follows:
 
-- All project-level prompts are complete values written directly to their canonical `settings` fields. Project generators must not emit separate `*_prefix_line` fields; any required heading belongs inside the prompt value.
+- Project-level prompts use only `settings.prepend_prompt` and `settings.append_prompt`. The former contains global/style requirements and the latter contains soundscape, BGM, and negative constraints. Generators must not emit the legacy global prompt fields or separate `*_prefix_line` fields.
 - `prompt`: the complete `subject_definitions`, `summary`, and `retention_analysis` sections, including their headings.
 - `detailed_description`: the body only, without another `detailed_description:` heading or any other structured section. The runtime prompt composer adds the heading when needed.
-- `settings.non_diegetic_music`: store both complete sound sections in one string: `overall_soundscape: ...`, then `non_diegetic_music: ...`. Do not add another outer prefix.
+- `settings.append_prompt`: keep both complete sound sections in the appended value: `overall_soundscape: ...`, then `non_diegetic_music: ...`; negative constraints follow them.
 - `prompt_includes`: include both `clip` and `detailed_description` when both should be sent to the model.
 
 ### Example (schema 3, illustrative)
@@ -323,8 +323,8 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
     "fps": 24,
     "width": 1344,
     "height": 768,
-    "global_prompt": "cinematic lighting",
-    "non_diegetic_music": "overall_soundscape:\nWind and cloth movement.\n\nnon_diegetic_music:\nN/A",
+    "prepend_prompt": "cinematic lighting",
+    "append_prompt": "overall_soundscape:\nWind and cloth movement.\n\nnon_diegetic_music:\nN/A\n\nNegative: subtitles, logos, watermarks",
     "timeline_zoom": 1.2,
     "current_time": 0,
     "timeline_scroll_left": 0,
@@ -370,7 +370,7 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
           "name": "Clip",
           "prompt": "subject_definitions:\n<Picture 1>: the character reference\n\nsummary: [reference generation] The character performs on stage.\n\nretention_analysis:\n<Picture 1>: fully_preserved",
           "detailed_description": "[Shot 1] The camera slowly pushes toward the performer as she plays in time with the music.",
-          "prompt_includes": ["global", "clip", "detailed_description", "media"],
+          "prompt_includes": ["clip", "detailed_description", "media"],
           "use_media_prompts": [true],
           "media_enabled": [true],
           "head_extend_sec": 0,
@@ -452,7 +452,8 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
   "fps": 24.0,
   "width": 1344,
   "height": 768,
-  "global_prompt": "cinematic",
+  "prepend_prompt": "cinematic",
+  "append_prompt": "Negative: subtitles, logos, watermarks",
   "total_frame_count": 120,
   "run_prefix": "20260805_224215",
   "clips": [
@@ -465,7 +466,6 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
       "start_image": "/absolute/path/to/start.jpg",
       "end_image": "/absolute/path/to/end.jpg",
       "prompt": "close up",
-      "use_global_prompt": true,
       "z_index": 1,
       "audios": [
         {

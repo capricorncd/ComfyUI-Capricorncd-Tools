@@ -159,9 +159,6 @@ class CAP_DataJsonClipParser:
         from .cap_audio_timeline import _clip_prompt_includes
         return _clip_prompt_includes(clip)
 
-    def _clip_use_global_prompt(self, clip: dict) -> bool:
-        return "global" in self._clip_prompt_includes(clip)
-
     def _strip_comment_lines(self, text: str) -> str:
         return "\n".join(
             line for line in str(text or "").split("\n")
@@ -174,7 +171,8 @@ class CAP_DataJsonClipParser:
 
     def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None,
                         *, style_prompt: str = "", non_diegetic_music: str = "",
-                        negative_prompt: str = "", prompt_concat_order=None) -> str:
+                        negative_prompt: str = "", prompt_concat_order=None,
+                        prepend_prompt: str | None = None, append_prompt: str | None = None) -> str:
         includes = set(self._clip_prompt_includes(clip))
         order = self._normalize_prompt_concat_order(prompt_concat_order)
         materials = materials if isinstance(materials, dict) else {}
@@ -198,6 +196,12 @@ class CAP_DataJsonClipParser:
             "negative": self._strip_comment_lines(negative_prompt).strip(),
         }
         parts = []
+        if prepend_prompt is not None or append_prompt is not None:
+            prepend = self._strip_comment_lines(prepend_prompt or "").strip()
+            if prepend:
+                parts.append(prepend)
+            includes.intersection_update(("clip", "detailed_description", "media"))
+            order = [key for key in order if key in ("clip", "detailed_description", "media")]
         for key in order:
             if key not in includes:
                 continue
@@ -206,6 +210,10 @@ class CAP_DataJsonClipParser:
                 if key == "detailed_description" and not text.lstrip().startswith("detailed_description:"):
                     text = f"detailed_description:\n\n{text}"
                 parts.append(text)
+        if prepend_prompt is not None or append_prompt is not None:
+            append = self._strip_comment_lines(append_prompt or "").strip()
+            if append:
+                parts.append(append)
         return "\n\n".join(part for part in parts if part)
 
     def _ref_id(self, ref) -> str:
@@ -438,17 +446,29 @@ class CAP_DataJsonClipParser:
     def _build_clip_json(self, clip: dict, materials: dict, *, fps: float = 24.0,
                          global_prompt: str = "", style_prompt: str = "",
                          non_diegetic_music: str = "", negative_prompt: str = "",
-                         prompt_concat_order=None) -> str:
+                         prompt_concat_order=None, prepend_prompt: str | None = None,
+                         append_prompt: str | None = None) -> str:
         """Self-contained clip JSON: images/videos with absolute paths + embedded materials."""
         out = copy.deepcopy(clip) if isinstance(clip, dict) else {}
         # Carry project-level fields so clip_json alone is enough for MiniMaxH3 etc.
         out["fps"] = float(fps)
-        out["global_prompt"] = global_prompt if isinstance(global_prompt, str) else ""
-        out["style_prompt"] = style_prompt if isinstance(style_prompt, str) else ""
-        out["non_diegetic_music"] = non_diegetic_music if isinstance(non_diegetic_music, str) else ""
-        out["negative_prompt"] = negative_prompt if isinstance(negative_prompt, str) else ""
-        out["prompt_concat_order"] = self._normalize_prompt_concat_order(prompt_concat_order)
-        out["prompt_includes"] = self._clip_prompt_includes(out)
+        if prepend_prompt is not None or append_prompt is not None:
+            out["prepend_prompt"] = prepend_prompt if isinstance(prepend_prompt, str) else ""
+            out["append_prompt"] = append_prompt if isinstance(append_prompt, str) else ""
+            for key in ("global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt"):
+                out.pop(key, None)
+        else:
+            out["global_prompt"] = global_prompt if isinstance(global_prompt, str) else ""
+            out["style_prompt"] = style_prompt if isinstance(style_prompt, str) else ""
+            out["non_diegetic_music"] = non_diegetic_music if isinstance(non_diegetic_music, str) else ""
+            out["negative_prompt"] = negative_prompt if isinstance(negative_prompt, str) else ""
+        order = self._normalize_prompt_concat_order(prompt_concat_order)
+        includes = self._clip_prompt_includes(out)
+        if prepend_prompt is not None or append_prompt is not None:
+            order = [key for key in order if key in ("clip", "detailed_description", "media")]
+            includes = [key for key in includes if key in ("clip", "detailed_description", "media")]
+        out["prompt_concat_order"] = order
+        out["prompt_includes"] = includes
         images = []
         videos = []
         used_ids: list[str] = []
@@ -529,6 +549,15 @@ class CAP_DataJsonClipParser:
         style_prompt = data.get("style_prompt", "")
         non_diegetic_music = data.get("non_diegetic_music", "")
         negative_prompt = data.get("negative_prompt", "")
+        fixed_prompts = any(key in data for key in (
+            "prepend_prompt", "append_prompt", "prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix",
+        ))
+        prepend_prompt = (
+            data.get("prepend_prompt") or data.get("prefix_prompt") or data.get("prompt_prefix") or ""
+        ) if fixed_prompts else None
+        append_prompt = (
+            data.get("append_prompt") or data.get("suffix_prompt") or data.get("prompt_suffix") or ""
+        ) if fixed_prompts else None
         prompt_concat_order = data.get("prompt_concat_order")
         run_timestamp = str(data.get("run_timestamp") or data.get("run_prefix") or "").strip()
         materials = self._materials_by_id(data)
@@ -559,6 +588,8 @@ class CAP_DataJsonClipParser:
             non_diegetic_music=non_diegetic_music,
             negative_prompt=negative_prompt,
             prompt_concat_order=prompt_concat_order,
+            prepend_prompt=prepend_prompt,
+            append_prompt=append_prompt,
         )
         generate_preview_video = bool(clip.get("generate_preview_video", False))
         second_sample = bool(clip.get("second_sample", False))
@@ -619,6 +650,8 @@ class CAP_DataJsonClipParser:
             non_diegetic_music=non_diegetic_music,
             negative_prompt=negative_prompt,
             prompt_concat_order=prompt_concat_order,
+            prepend_prompt=prepend_prompt,
+            append_prompt=append_prompt,
         )
         output_video = str(clip.get("output_video") or "").strip().replace("\\", "/")
 

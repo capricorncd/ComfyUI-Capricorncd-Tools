@@ -123,8 +123,8 @@
       "height": {
         "name": "高さ"
       },
-      "global_prompt": {
-        "name": "グローバルプロンプト"
+      "prepend_prompt": {
+        "name": "前置プロンプト"
       },
       "data_json": {
         "name": "データ JSON"

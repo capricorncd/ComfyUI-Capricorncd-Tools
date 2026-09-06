@@ -47,7 +47,7 @@
 ### 检视面板（右侧）
 
 - 选中片段缩略图（适用时含首 / 尾帧）
-- 每片段 **Keyframe Prompt** 与 **Use Global**
+- 每片段可选择“摘要”“详细描述”和“素材”提示词部分
 - **生成视频**列表（有绑定时）：启用、禁音（图标与轨道禁音相同）、打开预览、删除（需确认）
 - 快捷键提示
 
@@ -58,7 +58,7 @@
   - 目录包与 ZIP（含全部素材 + Clip 关联的生成视频写入 `media/generated/` + `project.json`）
   - **合成视频**：弹窗设置 `filename_prefix`（默认 `cap_timeline_compose/`）、文件名 `项目名称_yyyyMMdd_hhmmss.mp4`，以及 **忽略音频轨道**（默认关）。开启后不合并音频轨上的 clip；未禁音的生成视频音轨仍会混入。ffmpeg 写入 ComfyUI `output/`。需要本机 **ffmpeg**。
 - 标题栏显示 `时间轴编辑器 | 项目名称`；点击项目名称可聚焦右侧栏名称输入（并取消 clip 选中）。节点宽高与帧率显示在右侧（标题栏右侧 + 项目面板）。
-- 全局提示词仅在编辑器右侧栏维护，节点上不再提供该控件。
+- 工程级“前置提示词”和“后置提示词”在编辑器右侧栏维护。
 - 关闭后返回 ComfyUI 画布
 
 ### Clip 右键菜单（视觉轨）
@@ -134,7 +134,7 @@
 | `fps` | FLOAT | 帧率 |
 | `width` | INT | 视频宽度 |
 | `height` | INT | 视频高度 |
-| `global_prompt` | STRING | 编辑器内全局提示词（`project_json.settings.global_prompt`） |
+| `prepend_prompt` | STRING | 固定拼接在每个启用 Clip 提示词之前（`project_json.settings.prepend_prompt`） |
 | `data_json` | STRING | 仅含启用且可见片段的运行时 JSON（见下文） |
 | `clips_length` | INT | 运行时片段数量 |
 | `total_frame_count` | INT | 按 `fps` 汇总的总帧数 |
@@ -145,7 +145,7 @@
 
 ## `project_json`（可编辑）
 
-编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 3`**（整数，与 Python 包版本 `project_version` 无关），唯一版本值来自 `pyproject.toml` 的 `[tool.capricorncd].schema_version`。加载旧工程时会自动迁移：schema 2 中结构完整的 MiniMax H3 `ai_prompt` 会拆分写入 `prompt` 和 `detailed_description`，非结构化内容则写入 `detailed_description`。
+编辑器保存到节点控件的**完整工程文档**。当前文档形状为 **`schema_version: 3`**（整数，与 Python 包版本 `project_version` 无关），唯一版本值来自 `pyproject.toml` 的 `[tool.capricorncd].schema_version`。加载旧工程时会自动迁移：`global_prompt` + `style_prompt` 合并进 `prepend_prompt`，`non_diegetic_music` + `negative_prompt` 合并进 `append_prompt`；`prefix_prompt`、`prompt_prefix`、`suffix_prompt`、`prompt_suffix` 只作为迁移别名读取，不再写出。schema 2 中结构完整的 MiniMax H3 `ai_prompt` 会拆分写入 `prompt` 和 `detailed_description`，非结构化内容则写入 `detailed_description`。
 
 通常由全屏编辑器读写，一般无需手改；下表与示例对应编辑器 `_buildProject()` 的写出格式。
 
@@ -157,7 +157,7 @@
 | `schema_version` | int | 文档形状版本，现为 `3` |
 | `name` | string | 项目名称 |
 | `media` | array | 素材目录；clip 用 `media_ids` 引用其中的 `id` |
-| `settings` | object | 工程设置（含全局提示词、水印、时间轴视图状态等） |
+| `settings` | object | 工程设置（含前置/后置提示词、水印、时间轴视图状态等） |
 | `tracks` | array | 轨道列表（按 `order` 排列） |
 
 旧字段 `resources` 仅作迁移输入，写出时不再保留。
@@ -185,8 +185,8 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `fps` / `width` / `height` | number | 与节点标量同步的缓存副本 |
-| `global_prompt` | string | 全局提示词 |
-| `non_diegetic_music` | string | 合并保存 MiniMax H3 的 `overall_soundscape` 与 `non_diegetic_music` 两段，保留两个标题，不添加外层默认前缀 |
+| `prepend_prompt` | string | 固定放在 Clip 启用提示词之前的完整内容，包含全局要求和风格提示词 |
+| `append_prompt` | string | 固定放在 Clip 启用提示词之后的完整内容，包含环境音效、BGM 和负面约束 |
 | `timeline_zoom` | number | 时间轴缩放 |
 | `current_time` | number | 播放头时间（秒） |
 | `timeline_scroll_left` / `timeline_scroll_top` | number | 时间轴滚动位置 |
@@ -246,7 +246,7 @@
 | `name` | 标题 |
 | `prompt` | Clip 提示词；MiniMax H3 工程在这里保存 `subject_definitions`、`summary`、`retention_analysis` |
 | `detailed_description` | MiniMax H3 的 `detailed_description` 正文 |
-| `prompt_includes` | 提示词拼接顺序，例如 `global`、`clip`、`detailed_description`、`media` |
+| `prompt_includes` | Clip 内启用的提示词部分：`clip`、`detailed_description` 和/或 `media` |
 | `use_media_prompts` | 与 `media_ids` 等长的 bool[]：是否用对应素材 prompt |
 | `media_enabled` | 与 `media_ids` 等长的 bool[]：该槽位是否启用 |
 | `head_extend_sec` / `tail_extend_sec` | 首 / 尾扩展秒数 |
@@ -289,10 +289,10 @@
 
 MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
 
-- 所有工程级提示词都必须作为完整内容直接写入对应的 `settings` 字段。工程生成器不得写出独立的 `*_prefix_line` 字段；模型需要的标题或前缀应包含在提示词正文中。
+- 工程级提示词只使用 `settings.prepend_prompt` 与 `settings.append_prompt`：前者写全局要求和风格提示词，后者写环境音效、BGM 与负面约束。生成器不得写出旧全局提示词字段或独立的 `*_prefix_line` 字段。
 - `prompt`：完整写入 `subject_definitions`、`summary`、`retention_analysis` 三段，并保留段落标题。
 - `detailed_description`：只写正文，不得再次包含 `detailed_description:` 标题或其他结构段；运行时拼接器会在需要时补上标题。
-- `settings.non_diegetic_music`：在一个字符串内完整保存两个声音段落，先写 `overall_soundscape: ...`，再写 `non_diegetic_music: ...`，不再添加外层前缀。
+- `settings.append_prompt`：在后置内容中完整保存两个声音段落，先写 `overall_soundscape: ...`，再写 `non_diegetic_music: ...`，之后写负面约束。
 - `prompt_includes`：需要同时送入模型时，必须包含 `clip` 与 `detailed_description`。
 
 ### 示例（schema 3，字段示意）
@@ -321,8 +321,8 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
     "fps": 24,
     "width": 1344,
     "height": 768,
-    "global_prompt": "cinematic lighting",
-    "non_diegetic_music": "overall_soundscape:\n风声与衣料摩擦声。\n\nnon_diegetic_music:\nN/A",
+    "prepend_prompt": "cinematic lighting",
+    "append_prompt": "overall_soundscape:\n风声与衣料摩擦声。\n\nnon_diegetic_music:\nN/A\n\nNegative: subtitles, logos, watermarks",
     "timeline_zoom": 1.2,
     "current_time": 0,
     "timeline_scroll_left": 0,
@@ -368,7 +368,7 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
           "name": "Clip",
           "prompt": "subject_definitions:\n<Picture 1>: 角色参考图\n\nsummary: [reference generation] 角色在舞台上演奏。\n\nretention_analysis:\n<Picture 1>: fully_preserved",
           "detailed_description": "[Shot 1] 镜头缓慢推近，角色按照音乐节奏演奏。",
-          "prompt_includes": ["global", "clip", "detailed_description", "media"],
+          "prompt_includes": ["clip", "detailed_description", "media"],
           "use_media_prompts": [true],
           "media_enabled": [true],
           "head_extend_sec": 0,
@@ -450,7 +450,8 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
   "fps": 24.0,
   "width": 1344,
   "height": 768,
-  "global_prompt": "cinematic",
+  "prepend_prompt": "cinematic",
+  "append_prompt": "Negative: subtitles, logos, watermarks",
   "total_frame_count": 120,
   "run_prefix": "20260805_224215",
   "clips": [
@@ -463,7 +464,6 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
       "start_image": "/absolute/path/to/start.jpg",
       "end_image": "/absolute/path/to/end.jpg",
       "prompt": "close up",
-      "use_global_prompt": true,
       "z_index": 1,
       "audios": [
         {

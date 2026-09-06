@@ -123,8 +123,8 @@
       "height": {
         "name": "高度"
       },
-      "global_prompt": {
-        "name": "全局提示词"
+      "prepend_prompt": {
+        "name": "前置提示词"
       },
       "data_json": {
         "name": "配置数据"

@@ -168,15 +168,98 @@ def migrate_project(project: dict) -> dict:
         _migrate_schema_1_to_2(out)
     if parse_schema_version(out) < 3:
         _migrate_schema_2_to_3(out)
+    _migrate_setting_prompts(out)
     _normalize_h3_prompt_fields(out)
-    settings = out.get("settings")
-    if isinstance(settings, dict):
-        for key in ("global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt"):
-            settings.pop(f"{key}_prefix_line", None)
+    _normalize_timeline_prompt_selection(out)
     _normalize_media_catalog(out)
     _ensure_clip_media_ids(out)
     out["schema_version"] = SCHEMA_VERSION
     return out
+
+
+def _join_prompt_parts(*values) -> str:
+    parts: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in parts:
+            parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _legacy_setting_prompt(settings: dict, key: str) -> str:
+    text = str(settings.get(key) or "").strip()
+    prefix = str(settings.get(f"{key}_prefix_line") or "").strip()
+    if key == "non_diegetic_music" and prefix == "non_diegetic_music:":
+        prefix = ""
+    if key == "style_prompt" and prefix in {
+        "(填写MiniMax H3规范里的风格提示词英文：)",
+        "MiniMax H3规范里的风格提示词英文标题",
+    }:
+        prefix = "Style opening:"
+    if not text or not prefix or text.startswith(prefix):
+        return text
+    return f"{prefix}\n\n{text}"
+
+
+def _migrate_setting_prompts(project: dict) -> None:
+    settings = project.setdefault("settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
+        project["settings"] = settings
+    settings["prepend_prompt"] = _join_prompt_parts(
+        settings.get("prepend_prompt"),
+        settings.get("prefix_prompt"),
+        settings.get("prompt_prefix"),
+        _legacy_setting_prompt(settings, "global_prompt"),
+        _legacy_setting_prompt(settings, "style_prompt"),
+    )
+    settings["append_prompt"] = _join_prompt_parts(
+        settings.get("append_prompt"),
+        settings.get("suffix_prompt"),
+        settings.get("prompt_suffix"),
+        _legacy_setting_prompt(settings, "non_diegetic_music"),
+        _legacy_setting_prompt(settings, "negative_prompt"),
+    )
+    for key in ("global_prompt", "style_prompt", "non_diegetic_music", "negative_prompt"):
+        settings.pop(key, None)
+        settings.pop(f"{key}_prefix_line", None)
+    for key in ("prefix_prompt", "prompt_prefix", "suffix_prompt", "prompt_suffix"):
+        settings.pop(key, None)
+
+
+def _normalize_timeline_prompt_selection(project: dict) -> None:
+    allowed = ("clip", "detailed_description", "media")
+    settings = project.get("settings")
+    if isinstance(settings, dict):
+        raw_order = settings.get("prompt_concat_order")
+        order = []
+        if isinstance(raw_order, list):
+            for value in raw_order:
+                key = "detailed_description" if str(value) == "ai" else str(value)
+                if key in allowed and key not in order:
+                    order.append(key)
+        settings["prompt_concat_order"] = order + [key for key in allowed if key not in order]
+    for track in project.get("tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        for clip in track.get("clips") or []:
+            if not isinstance(clip, dict):
+                continue
+            raw = clip.get("prompt_includes")
+            selected = set()
+            if isinstance(raw, list):
+                for value in raw:
+                    key = "detailed_description" if str(value) == "ai" else str(value)
+                    if key in allowed:
+                        selected.add(key)
+                includes = [key for key in allowed if key in selected]
+            else:
+                includes = ["clip"]
+                if clip.get("use_ai_prompt", True) is not False:
+                    includes.append("detailed_description")
+            clip["prompt_includes"] = includes
+            clip.pop("use_global_prompt", None)
+            clip.pop("use_ai_prompt", None)
 
 
 def _split_h3_prompt(value: str) -> tuple[str, str, str] | None:
@@ -220,9 +303,16 @@ def _normalize_h3_prompt_fields(project: dict) -> None:
             elif h3_prompt not in current_prompt:
                 clip["prompt"] = f"{h3_prompt}\n\n{current_prompt}"
             clip["detailed_description"] = detailed_description
-            current_sound = str(settings.get("non_diegetic_music") or "").strip()
+            includes = clip.get("prompt_includes")
+            if isinstance(includes, list):
+                for key in ("clip", "detailed_description"):
+                    if key not in includes:
+                        includes.append(key)
+            current_sound = str(settings.get("append_prompt") or "").strip()
             if sound and not current_sound:
-                settings["non_diegetic_music"] = sound
+                settings["append_prompt"] = sound
+            elif sound and sound not in current_sound:
+                settings["append_prompt"] = f"{sound}\n\n{current_sound}"
 
 
 def _migrate_schema_2_to_3(project: dict) -> None:
@@ -241,9 +331,11 @@ def _migrate_schema_2_to_3(project: dict) -> None:
                     clip["prompt"] = h3_prompt if not current_prompt else f"{h3_prompt}\n\n{current_prompt}"
                     clip["detailed_description"] = detailed_description
                     settings = project.setdefault("settings", {})
-                    current_sound = str(settings.get("non_diegetic_music") or "").strip()
+                    current_sound = str(settings.get("append_prompt") or "").strip()
                     if sound and not current_sound:
-                        settings["non_diegetic_music"] = sound
+                        settings["append_prompt"] = sound
+                    elif sound and sound not in current_sound:
+                        settings["append_prompt"] = f"{sound}\n\n{current_sound}"
                 else:
                     clip["detailed_description"] = legacy_prompt
             clip.pop("ai_prompt", None)

@@ -13,7 +13,7 @@
 - 该片段对应的音频
 - 按时间轴帧率计算的帧数
 - 首帧和尾帧图片
-- 有效提示词（优先使用每片段提示词，无则回退到全局提示词）
+- 按上游格式规则拼接得到的有效提示词
 - `run_prefix`（本次运行时间戳前缀）
 - `generate_preview_video`
 - `second_sample`
@@ -26,7 +26,7 @@
 | **Audio Timeline** | 从单一 `audio_path` 按 `trim_start_ms` + 片段偏移裁剪 |
 | **Timeline Editor** | 加载并混音 clip 内 `audios[]` 中的各条音频切片 |
 
-两种格式在图片、时间轴与提示词上共用相同 clip 字段（`start_ms`、`end_ms`、`start_image`、`end_image`、`prompt`、`use_global_prompt`）。
+两种格式共用主要图片与时间字段。Audio Timeline 保留旧的 `global_prompt` / `use_global_prompt` 行为；Timeline Editor 使用固定的 `prepend_prompt` 和 `append_prompt` 包住 Clip 中启用的提示词部分。
 
 ---
 
@@ -45,7 +45,8 @@
   "fps": 24.0,
   "width": 1344,
   "height": 768,
-  "global_prompt": "cinematic",
+  "prepend_prompt": "cinematic",
+  "append_prompt": "Negative: subtitles, logos, watermarks",
   "clips": [
     {
       "id": "runtime_0001",
@@ -54,7 +55,7 @@
       "start_image": "/absolute/path/to/start.jpg",
       "end_image": "/absolute/path/to/end.jpg",
       "prompt": "close up",
-      "use_global_prompt": true,
+      "prompt_includes": ["clip", "detailed_description", "media"],
       "audios": [
         {
           "file": "/absolute/path/to/voice.wav",
