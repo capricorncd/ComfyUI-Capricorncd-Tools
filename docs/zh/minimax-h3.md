@@ -31,7 +31,7 @@
 
 ## 提示词
 
-Timeline Editor 的提示词按 `prepend_prompt` → 依据 `prompt_concat_order` 排列且由 `prompt_includes` 启用的 Clip 内容 → `append_prompt` 拼接。MiniMax H3 工程中，`clip.prompt` 统一保存带标题的 `subject_definitions`、`summary`、`retention_analysis` 与 `detailed_description`，形成一个完整结构化提示词。旧 Audio Timeline JSON 仍保留原有全局提示词行为。
+Timeline Editor 的提示词按固定顺序拼接：启用的 `prepend_prompt` → 启用的素材描述 → 启用的 Clip 提示词 → 启用的 `append_prompt`。MiniMax H3 工程中，`clip.prompt` 统一保存带标题的 `subject_definitions`、`summary`、`retention_analysis` 与 `detailed_description`，形成一个完整结构化提示词。旧 Audio Timeline JSON 仍保留原有全局提示词行为。
 
 提示词管理器的 MiniMaxH3 Skill 库同时支持 [MiniMax 官方 Skills](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills) 与原社区 Skill。官方 Skill 优先显示；选择 `h3-prompt-writing` 时会连同 `references/base-en.txt`、`references/ref-en.txt` 一起注入，以覆盖 T2VA、I2VA、FL2VA、L2VA 与 Ref2VA 的官方格式。Style Skill 有 `SKILL.cn.md` 时，中文界面优先使用中文版本。
 

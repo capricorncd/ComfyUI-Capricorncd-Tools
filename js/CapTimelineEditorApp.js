@@ -56,15 +56,11 @@ const SETTING_PROMPT_KEYS = [
     "prepend_prompt",
     "append_prompt",
 ];
-/**
- * Prompt parts for clip.prompt_includes and settings.prompt_concat_order.
- * Order of this constant is the default concatenation order.
- */
-const PROMPT_PART_KEYS = ["clip", "resource"];
+/** Prompt parts selectable through clip.prompt_includes, in fixed composition order. */
+const PROMPT_PART_KEYS = ["resource", "clip"];
 const PROMPT_PART_KEY_SET = new Set(PROMPT_PART_KEYS);
 const PROMPT_TOGGLE_KEYS = ["prepend_prompt", ...PROMPT_PART_KEYS, "append_prompt"];
 const PROMPT_TOGGLE_KEY_SET = new Set(PROMPT_TOGGLE_KEYS);
-const DEFAULT_PROMPT_CONCAT_ORDER = [...PROMPT_PART_KEYS];
 const DEFAULT_PROMPT_INCLUDES = ["clip"];
 const WATERMARK_FIXED_POSITIONS = [
     "top-left", "top-center", "top-right",
@@ -381,26 +377,6 @@ function uid() {
 
 function mediaUid() {
     return `md_${Math.random().toString(36).slice(2, 11)}`;
-}
-
-function normalizePromptConcatOrder(raw) {
-    const out = [];
-    const seen = new Set();
-    if (Array.isArray(raw)) {
-        for (const value of raw) {
-            const rawKey = String(value || "").trim();
-            const key = rawKey === "ai" || rawKey === "detailed_description"
-                ? "clip"
-                : rawKey === "media" ? "resource" : rawKey;
-            if (!PROMPT_PART_KEY_SET.has(key) || seen.has(key)) continue;
-            seen.add(key);
-            out.push(key);
-        }
-    }
-    for (const key of DEFAULT_PROMPT_CONCAT_ORDER) {
-        if (!seen.has(key)) out.push(key);
-    }
-    return out;
 }
 
 function normalizePromptIncludes(raw, { useAiPrompt, migrateLegacyFlags = false } = {}) {
@@ -866,7 +842,6 @@ export class CapTimelineEditorApp {
         this._modelPreviewRunning = false;
         this._modelPreviewEntry = null;
         this._watermark = this._defaultWatermark();
-        this._promptConcatOrder = [...DEFAULT_PROMPT_CONCAT_ORDER];
         /** When true, Run associates CapTimelineEditor/..._{clipId}.mp4 by specified name. */
         this._useClipSpecifiedVideoFilename = true;
         /**
@@ -3222,11 +3197,6 @@ export class CapTimelineEditorApp {
                         <textarea class="cat-te-settings-prompt-input" data-setting-prompt-input="append_prompt" placeholder="${T("append_prompt_placeholder")}"></textarea>
                       </div>
                     </div>
-                    <div class="cat-te-prompt-order" aria-label="${T("prompt_concat_order_label")}">
-                      <div class="cat-te-prompt-order-label">${T("prompt_concat_order_label")}</div>
-                      <div class="cat-te-prompt-order-hint">${T("prompt_concat_order_hint")}</div>
-                      <div class="cat-te-prompt-order-list"></div>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -3848,8 +3818,8 @@ export class CapTimelineEditorApp {
                     <div class="cat-te-prompt-includes-label">${T("prompt_includes_label")}</div>
                     <div class="cat-te-prompt-includes-chips" role="group">
                       <button type="button" class="cat-te-prompt-include-chip" data-include="prepend_prompt" title="${T("prompt_include_prepend_title")}">${T("prompt_include_prepend")}</button>
-                      <button type="button" class="cat-te-prompt-include-chip" data-include="clip" title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="resource" title="${T("prompt_include_media_title")}">${T("prompt_include_media")}</button>
+                      <button type="button" class="cat-te-prompt-include-chip" data-include="clip" title="${T("prompt_include_clip_title")}">${T("prompt_include_clip")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="append_prompt" title="${T("prompt_include_append_title")}">${T("prompt_include_append")}</button>
                     </div>
                   </div>
@@ -4150,7 +4120,6 @@ export class CapTimelineEditorApp {
         }
         this.promptIncludesHost = el.querySelector(".cat-te-prompt-includes");
         this.promptIncludeChips = el.querySelectorAll(".cat-te-prompt-include-chip");
-        this.promptOrderList = el.querySelector(".cat-te-prompt-order-list");
         this.headExtendInput = el.querySelector(".cat-te-head-extend");
         this.tailExtendInput = el.querySelector(".cat-te-tail-extend");
         this.genPreviewVideoCb = el.querySelector(".cat-te-gen-preview-video");
@@ -4574,7 +4543,6 @@ export class CapTimelineEditorApp {
                 this._onPromptIncludeToggle(chip.dataset.include);
             });
         });
-        this._renderPromptConcatOrderList();
         if (this.headExtendInput && !this.headExtendInput._catTeBound) {
             this.headExtendInput._catTeBound = true;
             this.headExtendInput.addEventListener("change", () => this._onHeadExtendChange());
@@ -5510,8 +5478,9 @@ export class CapTimelineEditorApp {
         if (schemaVersion < 2) this._migrateProjectSchema1To2(src);
         else this._hydrateMediaCatalog(src);
         if (schemaVersion < 3) this._migrateProjectSchema2To3(src);
+        if (schemaVersion < 4) this._migrateProjectSchema3To4(src);
         this._normalizeH3PromptFields(src);
-        src.settings.prompt_concat_order = normalizePromptConcatOrder(src.settings.prompt_concat_order);
+        delete src.settings.prompt_concat_order;
         for (const track of src.tracks) {
             for (const clip of track?.clips || []) {
                 if (!clip || typeof clip !== "object") continue;
@@ -5581,6 +5550,15 @@ export class CapTimelineEditorApp {
                 clip.prompt = prompt;
                 delete clip.detailed_description;
                 delete clip.ai_prompt;
+            }
+        }
+    }
+
+    _migrateProjectSchema3To4(project) {
+        for (const media of project.media || []) {
+            if (!media || typeof media !== "object") continue;
+            if (!String(media.setting_description || "").trim() && String(media.prompt || "").trim()) {
+                media.setting_description = String(media.prompt);
             }
         }
     }
@@ -8812,7 +8790,8 @@ export class CapTimelineEditorApp {
             ".cat-te-vo-prompt",
             ".cat-te-vo-style-prompt",
             ".cat-te-vo-edit-prompt",
-            ".cat-te-media-preview-desc",
+            ".cat-te-media-setting-description",
+            ".cat-te-media-generation-prompt",
             ".cat-te-gen-edit-prompt",
             ".cat-te-ai-src-text",
             ".cat-te-ai-system",
@@ -11948,7 +11927,7 @@ export class CapTimelineEditorApp {
         for (const key of SETTING_PROMPT_KEYS) {
             project.settings[key] = this._readSettingPrompt(key);
         }
-        project.settings.prompt_concat_order = this._getPromptConcatOrder();
+        delete project.settings.prompt_concat_order;
         delete project.settings.ignore_occluded;
         this._writeProjectJson(JSON.stringify(project));
         this._syncProjectScalarDisplay();
@@ -11991,8 +11970,7 @@ export class CapTimelineEditorApp {
         const settings = project.settings && typeof project.settings === "object" ? project.settings : {};
         this._applyScalarSettings(settings, { applySettingsFromProject });
         this._watermark = this._normalizeWatermark(settings.watermark);
-        this._promptConcatOrder = normalizePromptConcatOrder(settings.prompt_concat_order);
-        this._renderPromptConcatOrderList();
+        delete settings.prompt_concat_order;
         this._useClipSpecifiedVideoFilename = settings.use_clip_specified_video_filename !== false;
         // Legacy global mode → migrate onto per-clip previewMode after clips load.
         this._legacyTimelineEditMode = settings.timeline_edit_mode === "generated" ? "generated" : null;
@@ -12005,7 +11983,6 @@ export class CapTimelineEditorApp {
                 key,
                 String(settings[key] ?? this._readSettingPrompt(key) ?? ""),
             ])),
-            prompt_concat_order: this._getPromptConcatOrder(),
             use_clip_specified_video_filename: this._useClipSpecifiedVideoFilename !== false,
         };
         let wroteAnySettingPrompt = false;
@@ -16466,7 +16443,7 @@ export class CapTimelineEditorApp {
         const parts = [];
         const prepend = this._stripPromptComments(this._readSettingPrompt("prepend_prompt"));
         if (m.usePrependPrompt !== false && prepend) parts.push(prepend);
-        for (const key of this._getPromptConcatOrder()) {
+        for (const key of ["resource", "clip"]) {
             if (!includes.includes(key)) continue;
             const text = this._stripPromptComments(values[key]);
             if (!text) continue;
@@ -17058,77 +17035,6 @@ export class CapTimelineEditorApp {
         this._saveToWidgets();
     }
 
-    _promptPartLabel(key) {
-        switch (key) {
-            case "clip": return T("prompt_include_clip");
-            case "resource": return T("prompt_include_media");
-            default: return key;
-        }
-    }
-
-    _getPromptConcatOrder() {
-        return normalizePromptConcatOrder(this._promptConcatOrder);
-    }
-
-    _setPromptConcatOrder(order, { recordUndo = true } = {}) {
-        const next = normalizePromptConcatOrder(order);
-        const prev = this._getPromptConcatOrder().join(",");
-        if (next.join(",") === prev) return;
-        if (recordUndo) this._recordUndo();
-        this._promptConcatOrder = next;
-        this._renderPromptConcatOrderList();
-        this._saveToWidgets();
-    }
-
-    _movePromptConcatOrder(index, delta) {
-        const order = this._getPromptConcatOrder();
-        const to = index + delta;
-        if (to < 0 || to >= order.length) return;
-        const next = order.slice();
-        const [row] = next.splice(index, 1);
-        next.splice(to, 0, row);
-        this._setPromptConcatOrder(next);
-    }
-
-    _renderPromptConcatOrderList() {
-        if (!this.promptOrderList) return;
-        const order = this._getPromptConcatOrder();
-        this.promptOrderList.replaceChildren();
-        order.forEach((key, index) => {
-            const row = document.createElement("div");
-            row.className = "cat-te-prompt-order-row";
-            row.dataset.key = key;
-            const label = document.createElement("span");
-            label.className = "cat-te-prompt-order-name";
-            label.textContent = this._promptPartLabel(key);
-            const actions = document.createElement("div");
-            actions.className = "cat-te-prompt-order-actions";
-            const up = document.createElement("button");
-            up.type = "button";
-            up.className = "cat-te-prompt-order-btn";
-            up.title = T("move_up_title");
-            up.disabled = index === 0;
-            up.innerHTML = iconHtml("arrowUp", 12);
-            up.addEventListener("click", (e) => {
-                e.stopPropagation();
-                this._movePromptConcatOrder(index, -1);
-            });
-            const down = document.createElement("button");
-            down.type = "button";
-            down.className = "cat-te-prompt-order-btn";
-            down.title = T("move_down_title");
-            down.disabled = index === order.length - 1;
-            down.innerHTML = iconHtml("arrowDown", 12);
-            down.addEventListener("click", (e) => {
-                e.stopPropagation();
-                this._movePromptConcatOrder(index, 1);
-            });
-            actions.append(up, down);
-            row.append(label, actions);
-            this.promptOrderList.appendChild(row);
-        });
-    }
-
     _onClipRoleChange() {
         if (!this._selClip || this.clipRoleSelect?.disabled) return;
         this._recordUndo();
@@ -17502,7 +17408,6 @@ export class CapTimelineEditorApp {
                     key,
                     this._readSettingPrompt(key),
                 ])),
-                prompt_concat_order: this._getPromptConcatOrder(),
                 timeline_zoom: Number(this._timeline?.getZoom() ?? 1.2),
                 current_time: Number(this._timeline?.currentTime ?? 0) || 0,
                 timeline_scroll_left: Number(this._timeline?.scrollEl?.scrollLeft ?? 0) || 0,

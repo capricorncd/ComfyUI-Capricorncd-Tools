@@ -190,16 +190,6 @@ class CAP_DataJsonClipParser:
                 out.append(key)
         return out
 
-    def _timeline_prompt_order(self, raw) -> list[str]:
-        out = []
-        for value in raw if isinstance(raw, list) else []:
-            key = "clip" if str(value) in {"ai", "detailed_description"} else (
-                "resource" if str(value) == "media" else str(value)
-            )
-            if key in {"clip", "resource"} and key not in out:
-                out.append(key)
-        return out + [key for key in ("clip", "resource") if key not in out]
-
     def _compose_prompt(self, clip: dict, global_prompt: str, materials: dict | None = None,
                         *, style_prompt: str = "", non_diegetic_music: str = "",
                         negative_prompt: str = "", prompt_concat_order=None,
@@ -232,7 +222,7 @@ class CAP_DataJsonClipParser:
         parts = []
         if prepend_prompt is not None or append_prompt is not None:
             includes = set(self._timeline_prompt_includes(clip))
-            order = self._timeline_prompt_order(prompt_concat_order)
+            order = ("resource", "clip")
             prepend = self._strip_comment_lines(prepend_prompt or "").strip()
             if clip.get("use_prepend_prompt", True) is not False and prepend:
                 parts.append(prepend)
@@ -373,9 +363,16 @@ class CAP_DataJsonClipParser:
         rows = data.get("materials") if isinstance(data, dict) else None
         if not isinstance(rows, list):
             return out
+        try:
+            schema_version = int(data.get("schema_version", 1) or 1)
+        except (TypeError, ValueError):
+            schema_version = 1
         for row in rows:
             if not isinstance(row, dict):
                 continue
+            row = dict(row)
+            if schema_version < 4 and not str(row.get("setting_description") or "").strip() and str(row.get("prompt") or "").strip():
+                row["setting_description"] = str(row["prompt"])
             mid = str(row.get("id") or "").strip()
             if mid:
                 out[mid] = row
@@ -494,14 +491,14 @@ class CAP_DataJsonClipParser:
             out["style_prompt"] = style_prompt if isinstance(style_prompt, str) else ""
             out["non_diegetic_music"] = non_diegetic_music if isinstance(non_diegetic_music, str) else ""
             out["negative_prompt"] = negative_prompt if isinstance(negative_prompt, str) else ""
-        order = self._normalize_prompt_concat_order(prompt_concat_order)
         includes = self._clip_prompt_includes(out)
         if prepend_prompt is not None or append_prompt is not None:
-            order = self._timeline_prompt_order(prompt_concat_order)
             includes = self._timeline_prompt_includes(out)
             out.pop("detailed_description", None)
             out.pop("ai_prompt", None)
-        out["prompt_concat_order"] = order
+            out.pop("prompt_concat_order", None)
+        else:
+            out["prompt_concat_order"] = self._normalize_prompt_concat_order(prompt_concat_order)
         out["prompt_includes"] = includes
         images = []
         videos = []
@@ -595,7 +592,6 @@ class CAP_DataJsonClipParser:
         prompt_concat_order = data.get("prompt_concat_order")
         run_timestamp = str(data.get("run_timestamp") or data.get("run_prefix") or "").strip()
         materials = self._materials_by_id(data)
-
         clip = clips[index] if clips and 0 <= index < len(clips) else {}
         if not isinstance(clip, dict):
             clip = {}

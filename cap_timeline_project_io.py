@@ -168,6 +168,8 @@ def migrate_project(project: dict) -> dict:
         _migrate_schema_1_to_2(out)
     if parse_schema_version(out) < 3:
         _migrate_schema_2_to_3(out)
+    if parse_schema_version(out) < 4:
+        _migrate_schema_3_to_4(out)
     _migrate_setting_prompts(out)
     _normalize_h3_prompt_fields(out)
     _normalize_timeline_prompt_selection(out)
@@ -244,20 +246,10 @@ def _migrate_setting_prompts(project: dict) -> None:
 
 
 def _normalize_timeline_prompt_selection(project: dict) -> None:
-    allowed = ("clip", "resource")
+    allowed = ("resource", "clip")
     settings = project.get("settings")
     if isinstance(settings, dict):
-        raw_order = settings.get("prompt_concat_order")
-        order = []
-        if isinstance(raw_order, list):
-            for value in raw_order:
-                raw_key = str(value)
-                key = "clip" if raw_key in {"ai", "detailed_description"} else (
-                    "resource" if raw_key == "media" else raw_key
-                )
-                if key in allowed and key not in order:
-                    order.append(key)
-        settings["prompt_concat_order"] = order + [key for key in allowed if key not in order]
+        settings.pop("prompt_concat_order", None)
     for track in project.get("tracks") or []:
         if not isinstance(track, dict):
             continue
@@ -344,6 +336,14 @@ def _normalize_h3_prompt_fields(project: dict) -> None:
                 settings["append_prompt"] = sound
             elif sound and sound not in current_sound:
                 settings["append_prompt"] = f"{sound}\n\n{current_sound}"
+
+
+def _migrate_schema_3_to_4(project: dict) -> None:
+    for media in project.get("media") or []:
+        if not isinstance(media, dict):
+            continue
+        if not str(media.get("setting_description") or "").strip() and str(media.get("prompt") or "").strip():
+            media["setting_description"] = str(media["prompt"])
 
 
 def _migrate_schema_2_to_3(project: dict) -> None:

@@ -85,8 +85,10 @@ def _clip_plan(data: dict, clip: dict, fps: float, first: bool) -> tuple[str, in
         "style_prompt": data.get("style_prompt", ""),
         "non_diegetic_music": data.get("non_diegetic_music", ""),
         "negative_prompt": data.get("negative_prompt", ""),
-        "prompt_concat_order": data.get("prompt_concat_order"),
     })
+    if "prepend_prompt" in data or "append_prompt" in data:
+        row["prepend_prompt"] = data.get("prepend_prompt", "")
+        row["append_prompt"] = data.get("append_prompt", "")
     return json.dumps(row, ensure_ascii=False), frame_count, requested_context, trim_frames
 
 

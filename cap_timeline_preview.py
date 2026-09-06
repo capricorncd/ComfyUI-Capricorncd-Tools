@@ -17,7 +17,6 @@ from .cap_timeline_editor import (
     CAP_TimelineEditor,
     _add_material,
     _clip_visual_entries,
-    _timeline_prompt_concat_order,
     _timeline_prompt_includes,
 )
 from .timecode import resolve_media_path
@@ -122,7 +121,6 @@ def _preview_data(project_json: str, clip_id: str, width: int, height: int) -> t
         "height": int(height or settings.get("height") or 768),
         "prepend_prompt": str(settings.get("prepend_prompt") or ""),
         "append_prompt": str(settings.get("append_prompt") or ""),
-        "prompt_concat_order": _timeline_prompt_concat_order(settings.get("prompt_concat_order")),
         "materials": materials,
         "clips": [runtime_clip],
     }

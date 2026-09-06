@@ -254,8 +254,8 @@ Times are milliseconds snapped to the project `fps` frame grid: `start_ms` / `du
 | `name` | Title |
 | `prompt` | Clip prompt. MiniMax H3 projects store `subject_definitions`, `summary`, and `retention_analysis` here |
 | `prompt_includes` | Enabled Clip parts: `clip` and/or `resource`; `resource` composes media `setting_description` values |
-| `use_prepend_prompt` | Whether to place the project `prepend_prompt` before this Clip’s ordered parts (default `true`) |
-| `use_append_prompt` | Whether to place the project `append_prompt` after this Clip’s ordered parts (default `true`) |
+| `use_prepend_prompt` | Whether to place the project `prepend_prompt` before this Clip’s prompt parts (default `true`) |
+| `use_append_prompt` | Whether to place the project `append_prompt` after this Clip’s prompt parts (default `true`) |
 | `use_media_prompts` | Compatibility field name; bool[] aligned with `media_ids`, controlling their asset descriptions |
 | `media_enabled` | bool[] aligned with `media_ids` |
 | `head_extend_sec` / `tail_extend_sec` | Head / tail extend (seconds) |
@@ -303,7 +303,7 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
 - `prompt`: stores the complete Clip prompt. For MiniMax H3 this includes `subject_definitions`, `summary`, `retention_analysis`, and `detailed_description` with their headings.
 - `settings.append_prompt`: keep both complete sound sections in the appended value: `overall_soundscape: ...`, then `non_diegetic_music: ...`; negative constraints follow them.
 - `prompt_includes`: use `clip` to include the complete Clip prompt and `resource` to include enabled media `setting_description` values. Legacy `media` values migrate to `resource`.
-- `use_prepend_prompt` and `use_append_prompt` control the two fixed project-level boundaries. They are not members of `prompt_concat_order` and never enter its drag ordering.
+- Prompt composition order is fixed: enabled `prepend_prompt` → enabled asset descriptions → enabled Clip prompt → enabled `append_prompt`.
 
 ### Example (schema 3, illustrative)
 
@@ -377,7 +377,7 @@ MV and motion-comic project generators must split each MiniMax H3 result as foll
           "media_ids": ["md_abc123"],
           "name": "Clip",
           "prompt": "subject_definitions:\n<Picture 1>: the character reference\n\nsummary: [reference generation] The character performs on stage.\n\nretention_analysis:\n<Picture 1>: fully_preserved\n\ndetailed_description:\n[Shot 1] The camera slowly pushes toward the performer as she plays in time with the music.",
-          "prompt_includes": ["clip", "resource"],
+          "prompt_includes": ["resource", "clip"],
           "use_prepend_prompt": true,
           "use_append_prompt": true,
           "use_media_prompts": [true],

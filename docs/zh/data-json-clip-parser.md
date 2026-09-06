@@ -55,7 +55,7 @@
       "start_image": "/absolute/path/to/start.jpg",
       "end_image": "/absolute/path/to/end.jpg",
       "prompt": "close up",
-      "prompt_includes": ["clip", "resource"],
+      "prompt_includes": ["resource", "clip"],
       "audios": [
         {
           "file": "/absolute/path/to/voice.wav",

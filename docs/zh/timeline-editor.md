@@ -47,7 +47,7 @@
 ### 检视面板（右侧）
 
 - 选中片段缩略图（适用时含首 / 尾帧）
-- 每片段可选择“摘要”“详细描述”和“素材”提示词部分
+- 每片段可选择“Clip 提示词”和“素材描述”提示词部分
 - **生成视频**列表（有绑定时）：启用、禁音（图标与轨道禁音相同）、打开预览、删除（需确认）
 - 快捷键提示
 
@@ -253,8 +253,8 @@
 | `name` | 标题 |
 | `prompt` | Clip 提示词；MiniMax H3 工程在这里保存 `subject_definitions`、`summary`、`retention_analysis` |
 | `prompt_includes` | Clip 内启用的提示词部分：`clip` 和/或 `resource`；`resource` 拼接素材的 `setting_description` |
-| `use_prepend_prompt` | 是否在该 Clip 的排序内容之前拼接工程 `prepend_prompt`（默认 `true`） |
-| `use_append_prompt` | 是否在该 Clip 的排序内容之后拼接工程 `append_prompt`（默认 `true`） |
+| `use_prepend_prompt` | 是否在该 Clip 的提示词内容之前拼接工程 `prepend_prompt`（默认 `true`） |
+| `use_append_prompt` | 是否在该 Clip 的提示词内容之后拼接工程 `append_prompt`（默认 `true`） |
 | `use_media_prompts` | 兼容字段名；与 `media_ids` 等长，控制是否使用对应素材描述 |
 | `media_enabled` | 与 `media_ids` 等长的 bool[]：该槽位是否启用 |
 | `head_extend_sec` / `tail_extend_sec` | 首 / 尾扩展秒数 |
@@ -302,7 +302,7 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
 - `prompt`：保存完整的 Clip 提示词；MiniMax H3 内容包含带标题的 `subject_definitions`、`summary`、`retention_analysis` 与 `detailed_description`。
 - `settings.append_prompt`：在后置内容中完整保存两个声音段落，先写 `overall_soundscape: ...`，再写 `non_diegetic_music: ...`，之后写负面约束。
 - `prompt_includes`：`clip` 表示完整 Clip 提示词，`resource` 表示已启用素材的 `setting_description`；旧工程中的 `media` 会迁移为 `resource`。
-- `use_prepend_prompt` 与 `use_append_prompt` 只控制两个固定的工程级边界，不属于 `prompt_concat_order`，也不会进入拖拽拼接排序。
+- 提示词拼接顺序固定为：启用的 `prepend_prompt` → 启用的素材描述 → 启用的 Clip 提示词 → 启用的 `append_prompt`。
 
 ### 示例（schema 3，字段示意）
 
@@ -376,7 +376,7 @@ MV、漫剧项目生成器必须按以下方式拆分每个 MiniMax H3 结果：
           "media_ids": ["md_abc123"],
           "name": "Clip",
           "prompt": "subject_definitions:\n<Picture 1>: 角色参考图\n\nsummary: [reference generation] 角色在舞台上演奏。\n\nretention_analysis:\n<Picture 1>: fully_preserved\n\ndetailed_description:\n[Shot 1] 镜头缓慢推近，角色按照音乐节奏演奏。",
-          "prompt_includes": ["clip", "resource"],
+          "prompt_includes": ["resource", "clip"],
           "use_prepend_prompt": true,
           "use_append_prompt": true,
           "use_media_prompts": [true],

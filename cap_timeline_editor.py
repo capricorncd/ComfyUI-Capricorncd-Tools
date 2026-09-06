@@ -23,7 +23,7 @@ def _setting_prompt(settings: dict, key: str) -> str:
     return _strip_comment_lines(settings.get(key) or "").strip()
 
 
-_TIMELINE_PROMPT_PART_KEYS = ("clip", "resource")
+_TIMELINE_PROMPT_PART_KEYS = ("resource", "clip")
 
 
 def _timeline_prompt_includes(clip: dict) -> list[str]:
@@ -37,18 +37,6 @@ def _timeline_prompt_includes(clip: dict) -> list[str]:
         for key in raw
     }
     return [key for key in _TIMELINE_PROMPT_PART_KEYS if key in includes]
-
-
-def _timeline_prompt_concat_order(raw) -> list[str]:
-    order = []
-    if isinstance(raw, list):
-        for value in raw:
-            key = "clip" if str(value) in {"ai", "detailed_description"} else (
-                "resource" if str(value) == "media" else str(value)
-            )
-            if key in _TIMELINE_PROMPT_PART_KEYS and key not in order:
-                order.append(key)
-    return order + [key for key in _TIMELINE_PROMPT_PART_KEYS if key not in order]
 
 
 def _safe_filename_part(value, fallback: str = "Untitled") -> str:
@@ -657,7 +645,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
         height = max(1, int(height))
         prepend_prompt = _setting_prompt(settings, "prepend_prompt")
         append_prompt = _setting_prompt(settings, "append_prompt")
-        prompt_concat_order = _timeline_prompt_concat_order(settings.get("prompt_concat_order"))
         use_clip_video_name = settings.get("use_clip_specified_video_filename", True) is not False
         gen_video_stamp = str(settings.get("gen_video_stamp") or "").strip()
         if not gen_video_stamp:
@@ -813,7 +800,6 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
             "height": height,
             "prepend_prompt": prepend_prompt,
             "append_prompt": append_prompt,
-            "prompt_concat_order": prompt_concat_order,
             "total_frame_count": total_frame_count,
             "run_timestamp": run_timestamp,
             "materials": materials,
