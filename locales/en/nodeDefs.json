@@ -218,6 +218,10 @@
       "load_context": {
         "name": "Load Context",
         "tooltip": "True when this clip h3_motion_context_length > 0 (pin previous clip via H3 Motion Context Load Latent)."
+      },
+      "seed": {
+        "name": "Seed",
+        "tooltip": "Clip seed shared by preview and final generation; -1 means it has not been fixed yet."
       }
     }
   },

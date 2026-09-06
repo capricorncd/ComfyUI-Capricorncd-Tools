@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 
 import torch
 
@@ -18,6 +19,15 @@ from comfy_extras.nodes_minimax_h3 import (
 from .cap_minimax_h3 import _snap_h3_grid
 
 AUTO_CONTEXT_FRAMES = 39
+_TIME_RANGE_RE = re.compile(
+    r"(?<!\d)(\d+(?:\.\d+)?)\s*[—–-]\s*(\d+(?:\.\d+)?)\s*(?:秒|s(?:ec(?:onds?)?)?)",
+    re.IGNORECASE,
+)
+_LEADING_TIME_RANGE_RE = re.compile(
+    r"^\s*(?:\[Shot[^\]]*\]\s*)?\(?\s*(\d+(?:\.\d+)?)\s*[—–-]\s*"
+    r"(\d+(?:\.\d+)?)\s*(?:秒|s(?:ec(?:onds?)?)?)",
+    re.IGNORECASE,
+)
 
 
 def _sequence_rows(data_json: str) -> tuple[dict, list[dict], float]:
@@ -49,7 +59,7 @@ def _sequence_rows(data_json: str) -> tuple[dict, list[dict], float]:
 def _clip_plan(data: dict, clip: dict, fps: float, first: bool) -> tuple[str, int, int, int]:
     start_ms = int(clip.get("start_ms", 0) or 0)
     end_ms = int(clip.get("end_ms", start_ms) or start_ms)
-    frame_count = align_frame_count(max(5, int(round((end_ms - start_ms) * fps / 1000))))
+    frame_count = max(1, int(round((end_ms - start_ms) * fps / 1000)))
     try:
         requested_context = _snap_h3_grid(int(round(float(clip.get("h3_motion_context_length", 0) or 0))))
     except (TypeError, ValueError):
@@ -58,7 +68,7 @@ def _clip_plan(data: dict, clip: dict, fps: float, first: bool) -> tuple[str, in
         requested_context = 0
 
     trim_frames = requested_context
-    target_frames = align_frame_count(frame_count + requested_context)
+    target_frames = align_frame_count(max(5, frame_count + requested_context))
 
     row = dict(clip)
     row.update({
@@ -99,20 +109,108 @@ def _slice_audio_rows(rows, part_start_ms: int, part_end_ms: int) -> list[dict]:
     return result
 
 
+def _scope_timed_description(text: str, part_start_ms: int, part_end_ms: int) -> str:
+    text = str(text or "").strip()
+    if not text:
+        return ""
+    header = ""
+    if text.startswith("detailed_description:"):
+        header = "detailed_description:"
+        text = text[len(header):].lstrip()
+    blocks = re.split(r"\n\s*\n", text)
+    found_timed_block = False
+    kept = []
+    for block in blocks:
+        ranges = _TIME_RANGE_RE.findall(block)
+        if not ranges:
+            if part_start_ms > 0 and re.search(r"\[Shot\s+1\]", block, re.IGNORECASE):
+                continue
+            kept.append(block)
+            continue
+        found_timed_block = True
+        if any(float(end) * 1000 > part_start_ms and float(start) * 1000 < part_end_ms
+               for start, end in ranges):
+            kept.append(block)
+    if not found_timed_block:
+        return text
+    scope = (
+        f"internal_segment_scope: original timeline {part_start_ms / 1000:g}—"
+        f"{part_end_ms / 1000:g} seconds. Follow only the timed actions included below; "
+        "continue motion from the previous latent without restarting the shot."
+    )
+    scoped = "\n\n".join((scope, *kept))
+    return f"{header}\n\n{scoped}" if header else scoped
+
+
+def _segment_ranges(clip: dict, duration_ms: int, max_segment_ms: int) -> list[tuple[int, int]]:
+    boundaries = {0, duration_ms}
+    for block in re.split(r"\n\s*\n", str(clip.get("detailed_description") or "")):
+        match = _LEADING_TIME_RANGE_RE.match(block)
+        if match is None:
+            continue
+        start = max(0, min(duration_ms, round(float(match.group(1)) * 1000)))
+        end = max(0, min(duration_ms, round(float(match.group(2)) * 1000)))
+        if end > start:
+            boundaries.update((start, end))
+
+    points = sorted(boundaries)
+    authored = len(points) > 2
+    ranges = []
+    if authored:
+        source_ranges = zip(points, points[1:])
+    else:
+        segment_count = max(1, math.ceil(duration_ms / max_segment_ms))
+        source_ranges = [
+            (
+                round(duration_ms * index / segment_count),
+                round(duration_ms * (index + 1) / segment_count),
+            )
+            for index in range(segment_count)
+        ]
+
+    for start, end in source_ranges:
+        span = end - start
+        count = max(1, math.ceil(span / max_segment_ms))
+        ranges.extend(
+            (
+                start + round(span * index / count),
+                start + round(span * (index + 1) / count),
+            )
+            for index in range(count)
+        )
+    return ranges
+
+
+def _segment_seed(seed: int, index: int) -> int:
+    if index == 0:
+        return int(seed)
+    return (int(seed) + index * 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
+
+
 def _split_long_clips(clips: list[dict], max_segment_ms: int) -> list[tuple[int, int, int, dict]]:
     segments = []
     for clip_index, clip in enumerate(clips):
         start_ms = int(clip.get("start_ms", 0) or 0)
         end_ms = int(clip.get("end_ms", start_ms) or start_ms)
         duration_ms = end_ms - start_ms
-        count = max(1, math.ceil(duration_ms / max_segment_ms))
-        for part_index in range(count):
-            local_start = round(duration_ms * part_index / count)
-            local_end = round(duration_ms * (part_index + 1) / count)
+        ranges = _segment_ranges(clip, duration_ms, max_segment_ms)
+        count = len(ranges)
+        for part_index, (local_start, local_end) in enumerate(ranges):
             row = dict(clip)
             row["start_ms"] = start_ms + local_start
             row["end_ms"] = start_ms + local_end
             row["audios"] = _slice_audio_rows(clip.get("audios"), local_start, local_end)
+            row["detailed_description"] = _scope_timed_description(
+                clip.get("detailed_description", ""), local_start, local_end,
+            )
+            segment_scope = (
+                f"internal_segment_scope: part {part_index + 1}/{count}, original timeline "
+                f"{local_start / 1000:g}—{local_end / 1000:g} seconds. Do not restart or summarize "
+                "the full clip; render only this interval and continue the same take."
+            )
+            row["prompt"] = "\n\n".join(
+                value for value in (str(clip.get("prompt") or "").strip(), segment_scope) if value
+            )
             if part_index > 0:
                 row["h3_motion_context_length"] = AUTO_CONTEXT_FRAMES
             segments.append((clip_index, part_index, count, row))
@@ -272,6 +370,29 @@ class CAP_H3SequenceAudioJoin:
         return ({"waveform": waveform, "sample_rate": rate1},)
 
 
+class CAP_H3SequenceTrimAudio:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audio": ("AUDIO",),
+                "trim_frames": ("INT", {"default": 0, "min": 0, "max": 3600}),
+                "keep_frames": ("INT", {"default": 124, "min": 1, "max": 3600}),
+            },
+        }
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "trim"
+    CATEGORY = "Capricorncd/internal"
+
+    def trim(self, audio, trim_frames, keep_frames):
+        rate = int(audio["sample_rate"])
+        waveform = audio["waveform"]
+        start = min(waveform.shape[-1], round(max(0, int(trim_frames)) * rate / H3_FPS))
+        end = min(waveform.shape[-1], start + round(max(1, int(keep_frames)) * rate / H3_FPS))
+        return ({"waveform": waveform[..., start:end].clone(), "sample_rate": rate},)
+
+
 class CAP_H3TimelineSequenceSampler:
     @classmethod
     def INPUT_TYPES(cls):
@@ -301,14 +422,16 @@ class CAP_H3TimelineSequenceSampler:
         }
 
     RETURN_TYPES = ("LATENT", "IMAGE", "AUDIO", "STRING")
-    RETURN_NAMES = ("last_latent", "images", "audio", "sequence_info")
+    RETURN_NAMES = ("last_segment_latent (continuation only)", "images", "audio", "sequence_info")
     FUNCTION = "expand_sequence"
     CATEGORY = "Capricorncd"
     DESCRIPTION = (
         "Expands the runnable clips in Timeline Editor data_json into one finite MiniMax H3 sampling graph. "
-        "Timeline clips longer than max_segment_seconds are divided evenly into internal H3 segments. "
-        "Each segment reuses the previous sampled AV latent, applies a sigma-aware temporal mask, removes "
-        "the overlap, and joins decoded video and audio. The first segment ignores motion context."
+        "Timeline clips follow authored time ranges when present; remaining long spans are divided by max_segment_seconds. "
+        "Each later segment pins the previous sampled AV latent through H3 Motion Context, removes the "
+        "pinned head, and joins decoded video and audio. The first segment ignores motion context. "
+        "Connect images and audio directly to the video output node. Decoding last_segment_latent only "
+        "produces the final internal segment."
     )
 
     @classmethod
@@ -322,7 +445,8 @@ class CAP_H3TimelineSequenceSampler:
     def expand_sequence(self, model, clip, vae, audio_vae, data_json, sampler, sigmas, seed,
                         width, height, ref_image_size, max_segment_seconds, drift_strength, continue_audio):
         data, clips, fps = _sequence_rows(data_json)
-        segments = _split_long_clips(clips, max(1, round(float(max_segment_seconds) * 1000)))
+        max_segment_ms = max(1, round(float(max_segment_seconds) * 1000))
+        segments = _split_long_clips(clips, max_segment_ms)
         graph = GraphBuilder()
         previous_latent = None
         merged_images = None
@@ -343,24 +467,25 @@ class CAP_H3TimelineSequenceSampler:
                 index=0,
                 clip_json=clip_json,
             )
-            segment_model = model
+            segment_conditioning = encoded.out(0)
             segment_latent = encoded.out(1)
+            trim_input = trim_frames
             if previous_latent is not None and context_frames > 0:
                 continued = graph.node(
-                    "CAP_H3SequenceContinuation",
-                    model=model,
+                    "MiniMaxH3MotionContext",
+                    conditioning=segment_conditioning,
+                    vae=vae,
                     latent=segment_latent,
-                    previous_latent=previous_latent,
-                    sigmas=sigmas,
-                    context_frames=context_frames,
-                    drift_strength=drift_strength,
-                    continue_audio=continue_audio,
+                    context_length=str(context_frames),
+                    audio_context_length=0,
+                    context_latent=previous_latent,
                 )
-                segment_model = continued.out(0)
-                segment_latent = continued.out(1)
+                segment_conditioning = continued.out(0)
+                trim_input = continued.out(1)
 
-            noise = graph.node("RandomNoise", noise_seed=seed)
-            guider = graph.node("BasicGuider", model=segment_model, conditioning=encoded.out(0))
+            segment_seed = _segment_seed(seed, index)
+            noise = graph.node("RandomNoise", noise_seed=segment_seed)
+            guider = graph.node("BasicGuider", model=model, conditioning=segment_conditioning)
             sampled = graph.node(
                 "SamplerCustomAdvanced",
                 noise=noise.out(0),
@@ -375,13 +500,19 @@ class CAP_H3TimelineSequenceSampler:
             trimmed = graph.node(
                 "CAP_H3SequenceTrimVideo",
                 images=decoded.out(0),
-                trim_frames=trim_frames,
+                trim_frames=trim_input,
                 keep_frames=keep_frames,
             )
 
             if merged_images is None:
                 merged_images = trimmed.out(0)
-                merged_audio = decoded_audio.out(0)
+                trimmed_audio = graph.node(
+                    "CAP_H3SequenceTrimAudio",
+                    audio=decoded_audio.out(0),
+                    trim_frames=trim_input,
+                    keep_frames=keep_frames,
+                )
+                merged_audio = trimmed_audio.out(0)
             else:
                 image_batch = graph.node("ImageBatch", image1=merged_images, image2=trimmed.out(0))
                 merged_images = image_batch.out(0)
@@ -389,7 +520,7 @@ class CAP_H3TimelineSequenceSampler:
                     "CAP_H3SequenceAudioJoin",
                     audio1=merged_audio,
                     audio2=decoded_audio.out(0),
-                    overlap_frames=trim_frames,
+                    overlap_frames=trim_input,
                     keep_frames=keep_frames,
                 )
                 merged_audio = audio_join.out(0)
@@ -403,6 +534,7 @@ class CAP_H3TimelineSequenceSampler:
                 "frames": keep_frames,
                 "context_frames": context_frames,
                 "trim_frames": trim_frames,
+                "seed": segment_seed,
             })
 
         info = json.dumps({"clips": plan, "fps": fps, "seed": seed}, ensure_ascii=False)
@@ -417,6 +549,7 @@ NODE_CLASS_MAPPINGS = {
     "CAP_H3SequenceContinuation": CAP_H3SequenceContinuation,
     "CAP_H3SequenceTrimVideo": CAP_H3SequenceTrimVideo,
     "CAP_H3SequenceAudioJoin": CAP_H3SequenceAudioJoin,
+    "CAP_H3SequenceTrimAudio": CAP_H3SequenceTrimAudio,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {

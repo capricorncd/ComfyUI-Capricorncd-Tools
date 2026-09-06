@@ -32,7 +32,7 @@ class CAP_DataJsonClipParser:
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING", "BOOLEAN", "BOOLEAN")
+    RETURN_TYPES = ("AUDIO", "INT", "IMAGE", "IMAGE", "STRING", "STRING", "BOOLEAN", "STRING", "STRING", "STRING", "IMAGE", "STRING", "STRING", "STRING", "STRING", "BOOLEAN", "STRING", "BOOLEAN", "BOOLEAN", "INT")
     RETURN_NAMES = (
         "audio",
         "frame_count",
@@ -53,6 +53,7 @@ class CAP_DataJsonClipParser:
         "output_video",
         "save_latent",
         "load_context",
+        "seed",
     )
     FUNCTION = "execute"
     CATEGORY = "Capricorncd"
@@ -66,7 +67,7 @@ class CAP_DataJsonClipParser:
         "image/video file paths and embedded materials), second_sample, output_video "
         "(CapTimelineEditor-specified save path when enabled), save_latent "
         "(whether to run H3 Motion Context Save Latent for this clip), and "
-        "load_context (true when clip h3_motion_context_length > 0)."
+        "load_context (true when clip h3_motion_context_length > 0), and the Clip seed."
     )
 
     @classmethod
@@ -567,6 +568,10 @@ class CAP_DataJsonClipParser:
         except (TypeError, ValueError):
             h3_ctx_len = 0
         load_context = h3_ctx_len > 0
+        try:
+            seed = max(-1, int(clip.get("seed", -1)))
+        except (TypeError, ValueError):
+            seed = -1
 
         preview_start_ms = clip.get("preview_start_ms", None)
         preview_end_ms = clip.get("preview_end_ms", None)
@@ -637,6 +642,7 @@ class CAP_DataJsonClipParser:
             output_video,
             save_latent,
             load_context,
+            seed,
         )
 
 

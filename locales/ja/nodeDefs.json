@@ -218,6 +218,10 @@
       "load_context": {
         "name": "Context を読込",
         "tooltip": "クリップの h3_motion_context_length > 0 のとき true。H3 Motion Context Load Latent で前クリップ latent を読み込む。"
+      },
+      "seed": {
+        "name": "シード",
+        "tooltip": "プレビューと本生成で共有する Clip のシード。-1 は未固定を示します。"
       }
     }
   },

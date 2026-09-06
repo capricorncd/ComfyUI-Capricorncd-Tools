@@ -40,6 +40,9 @@ const STORAGE_MEDIA_LIST_VIEW = "cat-te-media-list-view";
 const STORAGE_AI_PROMPT_MODEL = "cat-te-ai-prompt-model";
 const STORAGE_AI_PROMPT_SKILL = "cat-te-ai-prompt-skill";
 const STORAGE_AI_PROMPT_LANG = "cat-te-ai-prompt-lang";
+const STORAGE_MODEL_PREVIEW_WORKFLOW = "cat-te-model-preview-workflow";
+const STORAGE_MODEL_PREVIEW_WORKFLOW_NAME = "cat-te-model-preview-workflow-name";
+const STORAGE_MODEL_PREVIEW_MODEL = "cat-te-model-preview-model";
 const AI_PROMPT_LANGUAGES = ["简体中文", "繁體中文", "English", "日本語"];
 const AGENT_DEFAULT_MODELS = { openai: "gpt-5.4", gemini: "gemini-3.7-flash" };
 const SKILL_URL_DEFAULT = "https://github.com/T8mars/minimax-h3-prompt-skill-T8";
@@ -404,6 +407,7 @@ function defaultImageMeta(trackIndex = 0) {
         secondSample: false,
         h3MotionContextLength: 0,
         saveLatent: false,
+        seed: -1,
         trackIndex,
         clipRole: "multi_ref",
         clipRoleCustom: "",
@@ -801,6 +805,10 @@ export class CapTimelineEditorApp {
         this._composeBusy = false;
         this._aiOptimizeBusy = false;
         this._aiOptimizeAbort = null;
+        this._modelPreviewPromptId = null;
+        this._modelPreviewClipId = null;
+        this._modelPreviewRunning = false;
+        this._modelPreviewEntry = null;
         this._watermark = this._defaultWatermark();
         this._promptConcatOrder = [...DEFAULT_PROMPT_CONCAT_ORDER];
         /** When true, Run associates CapTimelineEditor/..._{clipId}.mp4 by specified name. */
@@ -1249,8 +1257,47 @@ export class CapTimelineEditorApp {
         if (this.useClipVideoFilenameCb) {
             this.useClipVideoFilenameCb.checked = this._useClipSpecifiedVideoFilename !== false;
         }
+        if (this.modelPreviewModelInput) {
+            this.modelPreviewModelInput.value = localStorage.getItem(STORAGE_MODEL_PREVIEW_MODEL) || "";
+        }
+        this._updateModelPreviewConfigName();
         this.settingsModal.hidden = false;
         void this._loadAgentConfigs();
+    }
+
+    _updateModelPreviewConfigName() {
+        if (!this.modelPreviewConfigName) return;
+        const name = localStorage.getItem(STORAGE_MODEL_PREVIEW_WORKFLOW_NAME) || "";
+        this.modelPreviewConfigName.textContent = name
+            ? T("model_preview_workflow_loaded", { name })
+            : T("model_preview_workflow_missing");
+    }
+
+    async _importModelPreviewWorkflow(event) {
+        const input = event?.target;
+        const file = input?.files?.[0];
+        if (!file) return;
+        try {
+            const parsed = JSON.parse(await file.text());
+            const prompt = parsed?.output || parsed?.prompt || parsed;
+            if (!prompt || typeof prompt !== "object" || Array.isArray(prompt)
+                || !Object.values(prompt).some((node) => node && typeof node === "object" && node.class_type)) {
+                throw new Error(T("model_preview_api_workflow_required"));
+            }
+            localStorage.setItem(STORAGE_MODEL_PREVIEW_WORKFLOW, JSON.stringify(prompt));
+            localStorage.setItem(STORAGE_MODEL_PREVIEW_WORKFLOW_NAME, file.name);
+            this._updateModelPreviewConfigName();
+        } catch (error) {
+            alert(T("model_preview_import_failed", { msg: error instanceof Error ? error.message : String(error) }));
+        } finally {
+            if (input) input.value = "";
+        }
+    }
+
+    _clearModelPreviewWorkflow() {
+        localStorage.removeItem(STORAGE_MODEL_PREVIEW_WORKFLOW);
+        localStorage.removeItem(STORAGE_MODEL_PREVIEW_WORKFLOW_NAME);
+        this._updateModelPreviewConfigName();
     }
 
     _clampPromptFontSize(value) {
@@ -3037,6 +3084,8 @@ export class CapTimelineEditorApp {
         if (CapTimelineEditorApp._open === this) CapTimelineEditorApp._open = null;
         this._unbindExecutionWatch();
         this._clearAllRunPreviews();
+        if (this._modelPreviewEntry?.url) URL.revokeObjectURL(this._modelPreviewEntry.url);
+        this._modelPreviewEntry = null;
         document.body.classList.remove(...BODY_UI_CLASSES);
     }
 
@@ -3245,6 +3294,11 @@ export class CapTimelineEditorApp {
                   <input class="cat-te-save-latent" type="checkbox" disabled />
                   <span>${T("save_latent_label")}</span>
                 </label>
+                <div class="cat-te-clip-setting-row cat-te-seed-row" title="${T("clip_seed_title")}">
+                  <span>${T("clip_seed_label")}</span>
+                  <input class="cat-te-clip-seed" type="number" min="-1" max="9007199254740991" step="1" value="-1" disabled />
+                  <button type="button" class="cat-te-btn cat-te-clip-seed-random" title="${T("randomize_seed_title")}" disabled>${iconHtml("refresh", 12)}</button>
+                </div>
               </div>
               <div class="cat-te-prompt-wrap">
                 <div class="cat-te-prompt-label-row">
@@ -3813,8 +3867,20 @@ export class CapTimelineEditorApp {
                     <span>${T("ai_instruction_label")}</span>
                     <textarea class="cat-te-ai-result" rows="8" placeholder="${T("ai_instruction_placeholder")}"></textarea>
                   </label>
+                  <div class="cat-te-ai-preview" hidden>
+                    <div class="cat-te-ai-preview-head">
+                      <span>${T("model_preview_title")}</span>
+                      <span class="cat-te-ai-preview-status"></span>
+                    </div>
+                    <div class="cat-te-ai-preview-stage">
+                      <img class="cat-te-ai-preview-image" alt="${T("model_preview_title")}" hidden />
+                      <video class="cat-te-ai-preview-video" autoplay loop muted playsinline hidden></video>
+                      <div class="cat-te-ai-preview-empty"></div>
+                    </div>
+                  </div>
                   <div class="cat-te-ai-optimize-actions">
                     <button type="button" class="cat-te-btn cat-te-btn-primary cat-te-ai-generate">${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span></button>
+                    <button type="button" class="cat-te-btn cat-te-ai-preview-run">${iconHtml("eye", 12)}<span>${T("preview_btn")}</span></button>
                     <button type="button" class="cat-te-btn cat-te-ai-run">${iconHtml("play", 12)}<span>${T("run_and_close")}</span></button>
                   </div>
                 </div>
@@ -3930,6 +3996,22 @@ export class CapTimelineEditorApp {
                     <span class="cat-te-info-tip-pop">${T("use_clip_specified_video_filename_info_text")}</span>
                   </span>
                 </label>
+                <div class="cat-te-model-preview-settings">
+                  <div class="cat-te-agent-heading">
+                    <span>${T("model_preview_settings_title")}</span>
+                    <div class="cat-te-model-preview-config-actions">
+                      <button type="button" class="cat-te-btn cat-te-model-preview-import">${T("import_preview_workflow_btn")}</button>
+                      <button type="button" class="cat-te-btn cat-te-model-preview-clear">${T("clear_btn")}</button>
+                    </div>
+                  </div>
+                  <label class="cat-te-modal-row">
+                    <span>${T("model_preview_model_label")}</span>
+                    <input class="cat-te-model-preview-model" type="text" placeholder="${T("model_preview_model_placeholder")}" />
+                  </label>
+                  <div class="cat-te-model-preview-config-name"></div>
+                  <div class="cat-te-agent-note">${T("model_preview_workflow_hint")}</div>
+                  <input class="cat-te-model-preview-file" type="file" accept="application/json,.json" hidden />
+                </div>
                 <div class="cat-te-agent-settings">
                   <div class="cat-te-agent-heading">
                     <span>AI Agent</span>
@@ -4008,6 +4090,8 @@ export class CapTimelineEditorApp {
         this.secondSampleCb = el.querySelector(".cat-te-second-sample");
         this.h3MotionContextInput = el.querySelector(".cat-te-h3-motion-context");
         this.saveLatentCb = el.querySelector(".cat-te-save-latent");
+        this.clipSeedInput = el.querySelector(".cat-te-clip-seed");
+        this.clipSeedRandomBtn = el.querySelector(".cat-te-clip-seed-random");
         this.clipRoleSelect = el.querySelector(".cat-te-clip-role");
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
@@ -4186,6 +4270,12 @@ export class CapTimelineEditorApp {
         this.trackConvertMessage = el.querySelector(".cat-te-track-convert-message");
         this.aiResultInput = el.querySelector(".cat-te-ai-result");
         this.aiGenerateBtn = el.querySelector(".cat-te-ai-generate");
+        this.aiPreviewBtn = el.querySelector(".cat-te-ai-preview-run");
+        this.aiPreviewPanel = el.querySelector(".cat-te-ai-preview");
+        this.aiPreviewStatus = el.querySelector(".cat-te-ai-preview-status");
+        this.aiPreviewImage = el.querySelector(".cat-te-ai-preview-image");
+        this.aiPreviewVideo = el.querySelector(".cat-te-ai-preview-video");
+        this.aiPreviewEmpty = el.querySelector(".cat-te-ai-preview-empty");
         this.aiSrcText = el.querySelector(".cat-te-ai-src-text");
         this.aiSrcTabs = el.querySelectorAll(".cat-te-ai-src-tab");
         attachRichPromptHandler(this.aiSrcText, { mode: "widget" });
@@ -4194,6 +4284,9 @@ export class CapTimelineEditorApp {
         this.autosaveIntervalInput = el.querySelector(".cat-te-autosave-interval");
         this.promptFontSizeInput = el.querySelector(".cat-te-prompt-font-size");
         this.useClipVideoFilenameCb = el.querySelector(".cat-te-use-clip-video-filename");
+        this.modelPreviewModelInput = el.querySelector(".cat-te-model-preview-model");
+        this.modelPreviewFileInput = el.querySelector(".cat-te-model-preview-file");
+        this.modelPreviewConfigName = el.querySelector(".cat-te-model-preview-config-name");
         this.agentList = el.querySelector(".cat-te-agent-list");
         this.agentForm = el.querySelector(".cat-te-agent-form");
         this.agentLabelInput = el.querySelector(".cat-te-agent-label");
@@ -4314,6 +4407,12 @@ export class CapTimelineEditorApp {
         }
         el.querySelector(".cat-te-settings").addEventListener("click", () => this._openSettings());
         this.settingsModal.querySelector(".cat-te-modal-close").addEventListener("click", () => this._closeSettings());
+        el.querySelector(".cat-te-model-preview-import")?.addEventListener("click", () => this.modelPreviewFileInput?.click());
+        el.querySelector(".cat-te-model-preview-clear")?.addEventListener("click", () => this._clearModelPreviewWorkflow());
+        this.modelPreviewFileInput?.addEventListener("change", (e) => void this._importModelPreviewWorkflow(e));
+        this.modelPreviewModelInput?.addEventListener("change", () => {
+            localStorage.setItem(STORAGE_MODEL_PREVIEW_MODEL, String(this.modelPreviewModelInput.value || "").trim());
+        });
         el.querySelector(".cat-te-track-rename-close")?.addEventListener("click", () => this._closeTrackRenameModal());
         el.querySelector(".cat-te-track-rename-cancel")?.addEventListener("click", () => this._closeTrackRenameModal());
         el.querySelector(".cat-te-track-rename-confirm")?.addEventListener("click", () => this._confirmTrackRename());
@@ -4416,6 +4515,8 @@ export class CapTimelineEditorApp {
             this.secondSampleCb?.addEventListener("change", () => this._onSecondSampleChange());
             this.h3MotionContextInput?.addEventListener("change", () => this._onH3MotionContextChange());
             this.saveLatentCb?.addEventListener("change", () => this._onSaveLatentChange());
+            this.clipSeedInput?.addEventListener("change", () => this._onClipSeedChange());
+            this.clipSeedRandomBtn?.addEventListener("click", () => this._randomizeClipSeed());
         }
         this.clipRoleSelect?.addEventListener("change", () => this._onClipRoleChange());
         this.clipRoleCustomInput?.addEventListener("change", () => this._onClipRoleCustomChange());
@@ -4536,6 +4637,10 @@ export class CapTimelineEditorApp {
         this.aiGenerateBtn?.addEventListener("click", () => {
             if (this._aiOptimizeBusy) this._cancelAiOptimize();
             else void this._runAiOptimize();
+        });
+        this.aiPreviewBtn?.addEventListener("click", () => {
+            if (this._modelPreviewPromptId) void this._stopModelPreview();
+            else void this._startModelPreview();
         });
         el.querySelector(".cat-te-ai-run").addEventListener("click", () => {
             const clip = this._findClipById(this._aiOptimizeClipId);
@@ -6217,6 +6322,10 @@ export class CapTimelineEditorApp {
 
     _abortPendingGeneratedJob(e) {
         const promptId = this._promptIdFromEvent(e);
+        if (promptId && promptId === this._modelPreviewPromptId) {
+            this._finishModelPreview(T("model_preview_stopped"));
+            return;
+        }
         let droppedStamp = null;
         const droppedIds = [];
         if (promptId) {
@@ -6359,6 +6468,11 @@ export class CapTimelineEditorApp {
     _onExecutionStart(e) {
         if (this._destroyed || !this._isNodeOnLiveGraph()) return;
         const promptId = this._promptIdFromEvent(e);
+        if (promptId && promptId === this._modelPreviewPromptId) {
+            this._modelPreviewRunning = true;
+            this._renderModelPreview(this._modelPreviewEntry, T("model_preview_running"));
+            return;
+        }
         // Keep prompt id even when the pending list races behind queuePrompt.
         if (promptId) this._runningPromptId = promptId;
         let job = null;
@@ -6492,6 +6606,167 @@ export class CapTimelineEditorApp {
         for (const id of [...this._runPreviewByClipId.keys()]) this._clearRunPreview(id);
     }
 
+    _renderModelPreview(entry = this._modelPreviewEntry, status = "") {
+        if (!this.aiPreviewPanel) return;
+        this.aiPreviewPanel.hidden = false;
+        if (this.aiPreviewStatus) this.aiPreviewStatus.textContent = status;
+        this.aiPreviewVideo?.pause();
+        if (this.aiPreviewVideo) {
+            this.aiPreviewVideo.hidden = true;
+            this.aiPreviewVideo.removeAttribute("src");
+            this.aiPreviewVideo.load();
+        }
+        if (this.aiPreviewImage) {
+            this.aiPreviewImage.hidden = true;
+            this.aiPreviewImage.removeAttribute("src");
+        }
+        if (entry?.url && entry.mime === "video/mp4" && this.aiPreviewVideo) {
+            this.aiPreviewVideo.src = entry.url;
+            this.aiPreviewVideo.hidden = false;
+            void this.aiPreviewVideo.play().catch(() => {});
+        } else if (entry?.url && this.aiPreviewImage) {
+            this.aiPreviewImage.src = entry.url;
+            this.aiPreviewImage.hidden = false;
+        }
+        if (this.aiPreviewEmpty) {
+            this.aiPreviewEmpty.hidden = !!entry?.url;
+            this.aiPreviewEmpty.textContent = entry?.url ? "" : (status || T("model_preview_waiting"));
+        }
+    }
+
+    _syncModelPreviewButton() {
+        if (!this.aiPreviewBtn) return;
+        const active = !!this._modelPreviewPromptId;
+        this.aiPreviewBtn.classList.toggle("is-running", active);
+        this.aiPreviewBtn.innerHTML = active
+            ? `${iconHtml("stop", 12)}<span>${T("stop_preview_btn")}</span>`
+            : `${iconHtml("eye", 12)}<span>${T("preview_btn")}</span>`;
+    }
+
+    _replaceModelPreviewTokens(value, values) {
+        if (Array.isArray(value)) return value.map((item) => this._replaceModelPreviewTokens(item, values));
+        if (value && typeof value === "object") {
+            return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+                key,
+                this._replaceModelPreviewTokens(item, values),
+            ]));
+        }
+        if (typeof value !== "string") return value;
+        const exact = /^\{\{([a-z0-9_]+)\}\}$/i.exec(value);
+        if (exact && Object.hasOwn(values, exact[1])) return values[exact[1]];
+        return value.replace(/\{\{([a-z0-9_]+)\}\}/gi, (match, key) => (
+            Object.hasOwn(values, key) ? String(values[key]) : match
+        ));
+    }
+
+    async _startModelPreview() {
+        const clip = this._findClipById(this._aiOptimizeClipId);
+        if (!clip || this._modelPreviewPromptId) return;
+        let workflow;
+        try {
+            workflow = JSON.parse(localStorage.getItem(STORAGE_MODEL_PREVIEW_WORKFLOW) || "");
+        } catch {
+            workflow = null;
+        }
+        if (!workflow) {
+            this._renderModelPreview(null, T("model_preview_config_required"));
+            return;
+        }
+        if (!Object.values(workflow).some((node) => node?.class_type === "ModelPreviewOverrideKJ")) {
+            this._renderModelPreview(null, T("model_preview_override_required"));
+            return;
+        }
+        const meta = this._ensureClipMeta(clip);
+        if (this._normalizeClipSeed(meta.seed) < 0) {
+            meta.seed = this._randomClipSeed();
+            this._meta.set(clip.id, meta);
+            if (this._selClip?.id === clip.id && this.clipSeedInput) {
+                this.clipSeedInput.value = String(meta.seed);
+            }
+            this._saveToWidgets();
+        }
+        const files = this._clipAiOptimizeFiles(clip);
+        const values = {
+            prompt: this._composeFinalPrompt(clip, meta),
+            seed: meta.seed,
+            duration: Number(clip.duration) || 0,
+            context: this._clampH3MotionContextLength(meta.h3MotionContextLength),
+            width: Number(this._w("width")?.value ?? PY_SCALAR_DEFAULTS.width),
+            height: Number(this._w("height")?.value ?? PY_SCALAR_DEFAULTS.height),
+            fps: Number(this._w("fps")?.value ?? 24),
+            model: localStorage.getItem(STORAGE_MODEL_PREVIEW_MODEL) || "",
+        };
+        files.forEach((file, index) => {
+            values[`media_${index + 1}`] = file.file;
+            if (file.kind === "image") values[`image_${index + 1}`] = file.file;
+            if (file.kind === "video") values[`video_${index + 1}`] = file.file;
+        });
+        const prompt = this._replaceModelPreviewTokens(workflow, values);
+        const requestPromptId = crypto.randomUUID();
+        this._modelPreviewClipId = String(clip.id);
+        this._modelPreviewPromptId = requestPromptId;
+        this._modelPreviewEntry = null;
+        this._syncModelPreviewButton();
+        this._renderModelPreview(null, T("model_preview_queueing"));
+        try {
+            const response = await api.fetchApi("/prompt", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    prompt,
+                    prompt_id: requestPromptId,
+                    client_id: api.clientId || app?.clientId || crypto.randomUUID(),
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.error) {
+                throw new Error(data?.error?.message || data?.error || `HTTP ${response.status}`);
+            }
+            const returnedPromptId = String(data.prompt_id || "").trim();
+            if (!returnedPromptId) throw new Error(T("model_preview_no_prompt_id"));
+            this._modelPreviewPromptId = returnedPromptId;
+            this._syncModelPreviewButton();
+            this._renderModelPreview(null, T("model_preview_queued"));
+        } catch (error) {
+            this._modelPreviewPromptId = null;
+            this._modelPreviewClipId = null;
+            this._syncModelPreviewButton();
+            this._renderModelPreview(null, T("model_preview_failed", { msg: error instanceof Error ? error.message : String(error) }));
+        }
+    }
+
+    async _stopModelPreview() {
+        const promptId = this._modelPreviewPromptId;
+        if (!promptId) return;
+        let status = T("model_preview_stopped");
+        try {
+            if (this._modelPreviewRunning) await api.interrupt(promptId);
+            else if (typeof api.deleteItem === "function") await api.deleteItem("queue", promptId);
+            else await api.fetchApi("/queue", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ delete: [promptId] }),
+            });
+        } catch (error) {
+            status = T("model_preview_failed", {
+                msg: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            this._finishModelPreview(status);
+        }
+    }
+
+    _finishModelPreview(status) {
+        const clipId = this._modelPreviewClipId;
+        this._modelPreviewPromptId = null;
+        this._modelPreviewClipId = null;
+        this._modelPreviewRunning = false;
+        this._syncModelPreviewButton();
+        if (String(this._aiOptimizeClipId) === String(clipId)) {
+            this._renderModelPreview(this._modelPreviewEntry, status);
+        }
+    }
+
     /**
      * KJNodes Model Preview Override pushes sampling frames/videos over WS.
      * Attach the latest video/mp4 blob to the running timeline clip for hover preview.
@@ -6501,6 +6776,31 @@ export class CapTimelineEditorApp {
         const d = e?.detail;
         if (!d || typeof d.image !== "string") return;
         const mime = typeof d.mime === "string" ? d.mime : "";
+        if (this._modelPreviewRunning && ["image/jpeg", "image/webp", "video/mp4"].includes(mime)) {
+            let blob;
+            try {
+                blob = this._b64ToBlob(d.image, mime);
+            } catch {
+                return;
+            }
+            if (this._modelPreviewEntry?.url) {
+                try { URL.revokeObjectURL(this._modelPreviewEntry.url); } catch { /* ignore */ }
+            }
+            this._modelPreviewEntry = {
+                url: URL.createObjectURL(blob),
+                mime,
+                clipId: this._modelPreviewClipId,
+                step: Number(d.step) || 0,
+                total: Number(d.total) || 0,
+            };
+            if (String(this._aiOptimizeClipId) === String(this._modelPreviewClipId)) {
+                const status = this._modelPreviewEntry.step > 0 && this._modelPreviewEntry.total > 0
+                    ? T("model_preview_step", { step: this._modelPreviewEntry.step, total: this._modelPreviewEntry.total })
+                    : T("model_preview_receiving");
+                this._renderModelPreview(this._modelPreviewEntry, status);
+            }
+            return;
+        }
         if (mime !== "video/mp4") return;
 
         let clipId = this._runningClipId;
@@ -6554,6 +6854,14 @@ export class CapTimelineEditorApp {
         const d = e?.detail;
         if (!d || typeof d !== "object") return;
         const pid = String(d.prompt_id ?? d.promptId ?? "").trim();
+        if (pid && pid === this._modelPreviewPromptId) {
+            const max = Number(d.max);
+            if (max > 0) this._renderModelPreview(
+                this._modelPreviewEntry,
+                T("model_preview_progress", { pct: Math.round((Number(d.value) || 0) * 100 / max) }),
+            );
+            return;
+        }
         if (pid) {
             if (this._runningPromptId && this._runningPromptId !== pid) return;
             if (!this._runningPromptId) this._runningPromptId = pid;
@@ -6571,6 +6879,7 @@ export class CapTimelineEditorApp {
         const d = e?.detail;
         if (!d || typeof d !== "object") return;
         const pid = String(d.prompt_id ?? d.promptId ?? "").trim();
+        if (pid && pid === this._modelPreviewPromptId) return;
         if (pid) {
             if (this._runningPromptId && this._runningPromptId !== pid) return;
             if (!this._runningPromptId) this._runningPromptId = pid;
@@ -6669,6 +6978,7 @@ export class CapTimelineEditorApp {
 
     _onPromptExecuted(e) {
         if (this._destroyed || !this._isNodeOnLiveGraph()) return;
+        if (this._promptIdFromEvent(e) === this._modelPreviewPromptId) return;
         const files = this._collectExecutedOutputVideos(e?.detail);
         if (!files.length) return;
         const promptId = this._promptIdFromEvent(e);
@@ -6690,6 +7000,12 @@ export class CapTimelineEditorApp {
     _flushPendingGeneratedVideos(e) {
         if (this._destroyed || !this._isNodeOnLiveGraph()) return;
         const promptId = this._promptIdFromEvent(e);
+        if (promptId && promptId === this._modelPreviewPromptId) {
+            this._finishModelPreview(
+                this._modelPreviewEntry ? T("model_preview_complete") : T("model_preview_not_received"),
+            );
+            return;
+        }
         // One prompt may finish several for-loop clips — flush every matching job.
         const jobs = [];
         if (promptId) {
@@ -9744,6 +10060,7 @@ export class CapTimelineEditorApp {
         meta.agent = meta.agent === "other" ? "other" : this._knownClipAgent(meta.agent);
         if (meta.agent !== "other") meta.agentCustom = "";
         else meta.agentCustom = String(meta.agentCustom || "").trim();
+        meta.seed = this._normalizeClipSeed(meta.seed);
         meta.promptIncludes = normalizePromptIncludes(meta.promptIncludes);
         if (!items.length) {
             clip.thumbnail = null;
@@ -11964,6 +12281,7 @@ export class CapTimelineEditorApp {
                 secondSample: !!c.second_sample,
                 h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
                 saveLatent: !!c.save_latent,
+                seed: this._normalizeClipSeed(c.seed),
                 generatedVideos: this._generatedVideosFromJson(c),
                 genEditAudios: this._normalizeGenEditAudioDraft(c.gen_edit_audios),
                 previewMode: this._previewModeFromJson(c),
@@ -12062,6 +12380,7 @@ export class CapTimelineEditorApp {
                 ),
                 h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
                 saveLatent: !!c.save_latent,
+                seed: this._normalizeClipSeed(c.seed),
             });
             this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
             this._decorateClip(clip);
@@ -12119,6 +12438,7 @@ export class CapTimelineEditorApp {
             ),
             h3MotionContextLength: Math.max(0, Math.round(Number(c.h3_motion_context_length) || 0)),
             saveLatent: !!c.save_latent,
+            seed: this._normalizeClipSeed(c.seed),
         });
         this._normalizeVisualMeta(clip, this._meta.get(clip.id), { seedFromClip: false });
         this._decorateClip(clip);
@@ -15435,6 +15755,8 @@ export class CapTimelineEditorApp {
         const secondSample = el.querySelector(".cat-te-second-sample");
         const h3Motion = el.querySelector(".cat-te-h3-motion-context");
         const saveLatent = el.querySelector(".cat-te-save-latent");
+        const seed = el.querySelector(".cat-te-clip-seed");
+        const seedRandom = el.querySelector(".cat-te-clip-seed-random");
         const role = el.querySelector(".cat-te-clip-role");
         const agent = el.querySelector(".cat-te-clip-agent");
         if (!head) return;
@@ -15444,6 +15766,8 @@ export class CapTimelineEditorApp {
         this.secondSampleCb = secondSample;
         this.h3MotionContextInput = h3Motion;
         this.saveLatentCb = saveLatent;
+        this.clipSeedInput = seed;
+        this.clipSeedRandomBtn = seedRandom;
         this.clipRoleSelect = role;
         this.clipRoleCustomInput = el.querySelector(".cat-te-clip-role-custom");
         this.clipRoleCustomRow = el.querySelector(".cat-te-clip-role-custom-row");
@@ -15458,6 +15782,8 @@ export class CapTimelineEditorApp {
             secondSample?.addEventListener("change", () => this._onSecondSampleChange());
             h3Motion?.addEventListener("change", () => this._onH3MotionContextChange());
             saveLatent?.addEventListener("change", () => this._onSaveLatentChange());
+            seed?.addEventListener("change", () => this._onClipSeedChange());
+            seedRandom?.addEventListener("click", () => this._randomizeClipSeed());
         }
     }
 
@@ -15493,6 +15819,11 @@ export class CapTimelineEditorApp {
             this.saveLatentCb.disabled = disabled;
             this.saveLatentCb.checked = enabled && !!m?.saveLatent;
         }
+        if (this.clipSeedInput) {
+            this.clipSeedInput.disabled = disabled;
+            this.clipSeedInput.value = enabled ? String(this._normalizeClipSeed(m?.seed)) : "-1";
+        }
+        if (this.clipSeedRandomBtn) this.clipSeedRandomBtn.disabled = disabled;
         if (this.clipRoleSelect) {
             this.clipRoleSelect.disabled = disabled;
             this.clipRoleSelect.value = enabled ? this._knownClipRole(m?.clipRole) : "multi_ref";
@@ -16165,6 +16496,7 @@ export class CapTimelineEditorApp {
         this._cancelAiOptimize();
         if (!this.aiOptimizeModal) return;
         this.aiOptimizeModal.hidden = true;
+        this.aiPreviewVideo?.pause();
         this._aiOptimizeClipId = null;
         this._syncAiOptimizeNavButtons();
     }
@@ -16204,6 +16536,15 @@ export class CapTimelineEditorApp {
         if (reloadModels) await this._loadAiOptimizeModels();
         await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
         this._syncAiOptimizeNavButtons();
+        if (String(clip.id) === String(this._modelPreviewClipId)
+            || String(clip.id) === String(this._modelPreviewEntry?.clipId)) {
+            this._renderModelPreview(this._modelPreviewEntry, this._modelPreviewPromptId
+                ? T("model_preview_running")
+                : T("model_preview_complete"));
+        } else if (this.aiPreviewPanel) {
+            this.aiPreviewPanel.hidden = true;
+        }
+        this._syncModelPreviewButton();
     }
 
     async _stepAiOptimizeClip(delta) {
@@ -16711,6 +17052,39 @@ export class CapTimelineEditorApp {
         this._meta.set(this._selClip.id, m);
     }
 
+    _normalizeClipSeed(value) {
+        const seed = Math.trunc(Number(value));
+        if (!Number.isFinite(seed) || seed < -1) return -1;
+        return Math.min(Number.MAX_SAFE_INTEGER, seed);
+    }
+
+    _randomClipSeed() {
+        const values = new Uint32Array(2);
+        crypto.getRandomValues(values);
+        const seed = (BigInt(values[0]) << 32n) | BigInt(values[1]);
+        return Number(seed % BigInt(Number.MAX_SAFE_INTEGER));
+    }
+
+    _onClipSeedChange() {
+        if (!this._selClip || this.clipSeedInput?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.seed = this._normalizeClipSeed(this.clipSeedInput.value);
+        this.clipSeedInput.value = String(m.seed);
+        this._meta.set(this._selClip.id, m);
+        this._saveToWidgets();
+    }
+
+    _randomizeClipSeed() {
+        if (!this._selClip || this.clipSeedRandomBtn?.disabled) return;
+        this._recordUndo();
+        const m = this._meta.get(this._selClip.id) ?? defaultImageMeta();
+        m.seed = this._randomClipSeed();
+        this._meta.set(this._selClip.id, m);
+        if (this.clipSeedInput) this.clipSeedInput.value = String(m.seed);
+        this._saveToWidgets();
+    }
+
     /** Persist audio fade seconds from the Clip onto clip meta (ms). */
     _syncAudioFadeMeta(clip) {
         if (!clip || clip.track?.type !== "audio") return;
@@ -16848,6 +17222,7 @@ export class CapTimelineEditorApp {
                     row.second_sample = !!m.secondSample;
                     row.h3_motion_context_length = this._clampH3MotionContextLength(m.h3MotionContextLength);
                     row.save_latent = !!m.saveLatent;
+                    row.seed = this._normalizeClipSeed(m.seed);
                     row.clip_role = m.clipRole || "multi_ref";
                     row.clip_role_custom = m.clipRole === "other" ? (m.clipRoleCustom || "") : "";
                     row.agent = m.agent || "MiniMaxH3";

@@ -44,6 +44,13 @@ def _h3_motion_context_length(clip: dict) -> int:
         return 0
 
 
+def _clip_seed(clip: dict) -> int:
+    try:
+        return max(-1, int((clip or {}).get("seed", -1)))
+    except (TypeError, ValueError):
+        return -1
+
+
 def _is_subtitle_track(track_type) -> bool:
     t = str(track_type or "").lower()
     return t in ("text", "subtitle")
@@ -746,6 +753,7 @@ class CAP_TimelineEditor(CAP_AudioTimeline):
                 "second_sample": bool(clip.get("second_sample", False)),
                 "h3_motion_context_length": _h3_motion_context_length(clip),
                 "save_latent": bool(clip.get("save_latent", False)),
+                "seed": _clip_seed(clip),
                 "images": _clip_image_refs(entries),
                 "prompt": _strip_comment_lines(clip.get("prompt") or "").strip(),
                 "detailed_description": _strip_comment_lines(
