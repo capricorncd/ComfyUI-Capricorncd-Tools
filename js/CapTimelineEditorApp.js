@@ -40,12 +40,12 @@ const STORAGE_MEDIA_LIST_VIEW = "cat-te-media-list-view";
 const STORAGE_AI_PROMPT_MODEL = "cat-te-ai-prompt-model";
 const STORAGE_AI_PROMPT_SKILL = "cat-te-ai-prompt-skill";
 const STORAGE_AI_PROMPT_LANG = "cat-te-ai-prompt-lang";
+const STORAGE_AI_PROMPT_CONTEXT = "cat-te-ai-prompt-context";
 const STORAGE_MODEL_PREVIEW_WORKFLOW = "cat-te-model-preview-workflow";
 const STORAGE_MODEL_PREVIEW_WORKFLOW_NAME = "cat-te-model-preview-workflow-name";
 const STORAGE_MODEL_PREVIEW_MODEL = "cat-te-model-preview-model";
 const AI_PROMPT_LANGUAGES = ["简体中文", "繁體中文", "English", "日本語"];
 const AGENT_DEFAULT_MODELS = { openai: "gpt-5.4", gemini: "gemini-3.7-flash" };
-const SKILL_URL_DEFAULT = "https://github.com/T8mars/minimax-h3-prompt-skill-T8";
 const DEFAULT_AUTOSAVE_INTERVAL_SEC = 5;
 const MIN_AUTOSAVE_INTERVAL_SEC = 1;
 const MAX_AUTOSAVE_INTERVAL_SEC = 300;
@@ -109,6 +109,14 @@ const CLIP_AGENTS = [
     { id: "Wan", label: "Wan" },
     { id: "other", get label() { return T("clip_role_other"); } },
 ];
+const DEFAULT_AI_PROMPT_CONTEXT = {
+    clip_prompt: true,
+    resource_description: true,
+    resource_prompt: true,
+    image_data: true,
+    video_data: true,
+    audio_data: true,
+};
 const MEDIA_ASSET_TYPES = [
     { id: "character", get label() { return T("asset_type_character"); } },
     { id: "scene", get label() { return T("asset_type_scene"); } },
@@ -3817,10 +3825,7 @@ export class CapTimelineEditorApp {
               <div class="cat-te-ai-optimize-body">
                 <div class="cat-te-ai-optimize-left">
                   <div class="cat-te-ai-optimize-tabs">
-                    <button type="button" class="cat-te-ai-src-tab is-clip-scope is-active" data-src="clip">${T("clip_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="resource">${T("media_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="prepend">${T("prepend_prompt_tab")}</button>
-                    <button type="button" class="cat-te-ai-src-tab is-shared-scope" data-src="append">${T("append_prompt_tab")}</button>
+                    <span class="cat-te-ai-source-label">${T("clip_prompt_tab")}</span>
                   </div>
                   <textarea class="cat-te-ai-src-text"></textarea>
                 </div>
@@ -3833,6 +3838,49 @@ export class CapTimelineEditorApp {
                       <button type="button" class="cat-te-prompt-include-chip" data-include="resource" title="${T("prompt_include_media_title")}">${T("prompt_include_media")}</button>
                       <button type="button" class="cat-te-prompt-include-chip" data-include="append_prompt" title="${T("prompt_include_append_title")}">${T("prompt_include_append")}</button>
                     </div>
+                  </div>
+                  <div class="cat-te-ai-context">
+                    <div class="cat-te-ai-context-title">${T("ai_context_title")}</div>
+                    <div class="cat-te-ai-context-grid">
+                      <label><input type="checkbox" data-context="clip_prompt" checked /><span>${T("ai_context_clip_prompt")}</span></label>
+                      <label><input type="checkbox" data-context="resource_description" checked /><span>${T("ai_context_resource_description")}</span></label>
+                      <label><input type="checkbox" data-context="resource_prompt" checked /><span>${T("ai_context_resource_prompt")}</span></label>
+                      <label><input type="checkbox" data-context="image_data" checked /><span>${T("ai_context_image_data")}</span></label>
+                      <label><input type="checkbox" data-context="video_data" checked /><span>${T("ai_context_video_data")}</span></label>
+                      <label><input type="checkbox" data-context="audio_data" checked /><span>${T("ai_context_audio_data")}</span></label>
+                    </div>
+                  </div>
+                  <div class="cat-te-ai-field-row">
+                    <label class="cat-te-ai-field">
+                      <span>${T("prompt_target_agent_label")}</span>
+                      <select class="cat-te-ai-target-agent">
+                        <option value="MiniMaxH3">MiniMaxH3</option>
+                        <option value="LTX">LTX</option>
+                        <option value="Bernini">Bernini</option>
+                        <option value="Wan">Wan</option>
+                        <option value="other">${T("clip_role_other")}</option>
+                      </select>
+                    </label>
+                    <label class="cat-te-ai-field">
+                      <span>${T("prompt_generation_mode_label")}</span>
+                      <select class="cat-te-ai-target-role">
+                        <option value="multi_ref">${T("clip_role_multi_ref")}</option>
+                        <option value="first_last">${T("clip_role_first_last")}</option>
+                        <option value="t2v">${T("clip_role_t2v")}</option>
+                        <option value="video_ref">${T("clip_role_video_ref")}</option>
+                        <option value="video_edit">${T("clip_role_video_edit")}</option>
+                        <option value="other">${T("clip_role_other")}</option>
+                      </select>
+                    </label>
+                    <label class="cat-te-ai-field">
+                      <span>${T("audio_usage_label")}</span>
+                      <select class="cat-te-ai-audio-mode">
+                        <option value="auto">${T("audio_usage_auto")}</option>
+                        <option value="perform">${T("audio_usage_perform")}</option>
+                        <option value="lipsync">${T("audio_usage_lipsync")}</option>
+                        <option value="none">${T("audio_usage_none")}</option>
+                      </select>
+                    </label>
                   </div>
                   <div class="cat-te-ai-field-row">
                     <div class="cat-te-ai-field">
@@ -4255,6 +4303,10 @@ export class CapTimelineEditorApp {
         this.aiOptimizeNextBtn = el.querySelector(".cat-te-ai-optimize-nav.next");
         this.aiModelSelect = el.querySelector(".cat-te-ai-model");
         this.aiLangSelect = el.querySelector(".cat-te-ai-lang");
+        this.aiTargetAgentSelect = el.querySelector(".cat-te-ai-target-agent");
+        this.aiTargetRoleSelect = el.querySelector(".cat-te-ai-target-role");
+        this.aiAudioModeSelect = el.querySelector(".cat-te-ai-audio-mode");
+        this.aiContextInputs = el.querySelectorAll(".cat-te-ai-context input[data-context]");
         this.aiSystemInput = el.querySelector(".cat-te-ai-system");
         this.aiSkillInput = el.querySelector(".cat-te-ai-skill");
         this.skillPickBtn = el.querySelector(".cat-te-skill-pick-btn");
@@ -4282,7 +4334,6 @@ export class CapTimelineEditorApp {
         this.aiPreviewVideo = el.querySelector(".cat-te-ai-preview-video");
         this.aiPreviewEmpty = el.querySelector(".cat-te-ai-preview-empty");
         this.aiSrcText = el.querySelector(".cat-te-ai-src-text");
-        this.aiSrcTabs = el.querySelectorAll(".cat-te-ai-src-tab");
         attachRichPromptHandler(this.aiSrcText, { mode: "widget" });
 
         this.settingsModal = el.querySelector(".cat-te-settings-modal");
@@ -4633,9 +4684,6 @@ export class CapTimelineEditorApp {
             e.stopPropagation();
             void this._stepAiOptimizeClip(1);
         });
-        this.aiSrcTabs?.forEach((tab) => {
-            tab.addEventListener("click", () => this._setAiOptimizeSrcTab(tab.dataset.src));
-        });
         this.aiSrcText?.addEventListener("focus", () => { this._promptManagerUndoArmed = true; });
         this.aiSrcText?.addEventListener("blur", () => { this._promptManagerUndoArmed = false; });
         this.aiSrcText?.addEventListener("input", () => this._onPromptManagerSourceInput());
@@ -4656,6 +4704,14 @@ export class CapTimelineEditorApp {
         this.aiLangSelect?.addEventListener("change", () => {
             const lang = this._aiOutputLanguage();
             localStorage.setItem(STORAGE_AI_PROMPT_LANG, lang);
+        });
+        this.aiTargetAgentSelect?.addEventListener("change", () => void this._onAiPromptTargetChange());
+        this.aiTargetRoleSelect?.addEventListener("change", () => void this._onAiPromptTargetChange());
+        this.aiContextInputs?.forEach((input) => {
+            input.addEventListener("change", () => {
+                this._saveAiPromptContext();
+                this._syncAiPromptContextControls();
+            });
         });
         this.skillPickBtn?.addEventListener("click", (e) => {
             e.preventDefault();
@@ -16419,42 +16475,27 @@ export class CapTimelineEditorApp {
         this.promptInput.value = this._composeFinalPrompt(clip, meta);
     }
 
-    _promptManagerSettingKey(tab) {
-        if (tab === "prepend") return "prepend_prompt";
-        if (tab === "append") return "append_prompt";
-        return null;
-    }
-
-    _promptManagerValue(tab, clip) {
+    _promptManagerValue(_tab, clip) {
         if (!clip) return "";
         const meta = this._ensureClipMeta(clip);
-        if (tab === "clip") return String(meta.prompt || "");
-        if (tab === "resource") return this._mediaPromptBlock(clip);
-        const key = this._promptManagerSettingKey(tab);
-        return key ? this._readSettingPrompt(key) : "";
+        return String(meta.prompt || "");
     }
 
     _writePromptManagerValue(tab, text, { recordUndo = true } = {}) {
         const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
-        if (!clip || tab === "resource") return false;
+        if (!clip) return false;
         if (recordUndo) this._recordUndo();
         const value = String(text ?? "");
-        if (tab === "clip") {
-            const meta = this._ensureClipMeta(clip);
-            meta.prompt = value;
-            this._meta.set(clip.id, meta);
-        } else {
-            const key = this._promptManagerSettingKey(tab);
-            if (!key) return false;
-            this._writeSettingPrompt(key, value);
-        }
+        const meta = this._ensureClipMeta(clip);
+        meta.prompt = value;
+        this._meta.set(clip.id, meta);
         this._refreshFinalPromptDisplay();
         this._saveToWidgets();
         return true;
     }
 
     _onPromptManagerSourceInput() {
-        if (!this.aiSrcText || this.aiSrcText.readOnly || this._aiOptimizeSrc === "resource") return;
+        if (!this.aiSrcText || this.aiSrcText.readOnly) return;
         if (this._promptManagerUndoArmed) {
             this._recordUndo();
             this._promptManagerUndoArmed = false;
@@ -16462,29 +16503,9 @@ export class CapTimelineEditorApp {
         this._writePromptManagerValue(this._aiOptimizeSrc, this.aiSrcText.value, { recordUndo: false });
     }
 
-    _mediaPromptBlock(clip) {
+    _clipAiOptimizeFiles(clip, context = DEFAULT_AI_PROMPT_CONTEXT) {
         const m = this._ensureClipMeta(clip);
-        const items = this._clipItems(m);
-        const lines = [];
-        items.forEach((item, index) => {
-            if (item.enabled === false) return;
-            const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
-            const name = (item.file || "").split(/[\\/]/).pop() || item.file || T("asset_index_fallback", { index: index + 1 });
-            const kind = item.kind === "video" ? T("media_kind_video") : T("media_kind_image");
-            const type = media?.media_type || "";
-            const tags = Array.isArray(media?.tags) ? media.tags.filter(Boolean).join(", ") : "";
-            const prompt = String(media?.prompt || "");
-            const meta = [kind, type, tags].filter(Boolean).join(" · ");
-            lines.push(`${index + 1}. ${name}${meta ? `（${meta}）` : ""}`);
-            lines.push(prompt || T("empty_paren"));
-            lines.push("");
-        });
-        return lines.join("\n").trim() || T("no_media_prompt_for_clip");
-    }
-
-    _clipAiOptimizeFiles(clip) {
-        const m = this._ensureClipMeta(clip);
-        return this._clipItems(m)
+        const rows = this._clipItems(m)
             .filter((item) => item.enabled !== false)
             .map((item) => {
             const media = (item.id && this._findMediaById(item.id)) || this._findMedia(item.kind, item.file);
@@ -16498,22 +16519,55 @@ export class CapTimelineEditorApp {
                 setting_description: String(media?.setting_description || ""),
                 media_type: String(media?.media_type || ""),
                 tags: Array.isArray(media?.tags) ? media.tags : [],
+                include_description: context.resource_description !== false,
+                include_prompt: context.resource_prompt !== false,
+                include_data: item.kind === "video"
+                    ? context.video_data !== false
+                    : item.kind === "audio" ? context.audio_data !== false : context.image_data !== false,
             };
         });
+        const start = Number(clip.startTime) || 0;
+        const end = start + Math.max(0, Number(clip.duration) || 0);
+        for (const track of this._timeline?.tracks || []) {
+            if (track.type !== "audio" || track.muted) continue;
+            const info = this._trackInfo.get(track.id) || {};
+            if (info.enabled === false) continue;
+            for (const audioClip of track.clips || []) {
+                const audioStart = Number(audioClip.startTime) || 0;
+                const audioEnd = audioStart + Math.max(0, Number(audioClip.duration) || 0);
+                if (audioEnd <= start || audioStart >= end) continue;
+                const audioMeta = this._meta.get(audioClip.id) || defaultAudioMeta(this._trackIndex(track));
+                if (audioMeta.muted) continue;
+                const media = (audioMeta.mediaId && this._findMediaById(audioMeta.mediaId))
+                    || this._findMedia("audio", audioClip.src);
+                const file = String(media?.file || audioClip.src || "").trim();
+                if (!file || rows.some((row) => row.kind === "audio" && row.file === file)) continue;
+                const status = this._mediaStatus.get(`audio:${file}`);
+                rows.push({
+                    kind: "audio",
+                    file,
+                    location: status?.location || media?.location || "input",
+                    prompt: String(media?.prompt || ""),
+                    generation_prompt: String(media?.generation_prompt || ""),
+                    setting_description: String(media?.setting_description || ""),
+                    media_type: String(media?.media_type || ""),
+                    tags: Array.isArray(media?.tags) ? media.tags : [],
+                    include_description: context.resource_description !== false,
+                    include_prompt: context.resource_prompt !== false,
+                    include_data: context.audio_data !== false,
+                    timeline_overlap_sec: [Math.max(start, audioStart), Math.min(end, audioEnd)],
+                });
+            }
+        }
+        return rows.filter((row) => row.include_data || row.include_description || row.include_prompt);
     }
 
-    _setAiOptimizeSrcTab(tab) {
-        const allowed = new Set(["clip", "resource", "prepend", "append"]);
-        const next = allowed.has(tab) ? tab : "clip";
-        this._aiOptimizeSrc = next;
-        this.aiSrcTabs?.forEach((btn) => {
-            btn.classList.toggle("is-active", btn.dataset.src === next);
-            btn.setAttribute("aria-selected", btn.dataset.src === next ? "true" : "false");
-        });
+    _setAiOptimizeSrcTab() {
+        this._aiOptimizeSrc = "clip";
         if (this.aiSrcText) {
-            this.aiSrcText.readOnly = next === "resource";
-            this.aiSrcText.classList.toggle("is-readonly", next === "resource");
-            this.aiSrcText.title = next === "resource" ? T("material_prompt_readonly_hint") : "";
+            this.aiSrcText.readOnly = false;
+            this.aiSrcText.classList.remove("is-readonly");
+            this.aiSrcText.title = "";
         }
         this._promptManagerUndoArmed = false;
         this._fillAiOptimizeSrc();
@@ -16529,13 +16583,75 @@ export class CapTimelineEditorApp {
         }
         const tab = this._aiOptimizeSrc || "clip";
         setRichPromptValue(this.aiSrcText, this._promptManagerValue(tab, clip), true);
-        this.aiSrcText.placeholder = tab === "resource" ? T("material_prompt_readonly_hint") : "";
+        this.aiSrcText.placeholder = "";
     }
 
     _restoreAiOutputLanguage() {
         if (!this.aiLangSelect) return;
         const saved = localStorage.getItem(STORAGE_AI_PROMPT_LANG) || "简体中文";
         this.aiLangSelect.value = AI_PROMPT_LANGUAGES.includes(saved) ? saved : "简体中文";
+    }
+
+    _aiPromptContext() {
+        const out = { ...DEFAULT_AI_PROMPT_CONTEXT };
+        try {
+            const saved = JSON.parse(localStorage.getItem(STORAGE_AI_PROMPT_CONTEXT) || "{}");
+            if (saved && typeof saved === "object") {
+                for (const key of Object.keys(out)) {
+                    if (typeof saved[key] === "boolean") out[key] = saved[key];
+                }
+            }
+        } catch { /* use defaults */ }
+        this.aiContextInputs?.forEach((input) => {
+            if (input.dataset.context in out) out[input.dataset.context] = input.checked;
+        });
+        return out;
+    }
+
+    _restoreAiPromptContext() {
+        let saved = {};
+        try { saved = JSON.parse(localStorage.getItem(STORAGE_AI_PROMPT_CONTEXT) || "{}"); } catch { /* use defaults */ }
+        this.aiContextInputs?.forEach((input) => {
+            const key = input.dataset.context;
+            input.checked = typeof saved?.[key] === "boolean" ? saved[key] : DEFAULT_AI_PROMPT_CONTEXT[key] !== false;
+        });
+        this._syncAiPromptContextControls();
+    }
+
+    _saveAiPromptContext() {
+        localStorage.setItem(STORAGE_AI_PROMPT_CONTEXT, JSON.stringify(this._aiPromptContext()));
+    }
+
+    _syncAiPromptContextControls() {
+        const context = this._aiPromptContext();
+        if (this.aiAudioModeSelect) this.aiAudioModeSelect.disabled = !context.audio_data || this._aiOptimizeBusy;
+    }
+
+    _aiPromptTargetAgent() {
+        return String(this.aiTargetAgentSelect?.value || "MiniMaxH3");
+    }
+
+    async _onAiPromptTargetChange() {
+        const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
+        if (!clip) return;
+        this._recordUndo();
+        const meta = this._ensureClipMeta(clip);
+        const targetAgent = this._aiPromptTargetAgent();
+        if (meta.agent !== targetAgent) meta.agentCustom = "";
+        meta.agent = targetAgent;
+        meta.clipRole = String(this.aiTargetRoleSelect?.value || "multi_ref");
+        meta.clipRoleCustom = "";
+        this._meta.set(clip.id, meta);
+        this._saveToWidgets();
+        await this._loadAiAgentPrompt(meta.agent, meta.clipRole);
+        this._syncAiPromptTargetControls();
+    }
+
+    _syncAiPromptTargetControls() {
+        const isH3 = this._aiPromptTargetAgent() === "MiniMaxH3";
+        if (this.aiSkillInput) this.aiSkillInput.disabled = !isH3 || this._aiOptimizeBusy;
+        if (this.skillPickBtn) this.skillPickBtn.disabled = !isH3 || this._aiOptimizeBusy;
+        if (this.skillSyncBtn) this.skillSyncBtn.disabled = !isH3 || this._aiOptimizeBusy || this._skillSyncBusy;
     }
 
     _aiOutputLanguage() {
@@ -16590,10 +16706,17 @@ export class CapTimelineEditorApp {
             this.aiSkillInput.value = localStorage.getItem(STORAGE_AI_PROMPT_SKILL) || "";
         }
         this._restoreAiOutputLanguage();
+        this._restoreAiPromptContext();
+        const targetAgent = ["MiniMaxH3", "LTX", "Bernini", "Wan", "other"].includes(meta.agent)
+            ? meta.agent
+            : "MiniMaxH3";
+        if (this.aiTargetAgentSelect) this.aiTargetAgentSelect.value = targetAgent;
+        if (this.aiTargetRoleSelect) this.aiTargetRoleSelect.value = this._knownClipRole(meta.clipRole);
         this._setAiOptimizeSrcTab(this._aiOptimizeSrc || "clip");
         this._syncPromptIncludesUi(meta);
         if (reloadModels) await this._loadAiOptimizeModels();
-        await this._loadAiAgentPrompt(meta.agent || "MiniMaxH3", meta.clipRole || "multi_ref");
+        await this._loadAiAgentPrompt(targetAgent, meta.clipRole || "multi_ref");
+        this._syncAiPromptTargetControls();
         this._syncAiOptimizeNavButtons();
         if (String(clip.id) === String(this._modelPreviewClipId)
             || String(clip.id) === String(this._modelPreviewEntry?.clipId)) {
@@ -16694,7 +16817,9 @@ export class CapTimelineEditorApp {
 
     _setAiOptimizeBusy(busy) {
         this._aiOptimizeBusy = !!busy;
-        this.aiSrcTabs?.forEach((tab) => { tab.disabled = !!busy; });
+        if (this.aiTargetAgentSelect) this.aiTargetAgentSelect.disabled = !!busy;
+        if (this.aiTargetRoleSelect) this.aiTargetRoleSelect.disabled = !!busy;
+        this.aiContextInputs?.forEach((input) => { input.disabled = !!busy; });
         if (busy) {
             if (this.aiOptimizePrevBtn) this.aiOptimizePrevBtn.disabled = true;
             if (this.aiOptimizeNextBtn) this.aiOptimizeNextBtn.disabled = true;
@@ -16710,19 +16835,21 @@ export class CapTimelineEditorApp {
             if (span) span.textContent = busy ? T("terminate_label") : T("edit_btn");
         }
         if (this.aiGenerateBtn) {
-            this.aiGenerateBtn.disabled = !busy && this._aiOptimizeSrc === "resource";
+            this.aiGenerateBtn.disabled = false;
             this.aiGenerateBtn.classList.toggle("is-loading", false);
             this.aiGenerateBtn.classList.toggle("is-cancel", busy);
             this.aiGenerateBtn.innerHTML = busy
                 ? `${iconHtml("sparkles", 12)}<span>${T("terminate_label")}</span>`
                 : `${iconHtml("sparkles", 12)}<span>${T("generate_btn")}</span>`;
         }
+        this._syncAiPromptContextControls();
+        this._syncAiPromptTargetControls();
     }
 
     async _runAiOptimize() {
         const clip = this._findClipById(this._aiOptimizeClipId) || this._selClip;
         const targetTab = this._aiOptimizeSrc || "clip";
-        if (!clip || clip.track?.type === "audio" || this._aiOptimizeBusy || targetTab === "resource") return;
+        if (!clip || clip.track?.type === "audio" || this._aiOptimizeBusy) return;
         const meta = this._ensureClipMeta(clip);
         const modelChoice = String(this.aiModelSelect?.value || "").trim();
         if (!modelChoice) {
@@ -16733,7 +16860,14 @@ export class CapTimelineEditorApp {
         const isAgent = modelChoice.startsWith("agent:");
         const model = modelChoice.startsWith("local:") ? modelChoice.slice(6) : "";
         const agentId = isAgent ? modelChoice.slice(6) : "";
-        const skill = String(this.aiSkillInput?.value || "");
+        const context = this._aiPromptContext();
+        const targetAgent = this._aiPromptTargetAgent();
+        const files = this._clipAiOptimizeFiles(clip, context);
+        if (!isAgent && files.some((row) => row.kind === "audio" && row.include_data !== false)) {
+            alert(T("local_model_audio_unsupported"));
+            return;
+        }
+        const skill = targetAgent === "MiniMaxH3" ? String(this.aiSkillInput?.value || "") : "";
         localStorage.setItem(STORAGE_AI_PROMPT_SKILL, skill);
         const outputLanguage = this._aiOutputLanguage();
         localStorage.setItem(STORAGE_AI_PROMPT_LANG, outputLanguage);
@@ -16747,16 +16881,18 @@ export class CapTimelineEditorApp {
                 system_prompt: String(this.aiSystemInput?.value || ""),
                 skill,
                 output_language: outputLanguage,
-                agent: meta.agent || "MiniMaxH3",
-                clip_role: meta.clipRole || "multi_ref",
-                audio_mode: "none",
+                agent: targetAgent,
+                clip_role: String(this.aiTargetRoleSelect?.value || meta.clipRole || "multi_ref"),
+                audio_mode: context.audio_data !== false
+                    ? String(this.aiAudioModeSelect?.value || "auto")
+                    : "none",
                 generate_bgm: false,
                 lyrics: "",
                 duration_sec: Number(clip.duration) || 0,
-                clip_prompt: this._promptManagerValue(targetTab, clip),
-                global_prompt: this._readSettingPrompt("prepend_prompt"),
+                clip_prompt: context.clip_prompt !== false ? this._promptManagerValue(targetTab, clip) : "",
+                global_prompt: "",
                 user_prompt: String(this.aiResultInput?.value || "").trim(),
-                files: this._clipAiOptimizeFiles(clip),
+                files,
                 keep_loaded: false,
             };
             const response = await fetch(api.apiURL("/audio_keyframe_timeline/optimize_clip_prompt"), {
@@ -16771,24 +16907,9 @@ export class CapTimelineEditorApp {
             const text = String(data.prompt || "").trim();
             if (!text) throw new Error(T("model_no_prompt_returned"));
             const preview = text.length > 800 ? `${text.slice(0, 800)}…` : text;
-            const h3Sections = meta.agent === "MiniMaxH3" ? splitH3ProjectPrompt(text) : null;
-            const target = this._promptManagerTabLabel(targetTab);
+            const target = T("clip_prompt_tab");
             if (!confirm(T("confirm_apply_generated_prompt", { target, preview }))) return;
-            if (h3Sections) {
-                this._recordUndo();
-                meta.prompt = h3Sections.clipPrompt;
-                if (h3Sections.soundAndMusic) {
-                    const input = this._settingPromptInputs?.append_prompt;
-                    if (input) {
-                        setRichPromptValue(input, joinPromptParts(h3Sections.soundAndMusic, input.value), true);
-                    }
-                }
-                this._meta.set(clip.id, meta);
-                this._refreshFinalPromptDisplay();
-                this._saveToWidgets();
-            } else {
-                this._writePromptManagerValue(targetTab, text, { recordUndo: true });
-            }
+            this._writePromptManagerValue(targetTab, text, { recordUndo: true });
             this._fillAiOptimizeSrc();
         } catch (error) {
             if (ac.signal.aborted || error?.name === "AbortError") return;
@@ -16808,7 +16929,7 @@ export class CapTimelineEditorApp {
     _setSkillSyncBusy(busy) {
         this._skillSyncBusy = !!busy;
         if (!this.skillSyncBtn) return;
-        this.skillSyncBtn.disabled = !!busy;
+        this.skillSyncBtn.disabled = !!busy || this._aiPromptTargetAgent() !== "MiniMaxH3";
         this.skillSyncBtn.classList.toggle("is-loading", !!busy);
         const span = this.skillSyncBtn.querySelector("span");
         if (span) span.textContent = busy ? T("syncing_ellipsis") : T("update_btn");
@@ -16881,7 +17002,8 @@ export class CapTimelineEditorApp {
             }
             const name = document.createElement("div");
             name.className = "cat-te-skill-card-name";
-            name.textContent = row.title || row.name || row.id;
+            const source = row.source === "official" ? T("skill_source_official") : T("skill_source_community");
+            name.textContent = `${source} · ${row.title || row.name || row.id}`;
             name.title = row.summary || name.textContent;
             const apply = document.createElement("button");
             apply.type = "button";
@@ -16929,16 +17051,6 @@ export class CapTimelineEditorApp {
         this._syncPromptIncludesUi(m);
         this._refreshFinalPromptDisplay(this._selClip, m);
         this._saveToWidgets();
-    }
-
-    _promptManagerTabLabel(key) {
-        switch (key) {
-            case "clip": return T("clip_prompt_tab");
-            case "resource": return T("media_prompt_tab");
-            case "prepend": return T("prepend_prompt_tab");
-            case "append": return T("append_prompt_tab");
-            default: return key;
-        }
     }
 
     _promptPartLabel(key) {

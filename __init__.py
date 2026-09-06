@@ -764,12 +764,13 @@ def _register_routes():
 
     @routes.get("/audio_keyframe_timeline/h3_skills")
     async def api_h3_skills(_request: web.Request) -> web.Response:
-        from .cap_h3_skills import SKILL_REPO_URL, list_h3_skills, skill_repo_root
+        from .cap_h3_skills import SKILL_REPOS, list_h3_skills, skill_repo_root
         skills = list_h3_skills()
         return web.json_response({
             "skills": skills,
-            "repo_url": SKILL_REPO_URL,
-            "available": skill_repo_root().is_dir() and bool(skills),
+            "repo_url": SKILL_REPOS["official"]["url"],
+            "repo_urls": {key: value["url"] for key, value in SKILL_REPOS.items()},
+            "available": any(skill_repo_root(source).is_dir() for source in SKILL_REPOS) and bool(skills),
         })
 
     @routes.get("/audio_keyframe_timeline/h3_skill")

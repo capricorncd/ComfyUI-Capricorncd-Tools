@@ -33,6 +33,8 @@ Accepts either:
 
 Timeline Editor prompts are assembled as `prepend_prompt` → Clip parts enabled by `prompt_includes` in `prompt_concat_order` → `append_prompt`. For MiniMax H3 projects, `clip.prompt` contains `subject_definitions`, `summary`, `retention_analysis`, and `detailed_description` as one complete structured prompt. Legacy Audio Timeline JSON keeps its older global-prompt behavior.
 
+The Prompt Manager MiniMaxH3 Skill library supports both the [official MiniMax Skills](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills) and the existing community repository, with official Skills listed first. Selecting `h3-prompt-writing` also injects `references/base-en.txt` and `references/ref-en.txt`, covering the official T2VA, I2VA, FL2VA, L2VA, and Ref2VA formats. On a Chinese UI, style Skills use `SKILL.cn.md` when provided.
+
 ---
 
 ## Inputs

@@ -12,18 +12,32 @@ from pathlib import Path
 from .cap_i18n import get_last_known_lang, t
 
 SKILL_REPO_URL = "https://github.com/T8mars/minimax-h3-prompt-skill-T8"
-_SKILL_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,120}$")
+OFFICIAL_SKILL_REPO_URL = "https://github.com/MiniMax-AI/MiniMax-H3"
+SKILL_REPOS = {
+    "official": {
+        "url": OFFICIAL_SKILL_REPO_URL,
+        "folder": "MiniMax-H3",
+        "sparse": ("skills",),
+    },
+    "community": {
+        "url": SKILL_REPO_URL,
+        "folder": "minimax-h3-prompt-skill-T8",
+        "sparse": ("skills", "catalog"),
+    },
+}
+_SKILL_ID_RE = re.compile(r"^(?:(official|community)__)?([a-zA-Z0-9][a-zA-Z0-9._-]{0,120})$")
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _TITLE_RE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 _SYNC_LOCK = threading.Lock()
 
 
-def skill_repo_root() -> Path:
-    return Path(__file__).resolve().parent / "vendor" / "minimax-h3-prompt-skill-T8"
+def skill_repo_root(source: str = "community") -> Path:
+    config = SKILL_REPOS.get(source) or SKILL_REPOS["community"]
+    return Path(__file__).resolve().parent / "vendor" / str(config["folder"])
 
 
-def _skills_dir() -> Path:
-    return skill_repo_root() / "skills"
+def _skills_dir(source: str = "community") -> Path:
+    return skill_repo_root(source) / "skills"
 
 
 def _catalog_dir() -> Path:
@@ -32,9 +46,16 @@ def _catalog_dir() -> Path:
 
 def _safe_skill_id(value: str) -> str:
     text = str(value or "").strip()
-    if not _SKILL_ID_RE.match(text):
+    match = _SKILL_ID_RE.match(text)
+    if not match:
         raise ValueError("Invalid skill id")
-    return text
+    source = match.group(1) or "community"
+    return f"{source}__{match.group(2)}"
+
+
+def _skill_parts(value: str) -> tuple[str, str]:
+    safe = _safe_skill_id(value)
+    return tuple(safe.split("__", 1))
 
 
 def _read_text(path: Path) -> str:
@@ -98,17 +119,18 @@ def _title_for_skill(skill_id: str, skill_md: str, cases_by_slug: dict[str, dict
     return str(meta.get("name") or skill_id).strip() or skill_id
 
 
-def list_h3_skills() -> list[dict]:
-    root = _skills_dir()
+def _list_repo_skills(source: str) -> list[dict]:
+    root = _skills_dir(source)
     if not root.is_dir():
         return []
     cases_by_slug = {}
-    for row in _load_catalog_cases():
-        slug = str(row.get("slug") or "").strip()
-        skill_path = str(row.get("skill_path") or "").replace("\\", "/").rstrip("/")
-        key = slug or (skill_path.rsplit("/", 1)[-1] if skill_path else "")
-        if key:
-            cases_by_slug[key] = row
+    if source == "community":
+        for row in _load_catalog_cases():
+            slug = str(row.get("slug") or "").strip()
+            skill_path = str(row.get("skill_path") or "").replace("\\", "/").rstrip("/")
+            key = slug or (skill_path.rsplit("/", 1)[-1] if skill_path else "")
+            if key:
+                cases_by_slug[key] = row
     out = []
     for child in sorted(root.iterdir(), key=lambda p: p.name.lower()):
         if not child.is_dir():
@@ -118,20 +140,27 @@ def list_h3_skills() -> list[dict]:
             continue
         skill_id = child.name
         text = _read_text(skill_md)
-        preview = _preview_path_for_skill(skill_id, cases_by_slug)
+        preview = _preview_path_for_skill(skill_id, cases_by_slug) if source == "community" else None
         case = cases_by_slug.get(skill_id) or {}
         out.append({
-            "id": skill_id,
+            "id": f"{source}__{skill_id}",
             "name": skill_id,
             "title": _title_for_skill(skill_id, text, cases_by_slug),
             "summary": str(case.get("summary") or "").strip(),
             "has_preview": bool(preview),
+            "source": source,
         })
     return out
 
 
+def list_h3_skills() -> list[dict]:
+    return [row for source in ("official", "community") for row in _list_repo_skills(source)]
+
+
 def resolve_skill_preview(skill_id: str) -> Path | None:
-    skill_id = _safe_skill_id(skill_id)
+    source, skill_id = _skill_parts(skill_id)
+    if source != "community":
+        return None
     cases_by_slug = {}
     for row in _load_catalog_cases():
         slug = str(row.get("slug") or "").strip()
@@ -141,7 +170,7 @@ def resolve_skill_preview(skill_id: str) -> Path | None:
             cases_by_slug[key] = row
     path = _preview_path_for_skill(skill_id, cases_by_slug)
     if path and path.is_file():
-        root = os.path.realpath(skill_repo_root())
+        root = os.path.realpath(skill_repo_root(source))
         real = os.path.realpath(path)
         if real == root or real.startswith(root + os.sep):
             return path
@@ -149,18 +178,22 @@ def resolve_skill_preview(skill_id: str) -> Path | None:
 
 
 def load_skill_text(skill_id: str) -> str:
-    skill_id = _safe_skill_id(skill_id)
-    folder = _skills_dir() / skill_id
-    skill_md = folder / "SKILL.md"
+    source, skill_id = _skill_parts(skill_id)
+    folder = _skills_dir(source) / skill_id
+    lang = get_last_known_lang().lower()
+    localized = folder / "SKILL.cn.md"
+    skill_md = localized if lang.startswith("zh") and localized.is_file() else folder / "SKILL.md"
     if not skill_md.is_file():
         raise FileNotFoundError(f"Skill not found: {skill_id}")
     parts = [_read_text(skill_md).strip()]
-    for rel in ("references/h3-template.md", "references/template.md"):
-        extra = folder / rel.replace("/", os.sep)
-        if extra.is_file():
+    references = folder / "references"
+    if references.is_dir():
+        for extra in sorted(references.rglob("*")):
+            if not extra.is_file() or extra.suffix.lower() not in {".md", ".txt"}:
+                continue
             text = _read_text(extra).strip()
             if text:
-                parts.append(text)
+                parts.append(f"Reference: {extra.relative_to(folder).as_posix()}\n{text}")
     return "\n\n".join(part for part in parts if part).strip()
 
 
@@ -184,26 +217,35 @@ def sync_skill_repo() -> dict:
     if not _SYNC_LOCK.acquire(blocking=False):
         raise RuntimeError(t("skill_sync_in_progress", get_last_known_lang()))
     try:
-        root = skill_repo_root()
-        root.parent.mkdir(parents=True, exist_ok=True)
-        clone_url = SKILL_REPO_URL if SKILL_REPO_URL.endswith(".git") else f"{SKILL_REPO_URL}.git"
-        if (root / ".git").is_dir():
-            _run_git(["remote", "set-url", "origin", clone_url], cwd=root)
-            _run_git(["sparse-checkout", "init", "--cone"], cwd=root)
-            _run_git(["sparse-checkout", "set", "skills", "catalog"], cwd=root, timeout=600)
-            _run_git(["fetch", "--depth", "1", "origin"], cwd=root, timeout=600)
-            _run_git(["checkout", "-B", "main", "FETCH_HEAD"], cwd=root, timeout=600)
-        else:
-            if root.exists():
-                shutil.rmtree(root)
-            _run_git(
-                ["clone", "--depth", "1", "--filter=blob:none", "--sparse", clone_url, str(root)],
-                timeout=600,
-            )
-            _run_git(["sparse-checkout", "init", "--cone"], cwd=root)
-            _run_git(["sparse-checkout", "set", "skills", "catalog"], cwd=root, timeout=600)
+        for config in SKILL_REPOS.values():
+            root = Path(__file__).resolve().parent / "vendor" / str(config["folder"])
+            root.parent.mkdir(parents=True, exist_ok=True)
+            repo_url = str(config["url"])
+            clone_url = repo_url if repo_url.endswith(".git") else f"{repo_url}.git"
+            sparse = [str(value) for value in config["sparse"]]
+            if (root / ".git").is_dir():
+                _run_git(["remote", "set-url", "origin", clone_url], cwd=root)
+                _run_git(["sparse-checkout", "init", "--cone"], cwd=root)
+                _run_git(["sparse-checkout", "set", *sparse], cwd=root, timeout=600)
+                _run_git(["fetch", "--depth", "1", "origin"], cwd=root, timeout=600)
+                _run_git(["checkout", "-B", "main", "FETCH_HEAD"], cwd=root, timeout=600)
+            else:
+                if root.exists():
+                    shutil.rmtree(root)
+                _run_git(
+                    ["clone", "--depth", "1", "--filter=blob:none", "--sparse", clone_url, str(root)],
+                    timeout=600,
+                )
+                _run_git(["sparse-checkout", "init", "--cone"], cwd=root)
+                _run_git(["sparse-checkout", "set", *sparse], cwd=root, timeout=600)
         skills = list_h3_skills()
-        return {"ok": True, "count": len(skills), "skills": skills, "repo_url": SKILL_REPO_URL}
+        return {
+            "ok": True,
+            "count": len(skills),
+            "skills": skills,
+            "repo_url": OFFICIAL_SKILL_REPO_URL,
+            "repo_urls": {key: value["url"] for key, value in SKILL_REPOS.items()},
+        }
     finally:
         _SYNC_LOCK.release()
 

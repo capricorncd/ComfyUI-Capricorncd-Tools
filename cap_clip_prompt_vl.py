@@ -33,7 +33,9 @@ MAX_REF_IMAGES = 9
 MAX_REF_VIDEOS = 3
 MAX_VIDEO_FRAMES = 8
 MAX_IMAGE_SIDE = 768
-SKILL_URL = "https://github.com/T8mars/minimax-h3-prompt-skill-T8"
+MAX_REF_AUDIOS = 3
+MAX_AUDIO_BYTES = 20 * 1024 * 1024
+SKILL_URL = "https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills"
 OUTPUT_LANGUAGES = ("简体中文", "繁體中文", "English", "日本語")
 DEFAULT_OUTPUT_LANGUAGE = "简体中文"
 AGENT_PROVIDERS = ("openai", "gemini")
@@ -205,6 +207,12 @@ _H3_ROLE_HINTS = {
     "video_edit": "Rewrite as an edit of the source video: keep identity and setting unless the user asks to change them. Keep every <Video n> tag.",
     "other": "Follow the user's clip prompt and tagged media. Keep existing <Picture n> / <Video n> / <Audio n> tags.",
 }
+_LTX_FORMAT = (
+    "Output only one production-ready LTX video prompt as natural-language prose. "
+    "Do not use MiniMax H3 section headings, retention_analysis, or XML-style media tags. "
+    "Describe subject, action, environment, lighting, camera movement, timing, and the intended final state. "
+    "Keep it concise and directly usable by LTX."
+)
 _REF_SHEET_RULE = (
     "Character sheets, turnarounds, four-view 人设图, orthographic lineups, and reference boards "
     "are identity sources only. Never write that the camera shows those layouts, multiple views "
@@ -227,10 +235,36 @@ def with_output_language(system_prompt: str, language: str) -> str:
     return f"{base}\n\n{instruction}".strip() if base else instruction
 
 
+def with_prompt_skill(system_prompt: str, skill: str) -> str:
+    skill = str(skill or "").strip()
+    if not skill:
+        return str(system_prompt or "").strip()
+    return (
+        f"{str(system_prompt or '').strip()}\n\n"
+        "Selected Prompt Skill (authoritative):\n"
+        "Follow this Skill in full. If its output structure conflicts with the generic format above, "
+        "the selected Skill's structure takes precedence.\n"
+        f"{skill}"
+    ).strip()
+
+
 def agent_system_prompt(agent: str, clip_role: str) -> str:
     agent = str(agent or "MiniMaxH3").strip() or "MiniMaxH3"
     role = str(clip_role or "multi_ref").strip() or "multi_ref"
     label = _CLIP_ROLE_LABELS.get(role, role)
+    if agent == "LTX":
+        role_hint = {
+            "first_last": (
+                "The first attached image is the start frame and the second is the end frame. "
+                "Describe one continuous transition that begins exactly at the first frame and lands naturally on the last frame."
+            ),
+            "multi_ref": "Use the attached images as subject, scene, and style references without describing a reference-board layout.",
+            "video_ref": "Use the source video for motion and camera guidance while describing the desired generated shot.",
+            "video_edit": "Describe only the requested edit while preserving unmentioned identity, motion, and environment details.",
+            "t2v": "Write a complete text-to-video shot from the user's request.",
+            "other": "Follow the user's requested video-generation mode.",
+        }.get(role, "Follow the user's requested video-generation mode.")
+        return f"You are an LTX video prompt writer. Clip type: {label} ({role}). {role_hint}\n\n{_LTX_FORMAT}"
     if agent != "MiniMaxH3":
         return (
             f"You write video-generation prompts for {agent}. "
@@ -570,10 +604,7 @@ class ClipPromptVLEngine:
         self.load(model_name)
         if self._cancel.is_set():
             raise ClipPromptCancelled()
-        system_text = str(system_prompt or "").strip()
-        skill_text = str(skill or "").strip()
-        if skill_text:
-            system_text = f"{system_text}\n\nPrompt skill:\n{skill_text}".strip()
+        system_text = with_prompt_skill(system_prompt, skill)
         user_text = str(user_prompt or "").strip() or "Infer a complete video prompt from the attached media."
         conversation = []
         if system_text:
@@ -868,16 +899,33 @@ def _file_label(index: int, kind: str, row: dict) -> str:
     tags = (row or {}).get("tags") if isinstance((row or {}).get("tags"), list) else []
     tags = [str(tag).strip() for tag in tags if str(tag).strip()]
     meta = ", ".join(part for part in [media_type, *tags] if part)
-    prompt = str((row or {}).get("setting_description") or (row or {}).get("prompt") or "").strip()
+    include_description = (row or {}).get("include_description") is not False
+    include_prompt = (row or {}).get("include_prompt") is not False
+    description = str((row or {}).get("setting_description") or "").strip() if include_description else ""
+    prompts = []
+    if include_prompt:
+        for key in ("prompt", "generation_prompt"):
+            text = str((row or {}).get(key) or "").strip()
+            if text and text not in prompts:
+                prompts.append(text)
     bits = [tag]
     if name:
         bits.append(name)
     if meta:
         bits.append(meta)
+    overlap = (row or {}).get("timeline_overlap_sec")
+    if isinstance(overlap, (list, tuple)) and len(overlap) == 2:
+        try:
+            bits.append(f"timeline overlap {float(overlap[0]):.3f}s-{float(overlap[1]):.3f}s")
+        except (TypeError, ValueError):
+            pass
     line = ": ".join(bits) if len(bits) > 1 else tag
-    if prompt:
-        return f"{line}\n{prompt}"
-    return line
+    details = []
+    if description:
+        details.append(f"Resource description: {description}")
+    if prompts:
+        details.append(f"Resource prompt: {' '.join(prompts)}")
+    return "\n".join((line, *details))
 
 
 def build_user_prompt(payload: dict) -> str:
@@ -896,7 +944,7 @@ def build_user_prompt(payload: dict) -> str:
         pass
     files = payload.get("files") if isinstance(payload.get("files"), list) else []
     media_lines = []
-    picture_n = video_n = audio_n = 0
+    picture_n = video_n = audio_n = audio_data_n = 0
     for row in files:
         if not isinstance(row, dict):
             continue
@@ -909,6 +957,8 @@ def build_user_prompt(payload: dict) -> str:
         elif kind == "audio":
             audio_n += 1
             index = audio_n
+            if row.get("include_data") is not False:
+                audio_data_n += 1
         else:
             picture_n += 1
             index = picture_n
@@ -961,7 +1011,7 @@ def build_user_prompt(payload: dict) -> str:
     if extra:
         lines.append(extra)
     audio_mode = normalize_audio_mode(payload.get("audio_mode") or payload.get("ai_audio_mode") or "")
-    has_audio = audio_n > 0 and audio_mode != "none"
+    has_audio = audio_data_n > 0 and audio_mode != "none"
     if audio_mode == "none" or not has_audio:
         lines.append(_AUDIO_MODE_INSTRUCTIONS["none"] if audio_mode == "none" else _NO_TIMELINE_AUDIO)
     else:
@@ -982,6 +1032,8 @@ def media_from_payload(payload: dict) -> tuple[list[Image.Image], list[list[Imag
     for row in files:
         if not isinstance(row, dict):
             continue
+        if row.get("include_data") is False:
+            continue
         path = resolve_media_path(
             str(row.get("file") or ""),
             location=str(row.get("location") or "input"),
@@ -1000,6 +1052,32 @@ def media_from_payload(payload: dict) -> tuple[list[Image.Image], list[list[Imag
         if still is not None:
             images.append(still)
     return images, videos
+
+
+def audio_from_payload(payload: dict) -> list[tuple[str, str, str]]:
+    result = []
+    files = payload.get("files") if isinstance(payload.get("files"), list) else []
+    for row in files:
+        if not isinstance(row, dict) or row.get("include_data") is False:
+            continue
+        path = resolve_media_path(
+            str(row.get("file") or ""),
+            location=str(row.get("location") or "input"),
+        )
+        if _kind_of(row, path) != "audio":
+            continue
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in {".mp3", ".wav"}:
+            raise ValueError(f"Agent audio input supports MP3 or WAV files, got: {ext or 'unknown'}")
+        size = os.path.getsize(path)
+        if size > MAX_AUDIO_BYTES:
+            raise ValueError(f"Agent audio input exceeds {MAX_AUDIO_BYTES // (1024 * 1024)} MB: {os.path.basename(path)}")
+        mime = "audio/mpeg" if ext == ".mp3" else "audio/wav"
+        data = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        result.append((mime, ext[1:], data))
+        if len(result) >= MAX_REF_AUDIOS:
+            break
+    return result
 
 
 def _agent_config(agent_id: str) -> dict:
@@ -1067,11 +1145,10 @@ def _generate_with_agent(payload: dict, agent_id: str) -> str:
         system_prompt,
         payload.get("output_language") or payload.get("language") or DEFAULT_OUTPUT_LANGUAGE,
     )
-    skill = str(payload.get("skill") or "").strip()
-    if skill:
-        system_prompt = f"{system_prompt}\n\nAdditional prompt skill:\n{skill}"
+    system_prompt = with_prompt_skill(system_prompt, payload.get("skill") or "")
     images, videos = media_from_payload(payload)
     encoded_images = _remote_images(images, videos)
+    encoded_audio = audio_from_payload(payload)
     user_prompt = build_user_prompt(payload)
     max_tokens = min(8192, max(256, int(payload.get("max_new_tokens") or 2048)))
     if provider == "openai":
@@ -1079,6 +1156,10 @@ def _generate_with_agent(payload: dict, agent_id: str) -> str:
             {"type": "input_image", "image_url": f"data:{mime};base64,{data}"}
             for mime, data in encoded_images
         ]
+        content.extend({
+            "type": "input_audio",
+            "input_audio": {"data": data, "format": fmt},
+        } for _mime, fmt, data in encoded_audio)
         content.append({"type": "input_text", "text": user_prompt})
         body = {
             "model": str(config["model"]),
@@ -1101,6 +1182,7 @@ def _generate_with_agent(payload: dict, agent_id: str) -> str:
             {"inlineData": {"mimeType": mime, "data": data}}
             for mime, data in encoded_images
         ]
+        parts.extend({"inlineData": {"mimeType": mime, "data": data}} for mime, _fmt, data in encoded_audio)
         parts.append({"text": user_prompt})
         body = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -1134,6 +1216,14 @@ def generate_from_payload(payload: dict) -> str:
         if not models:
             raise ValueError(_t("local_qwen_model_not_found", get_last_known_lang()))
         model_name = models[0]
+    files = payload.get("files") if isinstance(payload.get("files"), list) else []
+    if any(
+        isinstance(row, dict)
+        and str(row.get("kind") or "").lower() == "audio"
+        and row.get("include_data") is not False
+        for row in files
+    ):
+        raise ValueError("The local Qwen3-VL prompt model does not support audio input. Use a configured ChatGPT or Gemini Agent, or disable audio data.")
     system_prompt = str(payload.get("system_prompt") or "").strip()
     if not system_prompt:
         system_prompt = agent_system_prompt(
